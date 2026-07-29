@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#0f172a" flood-opacity=".07"/></filter>
+    <style>
+      .ui{font-family:"Noto Sans CJK SC","Microsoft YaHei",Arial,sans-serif}
+      .title{font-size:23px;font-weight:700;fill:#111827}.h2{font-size:15px;font-weight:650;fill:#111827}
+      .body{font-size:13px;fill:#374151}.small{font-size:12px;fill:#6b7280}.label{font-size:12px;font-weight:650;fill:#374151}.nav{font-size:14px;fill:#4b5563}
+    </style>
+  </defs>
+  <rect width="1440" height="900" fill="#f6f7f9"/>
+  <g class="ui">
+    <rect width="228" height="900" fill="#fff"/><line x1="227.5" y1="0" x2="227.5" y2="900" stroke="#e5e7eb"/>
+    <circle cx="36" cy="34" r="14" fill="#6d28d9"/><path d="M28 35h16M36 27v16" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="58" y="40" font-size="17" font-weight="700" fill="#111827">预算管理系统</text>
+    <text class="nav" x="52" y="105">工作台</text><text class="nav" x="52" y="151">项目管理</text><text class="nav" x="52" y="197">预算执行</text><text class="nav" x="52" y="243">业务记录</text>
+    <rect x="16" y="262" width="196" height="42" rx="8" fill="#f0eafe"/><text class="nav" x="52" y="289" fill="#5b21b6" font-weight="650">预算调整</text>
+    <text class="nav" x="52" y="335">审批中心</text><text class="nav" x="52" y="381">统计分析</text>
+    <rect x="228" y="0" width="1212" height="64" fill="#fff"/><line x1="228" y1="63.5" x2="1440" y2="63.5" stroke="#e5e7eb"/>
+    <text class="small" x="258" y="38">预算调整 / 新建调整单</text>
+
+    <text class="title" x="258" y="109">新建预算调整</text>
+    <text class="small" x="258" y="134">调整单 BA-2026-019 · 草稿</text>
+    <rect x="1181" y="91" width="98" height="38" rx="8" fill="#fff" stroke="#d1d5db"/><text class="body" x="1230" y="115" text-anchor="middle">保存草稿</text>
+    <rect x="1291" y="91" width="112" height="38" rx="8" fill="#6d28d9"/><text x="1347" y="115" text-anchor="middle" font-size="13" font-weight="650" fill="#fff">提交审批</text>
+
+    <g filter="url(#shadow)"><rect x="258" y="157" width="792" height="711" rx="12" fill="#fff"/><rect x="1068" y="157" width="335" height="711" rx="12" fill="#fff"/></g>
+    <text class="h2" x="282" y="192">基本信息</text>
+    <text class="label" x="282" y="223">项目 *</text>
+    <rect x="282" y="235" width="354" height="40" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="296" y="260">无人系统智能设计方法研究</text><path d="m614 251 5 5 5-5" fill="none" stroke="#6b7280"/>
+    <text class="label" x="658" y="223">调整类型 *</text>
+    <rect x="658" y="235" width="368" height="40" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="672" y="260">同年度科目调剂</text><path d="m1004 251 5 5 5-5" fill="none" stroke="#6b7280"/>
+    <text class="label" x="282" y="306">预算年度 *</text>
+    <rect x="282" y="318" width="354" height="40" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="296" y="343">2026</text>
+    <text class="label" x="658" y="306">调整原因 *</text>
+    <rect x="658" y="318" width="368" height="72" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="672" y="343">材料费实际需求增加，调剂设备购置费结余。</text>
+    <line x1="282" y1="420" x2="1026" y2="420" stroke="#e5e7eb"/>
+
+    <text class="h2" x="282" y="455">调整明细</text>
+    <rect x="908" y="437" width="118" height="32" rx="7" fill="#f0eafe"/><text x="967" y="458" text-anchor="middle" font-size="12" font-weight="650" fill="#6d28d9">＋ 增加一组调剂</text>
+    <rect x="282" y="482" width="744" height="224" rx="10" fill="#fafafa" stroke="#e5e7eb"/>
+    <rect x="300" y="501" width="29" height="29" rx="15" fill="#ede9fe"/><text x="314" y="521" text-anchor="middle" font-size="12" font-weight="700" fill="#6d28d9">1</text>
+    <text class="label" x="347" y="521">调出科目</text>
+    <rect x="347" y="533" width="299" height="40" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="361" y="558">直接费 / 设备费 / 服务器</text>
+    <text class="label" x="667" y="521">调出金额</text>
+    <rect x="667" y="533" width="335" height="40" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="681" y="558">¥ 50,000.00</text>
+    <rect x="347" y="584" width="299" height="48" rx="7" fill="#f8fafc"/>
+    <text class="small" x="361" y="604">当前预算 ¥ 550,000</text><text class="small" x="361" y="621">总占用 ¥ 485,000 · 可调 ¥ 65,000</text>
+    <rect x="667" y="584" width="335" height="48" rx="7" fill="#f0fdf4"/>
+    <text class="small" x="681" y="604">调整后预算 ¥ 500,000</text><text x="681" y="621" font-size="12" fill="#15803d">调整后可用 ¥ 15,000</text>
+    <path d="M467 651v17m-7-7 7 7 7-7" fill="none" stroke="#7c3aed" stroke-width="1.7"/>
+    <text class="label" x="347" y="689">调入科目</text>
+    <rect x="347" y="701" width="299" height="40" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="361" y="726">直接费 / 材料费</text>
+    <text class="label" x="667" y="689">调入金额</text>
+    <rect x="667" y="701" width="335" height="40" rx="7" fill="#fff" stroke="#d1d5db"/><text class="body" x="681" y="726">¥ 50,000.00</text>
+
+    <rect x="282" y="762" width="744" height="80" rx="9" fill="#fffbeb" stroke="#fde68a"/>
+    <circle cx="306" cy="788" r="11" fill="#fef3c7"/><text x="306" y="792" text-anchor="middle" font-size="12" font-weight="700" fill="#a16207">!</text>
+    <text class="body" x="328" y="785" font-weight="650">提交后将预留调出额度 ¥ 50,000</text>
+    <text class="small" x="328" y="807">新增业务仍可占用该额度，但审批时如可调额度不足，本调整单将不能通过。</text>
+    <text class="small" x="328" y="826">同年度调入、调出金额已平衡。</text>
+
+    <text class="h2" x="1092" y="192">调整影响</text>
+    <text class="small" x="1092" y="218">审批通过后生效</text>
+    <rect x="1092" y="240" width="287" height="98" rx="9" fill="#f8fafc"/>
+    <text class="small" x="1110" y="266">年度预算</text><text x="1361" y="266" text-anchor="end" font-size="14" font-weight="700" fill="#111827">¥ 3,200,000</text>
+    <text class="small" x="1110" y="292">调出合计</text><text x="1361" y="292" text-anchor="end" font-size="14" fill="#dc2626">-¥ 50,000</text>
+    <text class="small" x="1110" y="318">调入合计</text><text x="1361" y="318" text-anchor="end" font-size="14" fill="#15803d">+¥ 50,000</text>
+    <text class="h2" x="1092" y="374">科目前后对比</text>
+    <rect x="1092" y="392" width="287" height="74" rx="9" fill="#fff" stroke="#e5e7eb"/>
+    <text class="small" x="1110" y="416">服务器</text><text class="small" x="1110" y="442">¥ 550,000</text>
+    <path d="M1211 436h37m-7-6 7 6-7 6" fill="none" stroke="#9ca3af" stroke-width="1.4"/>
+    <text x="1361" y="442" text-anchor="end" font-size="13" font-weight="650" fill="#111827">¥ 500,000</text>
+    <rect x="1092" y="478" width="287" height="74" rx="9" fill="#fff" stroke="#e5e7eb"/>
+    <text class="small" x="1110" y="502">材料费</text><text class="small" x="1110" y="528">¥ 700,000</text>
+    <path d="M1211 522h37m-7-6 7 6-7 6" fill="none" stroke="#9ca3af" stroke-width="1.4"/>
+    <text x="1361" y="528" text-anchor="end" font-size="13" font-weight="650" fill="#111827">¥ 750,000</text>
+
+    <text class="h2" x="1092" y="590">审批流程</text>
+    <circle cx="1105" cy="625" r="9" fill="#7c3aed"/><line x1="1105" y1="634" x2="1105" y2="698" stroke="#d1d5db" stroke-width="2"/>
+    <text class="body" x="1125" y="623" font-weight="650">申请人提交</text><text class="small" x="1125" y="643">项目负责人／授权经办人</text>
+    <circle cx="1105" cy="681" r="9" fill="#fff" stroke="#9ca3af" stroke-width="2"/>
+    <text class="body" x="1125" y="679" font-weight="650">预算管理员审批</text><text class="small" x="1125" y="699">单级审批</text>
+    <circle cx="1105" cy="737" r="9" fill="#fff" stroke="#9ca3af" stroke-width="2"/>
+    <text class="body" x="1125" y="735" font-weight="650">预算生效</text><text class="small" x="1125" y="755">原子更新并重新汇总</text>
+    <rect x="1092" y="790" width="287" height="50" rx="8" fill="#f0fdf4"/>
+    <text x="1235" y="820" text-anchor="middle" font-size="12" font-weight="650" fill="#15803d">当前校验通过，可提交审批</text>
+  </g>
+</svg>

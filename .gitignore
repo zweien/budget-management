@@ -12,6 +12,10 @@ next/
 .nuxt/
 .svelte-kit/
 
+# Next.js build output & generated type files
+.next/
+next-env.d.ts
+
 # Environment & secrets
 .env
 .env.*
