@@ -1,0 +1,391 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 金额统一 Decimal(18,2)
+// 主键统一 UUID v7(应用层生成,通过 @default(dbgenerated()) 兜底也可;此处显式传入)
+
+enum UserRole {
+  PROJECT_OWNER
+  AUTHORIZED_HANDLER
+  BUDGET_ADMIN
+}
+
+enum MemberRole {
+  OWNER
+  HANDLER
+}
+
+enum ApprovalStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum BusinessStatus {
+  PLACEHOLDER // 登记占位
+  CONTRACT    // 合同
+  FINANCE_APPROVAL // 财务系统审批
+  PAID        // 已支出
+}
+
+enum AdjustmentType {
+  PROJECT_TOTAL
+  ANNUAL
+  SUBJECT
+  SUBJECT_TRANSFER // 同年度科目调剂
+}
+
+enum LineDirection {
+  INCREASE
+  DECREASE
+}
+
+enum LevelType {
+  PROJECT
+  ANNUAL
+  SUBJECT
+}
+
+model User {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  role      UserRole
+  status    String     @default("active")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  ownedProjects    Project[]  // back-relation for Project.owner (not in brief; required by prisma)
+  memberships       ProjectMember[]
+  createdRecords    BusinessRecord[]   @relation("RecordCreator")
+  modifiedRecords   BusinessRecord[]   @relation("RecordModifier")
+  initApplications  InitialBudgetApplication[] @relation("AppInitApplicant") // back-relation for InitialBudgetApplication.applicant (not in brief; required by prisma)
+  auditLogs         AuditLog[]
+  approvalLogs      ApprovalLog[]
+  receipts          ReceiptRecord[]
+
+  @@map("users")
+}
+
+model Project {
+  id         String   @id @db.Uuid
+  code       String   @unique // §16.1 系统内唯一
+  name       String
+  level      String?
+  startDate  DateTime? @map("start_date") @db.Date
+  endDate    DateTime? @map("end_date") @db.Date
+  ownerId    String   @map("owner_id") @db.Uuid
+  remark     String?
+  archivedAt DateTime? @map("archived_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  owner           User              @relation(fields: [ownerId], references: [id])
+  members         ProjectMember[]
+  subjects        BudgetSubject[]
+  annualBudgets   AnnualBudget[]
+  subjectBudgets  SubjectBudget[]
+  projectBudget   ProjectBudget?
+  applications    InitialBudgetApplication[]
+  adjustments     BudgetAdjustment[]
+  records         BusinessRecord[]
+  receipts        ReceiptRecord[]
+  importBatches   ImportBatch[]
+  auditLogs       AuditLog[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id           String    @id @db.Uuid
+  projectId    String    @map("project_id") @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  memberRole   MemberRole @map("member_role")
+  authorizedAt DateTime  @default(now()) @map("authorized_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+model BudgetSubject {
+  id          String   @id @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  parentId    String?  @map("parent_id") @db.Uuid
+  code        String   // §16.1 项目内唯一
+  name        String
+  description String?
+  level       Int
+  isLeaf      Boolean  @map("is_leaf")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  project        Project         @relation(fields: [projectId], references: [id])
+  parent         BudgetSubject?  @relation("SubjectTree", fields: [parentId], references: [id])
+  children       BudgetSubject[] @relation("SubjectTree")
+  subjectBudgets SubjectBudget[]
+  records        BusinessRecord[]
+
+  @@unique([projectId, code]) // §16.1 项目内唯一
+  @@index([projectId])
+  @@map("budget_subjects")
+}
+
+model ProjectBudget {
+  projectId         String   @id @map("project_id") @db.Uuid
+  initialAmount     Decimal  @map("initial_amount") @db.Decimal(18, 2)
+  adjustmentAmount  Decimal  @map("adjustment_amount") @default(0) @db.Decimal(18, 2)
+  currentAmount     Decimal  @map("current_amount") @db.Decimal(18, 2)
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@map("project_budgets")
+}
+
+model AnnualBudget {
+  id               String   @id @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  year             Int
+  initialAmount    Decimal  @map("initial_amount") @db.Decimal(18, 2)
+  adjustmentAmount Decimal  @map("adjustment_amount") @default(0) @db.Decimal(18, 2)
+  currentAmount    Decimal  @map("current_amount") @db.Decimal(18, 2)
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, year]) // §16.1
+  @@map("annual_budgets")
+}
+
+model SubjectBudget {
+  id               String   @id @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  year             Int
+  subjectId        String   @map("subject_id") @db.Uuid
+  initialAmount    Decimal  @map("initial_amount") @db.Decimal(18, 2)
+  adjustmentAmount Decimal  @map("adjustment_amount") @default(0) @db.Decimal(18, 2)
+  currentAmount    Decimal  @map("current_amount") @db.Decimal(18, 2)
+
+  project Project        @relation(fields: [projectId], references: [id])
+  subject BudgetSubject  @relation(fields: [subjectId], references: [id])
+
+  @@unique([projectId, year, subjectId]) // §16.1
+  @@index([projectId, year])
+  @@map("subject_budgets")
+}
+
+model InitialBudgetApplication {
+  id          String          @id @db.Uuid
+  projectId   String          @map("project_id") @db.Uuid
+  status      ApprovalStatus  @default(DRAFT)
+  applicantId String          @map("applicant_id") @db.Uuid
+  submittedAt DateTime?       @map("submitted_at")
+  approverId  String?         @map("approver_id") @db.Uuid
+  approvedAt  DateTime?       @map("approved_at")
+  opinion     String?
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  project   Project @relation(fields: [projectId], references: [id])
+  applicant User    @relation("AppInitApplicant", fields: [applicantId], references: [id])
+
+  @@map("initial_budget_applications")
+}
+
+model BudgetAdjustment {
+  id          String          @id @db.Uuid
+  projectId   String          @map("project_id") @db.Uuid
+  type        AdjustmentType
+  status      ApprovalStatus  @default(DRAFT)
+  reason      String?
+  applicantId String          @map("applicant_id") @db.Uuid
+  approverId  String?         @map("approver_id") @db.Uuid
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  approvedAt  DateTime?       @map("approved_at")
+
+  project   Project @relation(fields: [projectId], references: [id])
+  lines     BudgetAdjustmentLine[]
+  locks     BudgetLock[]
+
+  @@map("budget_adjustments")
+}
+
+model BudgetAdjustmentLine {
+  id            String        @id @db.Uuid
+  adjustmentId  String        @map("adjustment_id") @db.Uuid
+  levelType     LevelType     @map("level_type")
+  year          Int?
+  subjectId     String?       @map("subject_id") @db.Uuid
+  direction     LineDirection
+  amount        Decimal       @db.Decimal(18, 2)
+
+  adjustment BudgetAdjustment @relation(fields: [adjustmentId], references: [id])
+
+  @@map("budget_adjustment_lines")
+}
+
+model BudgetLock {
+  id            String    @id @db.Uuid
+  adjustmentId  String    @map("adjustment_id") @db.Uuid
+  projectId     String    @map("project_id") @db.Uuid
+  year          Int?
+  subjectId     String    @map("subject_id") @db.Uuid
+  amount        Decimal   @db.Decimal(18, 2)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  releasedAt    DateTime? @map("released_at")
+
+  adjustment BudgetAdjustment @relation(fields: [adjustmentId], references: [id])
+
+  @@index([subjectId, releasedAt])
+  @@map("budget_locks")
+}
+
+model SubjectChangeApplication {
+  id              String         @id @db.Uuid
+  projectId       String         @map("project_id") @db.Uuid
+  status          ApprovalStatus @default(DRAFT)
+  beforeSnapshot  Json           @map("before_snapshot")
+  afterSnapshot   Json           @map("after_snapshot")
+  applicantId     String         @map("applicant_id") @db.Uuid
+  approverId      String?        @map("approver_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@map("subject_change_applications")
+}
+
+model BusinessRecord {
+  id            String          @id @db.Uuid
+  projectId     String          @map("project_id") @db.Uuid
+  budgetYear    Int             @map("budget_year")
+  subjectId     String          @map("subject_id") @db.Uuid
+  amount        Decimal         @db.Decimal(18, 2)
+  businessDate  DateTime        @map("business_date") @db.Date
+  enteredAt     DateTime        @default(now()) @map("entered_at")
+  handler       String
+  summary       String
+  status        BusinessStatus
+  remark        String?
+  isVoid        Boolean         @default(false) @map("is_void")
+  voidReason    String?         @map("void_reason")
+  voidedBy      String?         @map("voided_by") @db.Uuid
+  voidedAt      DateTime?       @map("voided_at")
+  createdById   String          @map("created_by") @db.Uuid
+  modifiedById  String?         @map("modified_by") @db.Uuid
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  project    Project         @relation(fields: [projectId], references: [id])
+  subject    BudgetSubject   @relation(fields: [subjectId], references: [id])
+  createdBy  User            @relation("RecordCreator", fields: [createdById], references: [id])
+  modifiedBy User?           @relation("RecordModifier", fields: [modifiedById], references: [id])
+  history    BusinessRecordHistory[]
+
+  @@index([projectId, budgetYear, subjectId, isVoid])
+  @@index([projectId, budgetYear])
+  @@map("business_records")
+}
+
+model BusinessRecordHistory {
+  id             String   @id @db.Uuid
+  businessRecordId String @map("business_record_id") @db.Uuid
+  action         String
+  beforeData     Json?    @map("before_data")
+  afterData      Json?    @map("after_data")
+  operatorId     String   @map("operator_id") @db.Uuid
+  operatedAt     DateTime @default(now()) @map("operated_at")
+  reason         String?
+
+  businessRecord BusinessRecord @relation(fields: [businessRecordId], references: [id])
+
+  @@map("business_record_history")
+}
+
+model ReceiptRecord {
+  id          String   @id @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  receiptDate DateTime @map("receipt_date") @db.Date
+  amount      Decimal  @db.Decimal(18, 2)
+  summary     String?
+  remark      String?
+  creatorId   String   @map("creator_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+  creator User    @relation(fields: [creatorId], references: [id])
+
+  @@map("receipt_records")
+}
+
+model ImportBatch {
+  id              String   @id @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  fileName        String   @map("file_name")
+  templateVersion String   @map("template_version")
+  status          String   @default("pending")
+  creatorId       String   @map("creator_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  confirmedAt     DateTime? @map("confirmed_at")
+
+  project Project   @relation(fields: [projectId], references: [id])
+  rows    ImportRow[]
+
+  @@map("import_batches")
+}
+
+model ImportRow {
+  id               String  @id @db.Uuid
+  batchId          String  @map("batch_id") @db.Uuid
+  rowNo            Int     @map("row_no")
+  parsedData       Json    @map("parsed_data")
+  validationStatus String  @map("validation_status")
+  errors           Json?
+  duplicateFlag    Boolean @default(false) @map("duplicate_flag")
+  forcedImport     Boolean @default(false) @map("forced_import")
+
+  batch ImportBatch @relation(fields: [batchId], references: [id])
+
+  @@map("import_rows")
+}
+
+model ApprovalLog {
+  id         String   @id @db.Uuid
+  objectType String   @map("object_type")
+  objectId   String   @map("object_id") @db.Uuid
+  action     String
+  operatorId String   @map("operator_id") @db.Uuid
+  opinion    String?
+  operatedAt DateTime @default(now()) @map("operated_at")
+
+  operator User @relation(fields: [operatorId], references: [id])
+
+  @@index([objectType, objectId])
+  @@map("approval_logs")
+}
+
+model AuditLog {
+  id          String   @id @db.Uuid
+  projectId   String?  @map("project_id") @db.Uuid
+  objectType  String   @map("object_type")
+  objectId    String   @map("object_id")
+  action      String
+  beforeData  Json?    @map("before_data")
+  afterData   Json?    @map("after_data")
+  operatorId  String   @map("operator_id") @db.Uuid
+  operatedAt  DateTime @default(now()) @map("operated_at")
+
+  project Project? @relation(fields: [projectId], references: [id])
+  operator User    @relation(fields: [operatorId], references: [id])
+
+  @@index([objectType, objectId])
+  @@index([projectId])
+  @@map("audit_logs")
+}
