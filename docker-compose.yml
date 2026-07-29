@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: budget-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: budget
+      POSTGRES_PASSWORD: budget
+      POSTGRES_DB: budget
+    ports:
+      - '5434:5432'
+    volumes:
+      - budget-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U budget -d budget']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  budget-pgdata:
