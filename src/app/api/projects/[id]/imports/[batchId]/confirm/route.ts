@@ -1,0 +1,35 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+import { HTTPError, requireUser } from '@/lib/auth/session';
+import { confirmImport } from '@/server/services/excelImport.service';
+
+/**
+ * POST /api/projects/:id/imports/:batchId/confirm — 确认入库(§10 阶段二)。
+ * body = { selectedRowIds: string[] }(用户在预览页勾选的有效/重复行 id)。
+ * 返回 { created, batchId }。
+ */
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; batchId: string }> },
+) {
+  try {
+    const user = await requireUser();
+    const { batchId } = await params;
+
+    const body = (await req.json().catch(() => null)) as { selectedRowIds?: unknown } | null;
+    if (!body || !Array.isArray(body.selectedRowIds)) {
+      return NextResponse.json({ error: '请求体无效:需要 selectedRowIds 数组' }, { status: 400 });
+    }
+    const selectedRowIds = body.selectedRowIds.filter(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+
+    const result = await confirmImport(batchId, selectedRowIds, user);
+    return NextResponse.json(result);
+  } catch (e) {
+    if (e instanceof HTTPError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
+}
