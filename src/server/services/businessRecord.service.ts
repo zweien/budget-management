@@ -246,8 +246,7 @@ export async function createRecord(
 
 /**
  * §8 列出业务记录(组合筛选)。
- * - 权限:record:create / record:edit / record:void 任一(此处复用 record:create 作为
- *   "可登记即可见";若上层需要更细可调整)。
+ * - 权限:project:view + 项目范围(查看记录归入"查看获授权项目",§2.2)。
  * - 默认不含作废(includeVoid=false)。
  */
 export async function listRecords(
@@ -255,7 +254,7 @@ export async function listRecords(
   filters: ListRecordsFilters,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<BusinessRecord[]> {
-  await requirePermission(user, 'record:create', projectId);
+  await requirePermission(user, 'project:view', projectId);
 
   const where: Prisma.BusinessRecordWhereInput = { projectId };
   if (filters.year !== undefined) {
