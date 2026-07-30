@@ -12,6 +12,10 @@ next/
 .nuxt/
 .svelte-kit/
 
+# Next.js build output & generated type files
+.next/
+next-env.d.ts
+
 # Environment & secrets
 .env
 .env.*
@@ -38,3 +42,6 @@ Thumbs.db
 # (issues live in .scratch/<feature>/ per docs/agents/issue-tracker.md;
 #  remove this line if you want issues version-controlled)
 .scratch/
+
+# Playwright CLI artifacts (browser session snapshots, screenshots, traces)
+.playwright-cli/

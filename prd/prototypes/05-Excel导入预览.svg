@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#0f172a" flood-opacity=".07"/></filter>
+    <style>
+      .ui{font-family:"Noto Sans CJK SC","Microsoft YaHei",Arial,sans-serif}
+      .title{font-size:23px;font-weight:700;fill:#111827}.h2{font-size:15px;font-weight:650;fill:#111827}
+      .body{font-size:13px;fill:#374151}.small{font-size:12px;fill:#6b7280}.th{font-size:12px;font-weight:650;fill:#4b5563}.nav{font-size:14px;fill:#4b5563}
+    </style>
+  </defs>
+  <rect width="1440" height="900" fill="#f6f7f9"/>
+  <g class="ui">
+    <rect width="228" height="900" fill="#fff"/><line x1="227.5" y1="0" x2="227.5" y2="900" stroke="#e5e7eb"/>
+    <circle cx="36" cy="34" r="14" fill="#6d28d9"/><path d="M28 35h16M36 27v16" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="58" y="40" font-size="17" font-weight="700" fill="#111827">预算管理系统</text>
+    <text class="nav" x="52" y="105">工作台</text><text class="nav" x="52" y="151">项目管理</text><text class="nav" x="52" y="197">预算执行</text>
+    <rect x="16" y="216" width="196" height="42" rx="8" fill="#f0eafe"/><text class="nav" x="52" y="243" fill="#5b21b6" font-weight="650">业务记录</text>
+    <text class="nav" x="52" y="289">预算调整</text><text class="nav" x="52" y="335">审批中心</text><text class="nav" x="52" y="381">统计分析</text>
+    <rect x="228" y="0" width="1212" height="64" fill="#fff"/><line x1="228" y1="63.5" x2="1440" y2="63.5" stroke="#e5e7eb"/>
+    <text class="small" x="258" y="38">业务记录 / Excel 导入 / 校验预览</text>
+
+    <text class="title" x="258" y="109">Excel 导入校验</text>
+    <text class="small" x="258" y="134">业务记录_2026年7月.xlsx · 导入批次 IMP-2026-044</text>
+    <rect x="1168" y="91" width="100" height="38" rx="8" fill="#fff" stroke="#d1d5db"/><text class="body" x="1218" y="115" text-anchor="middle">取消导入</text>
+    <rect x="1280" y="91" width="123" height="38" rx="8" fill="#6d28d9"/><text x="1341" y="115" text-anchor="middle" font-size="13" font-weight="650" fill="#fff">确认导入 46 条</text>
+
+    <g filter="url(#shadow)"><rect x="258" y="157" width="1145" height="82" rx="12" fill="#fff"/></g>
+    <circle cx="355" cy="198" r="16" fill="#dcfce7"/><path d="m348 198 5 5 9-11" fill="none" stroke="#15803d" stroke-width="2"/><text class="small" x="332" y="228">上传文件</text>
+    <line x1="383" y1="198" x2="594" y2="198" stroke="#7c3aed" stroke-width="2"/>
+    <circle cx="622" cy="198" r="16" fill="#ede9fe"/><text x="622" y="203" text-anchor="middle" font-size="12" font-weight="700" fill="#6d28d9">2</text><text class="body" x="591" y="228" font-weight="650" fill="#6d28d9">校验预览</text>
+    <line x1="650" y1="198" x2="861" y2="198" stroke="#d1d5db" stroke-width="2"/>
+    <circle cx="889" cy="198" r="16" fill="#fff" stroke="#d1d5db" stroke-width="2"/><text x="889" y="203" text-anchor="middle" font-size="12" font-weight="700" fill="#9ca3af">3</text><text class="small" x="866" y="228">确认导入</text>
+    <line x1="917" y1="198" x2="1128" y2="198" stroke="#d1d5db" stroke-width="2"/>
+    <circle cx="1156" cy="198" r="16" fill="#fff" stroke="#d1d5db" stroke-width="2"/><text x="1156" y="203" text-anchor="middle" font-size="12" font-weight="700" fill="#9ca3af">4</text><text class="small" x="1133" y="228">导入完成</text>
+
+    <g filter="url(#shadow)">
+      <rect x="258" y="257" width="267" height="92" rx="12" fill="#fff"/><rect x="541" y="257" width="267" height="92" rx="12" fill="#fff"/>
+      <rect x="824" y="257" width="267" height="92" rx="12" fill="#fff"/><rect x="1107" y="257" width="296" height="92" rx="12" fill="#fff"/>
+    </g>
+    <text class="small" x="280" y="284">总行数</text><text x="280" y="325" font-size="26" font-weight="700" fill="#111827">52</text>
+    <text class="small" x="563" y="284">校验通过</text><text x="563" y="325" font-size="26" font-weight="700" fill="#15803d">46</text>
+    <text class="small" x="846" y="284">错误行</text><text x="846" y="325" font-size="26" font-weight="700" fill="#dc2626">3</text>
+    <text class="small" x="1129" y="284">疑似重复</text><text x="1129" y="325" font-size="26" font-weight="700" fill="#d97706">3</text><text class="small" x="1163" y="324">默认不导入</text>
+
+    <g filter="url(#shadow)"><rect x="258" y="367" width="1145" height="501" rx="12" fill="#fff"/></g>
+    <text class="h2" x="280" y="401">数据预览</text>
+    <rect x="384" y="383" width="80" height="32" rx="16" fill="#f0eafe"/><text x="424" y="404" text-anchor="middle" font-size="12" font-weight="650" fill="#6d28d9">全部 52</text>
+    <rect x="474" y="383" width="88" height="32" rx="16" fill="#f0fdf4"/><text x="518" y="404" text-anchor="middle" font-size="12" fill="#15803d">通过 46</text>
+    <rect x="572" y="383" width="80" height="32" rx="16" fill="#fef2f2"/><text x="612" y="404" text-anchor="middle" font-size="12" fill="#b91c1c">错误 3</text>
+    <rect x="662" y="383" width="98" height="32" rx="16" fill="#fffbeb"/><text x="711" y="404" text-anchor="middle" font-size="12" fill="#a16207">疑似重复 3</text>
+    <text class="small" x="1378" y="403" text-anchor="end">默认选择 46 条有效且非重复数据</text>
+    <rect x="280" y="429" width="1101" height="42" rx="6" fill="#f8fafc"/>
+    <rect x="295" y="443" width="13" height="13" rx="2" fill="#7c3aed"/><path d="m298 449 3 3 5-6" fill="none" stroke="#fff" stroke-width="1.4"/>
+    <g class="th"><text x="322" y="455">行</text><text x="360" y="455">项目编号</text><text x="470" y="455">年度</text><text x="530" y="455">科目编码</text><text x="635" y="455">金额</text><text x="730" y="455">业务日期</text><text x="844" y="455">摘要</text><text x="1070" y="455">状态</text><text x="1192" y="455">校验结果</text></g>
+
+    <g>
+      <rect x="295" y="492" width="13" height="13" rx="2" fill="#7c3aed"/><path d="m298 498 3 3 5-6" fill="none" stroke="#fff" stroke-width="1.4"/>
+      <text class="body" x="322" y="503">2</text><text class="body" x="360" y="503">IDRL-2025-017</text><text class="body" x="470" y="503">2026</text><text class="body" x="530" y="503">D-01-01-04</text><text class="body" x="635" y="503">135,000</text><text class="body" x="730" y="503">2026-07-28</text><text class="body" x="844" y="503">GPU 服务器采购首付款</text><text class="body" x="1070" y="503">合同</text>
+      <rect x="1190" y="484" width="64" height="25" rx="13" fill="#dcfce7"/><text x="1222" y="502" text-anchor="middle" font-size="11" fill="#15803d">通过</text>
+      <line x1="280" y1="527" x2="1381" y2="527" stroke="#eef0f3"/>
+
+      <rect x="295" y="548" width="13" height="13" rx="2" fill="#fff" stroke="#d1d5db"/>
+      <text class="body" x="322" y="559">7</text><text class="body" x="360" y="559">IDRL-2025-017</text><text class="body" x="470" y="559">2026</text><text class="body" x="530" y="559">D-01-02</text><text class="body" x="635" y="559">82,400</text><text class="body" x="730" y="559">2026-07-25</text><text class="body" x="844" y="559">复合材料与连接件采购</text><text class="body" x="1070" y="559">财务系统审批</text>
+      <rect x="1190" y="540" width="84" height="25" rx="13" fill="#ffedd5"/><text x="1232" y="558" text-anchor="middle" font-size="11" fill="#c2410c">超预算预警</text>
+      <line x1="280" y1="583" x2="1381" y2="583" stroke="#eef0f3"/>
+
+      <rect x="295" y="604" width="13" height="13" rx="2" fill="#fff" stroke="#d1d5db"/>
+      <text class="body" x="322" y="615">12</text><text class="body" x="360" y="615">IDRL-2025-017</text><text class="body" x="470" y="615">2026</text><text class="body" x="530" y="615" fill="#dc2626">D-99-99</text><text class="body" x="635" y="615">25,000</text><text class="body" x="730" y="615">2026-07-23</text><text class="body" x="844" y="615">传感器采购</text><text class="body" x="1070" y="615">合同</text>
+      <rect x="1190" y="596" width="110" height="25" rx="13" fill="#fee2e2"/><text x="1245" y="614" text-anchor="middle" font-size="11" fill="#b91c1c">科目编码不存在</text>
+      <line x1="280" y1="639" x2="1381" y2="639" stroke="#eef0f3"/>
+
+      <rect x="295" y="660" width="13" height="13" rx="2" fill="#fff" stroke="#d1d5db"/>
+      <text class="body" x="322" y="671">21</text><text class="body" x="360" y="671">IDRL-2025-017</text><text class="body" x="470" y="671">2026</text><text class="body" x="530" y="671">D-01-06</text><text class="body" x="635" y="671" fill="#dc2626">-5,000</text><text class="body" x="730" y="671">2026-07-20</text><text class="body" x="844" y="671">会议注册费</text><text class="body" x="1070" y="671">已支出</text>
+      <rect x="1190" y="652" width="88" height="25" rx="13" fill="#fee2e2"/><text x="1234" y="670" text-anchor="middle" font-size="11" fill="#b91c1c">金额须大于 0</text>
+      <line x1="280" y1="695" x2="1381" y2="695" stroke="#eef0f3"/>
+
+      <rect x="295" y="716" width="13" height="13" rx="2" fill="#fff" stroke="#d1d5db"/>
+      <text class="body" x="322" y="727">34</text><text class="body" x="360" y="727">IDRL-2025-017</text><text class="body" x="470" y="727">2026</text><text class="body" x="530" y="727">D-01-07</text><text class="body" x="635" y="727">40,000</text><text class="body" x="730" y="727">2026-07-16</text><text class="body" x="844" y="727">外场试验差旅预留</text><text class="body" x="1070" y="727">登记占位</text>
+      <rect x="1190" y="708" width="84" height="25" rx="13" fill="#fef3c7"/><text x="1232" y="726" text-anchor="middle" font-size="11" fill="#a16207">疑似重复</text><text x="1290" y="727" font-size="11" fill="#6d28d9">强制导入</text>
+      <line x1="280" y1="751" x2="1381" y2="751" stroke="#eef0f3"/>
+    </g>
+
+    <rect x="280" y="775" width="1101" height="70" rx="9" fill="#fffbeb" stroke="#fde68a"/>
+    <circle cx="306" cy="802" r="11" fill="#fef3c7"/><text x="306" y="806" text-anchor="middle" font-size="12" font-weight="700" fill="#a16207">!</text>
+    <text class="body" x="328" y="799" font-weight="650">确认前请处理 3 条错误行和 3 条疑似重复行</text>
+    <text class="small" x="328" y="822">错误行不会导入；疑似重复行默认不勾选，可核实后手动强制导入。所有强制导入行为将记录审计日志。</text>
+  </g>
+</svg>

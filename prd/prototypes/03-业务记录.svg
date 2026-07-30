@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#0f172a" flood-opacity=".07"/></filter>
+    <style>
+      .ui{font-family:"Noto Sans CJK SC","Microsoft YaHei",Arial,sans-serif}
+      .title{font-size:23px;font-weight:700;fill:#111827}.h2{font-size:15px;font-weight:650;fill:#111827}
+      .body{font-size:13px;fill:#374151}.small{font-size:12px;fill:#6b7280}.th{font-size:12px;font-weight:650;fill:#4b5563}.nav{font-size:14px;fill:#4b5563}
+    </style>
+  </defs>
+  <rect width="1440" height="900" fill="#f6f7f9"/>
+  <g class="ui">
+    <rect width="228" height="900" fill="#fff"/><line x1="227.5" y1="0" x2="227.5" y2="900" stroke="#e5e7eb"/>
+    <circle cx="36" cy="34" r="14" fill="#6d28d9"/><path d="M28 35h16M36 27v16" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="58" y="40" font-size="17" font-weight="700" fill="#111827">预算管理系统</text>
+    <text class="nav" x="52" y="105">工作台</text><text class="nav" x="52" y="151">项目管理</text><text class="nav" x="52" y="197">预算执行</text>
+    <rect x="16" y="216" width="196" height="42" rx="8" fill="#f0eafe"/><text class="nav" x="52" y="243" fill="#5b21b6" font-weight="650">业务记录</text>
+    <text class="nav" x="52" y="289">预算调整</text><text class="nav" x="52" y="335">审批中心</text><text class="nav" x="52" y="381">统计分析</text>
+    <rect x="228" y="0" width="1212" height="64" fill="#fff"/><line x1="228" y1="63.5" x2="1440" y2="63.5" stroke="#e5e7eb"/>
+    <text class="small" x="258" y="38">业务记录 / 全部记录</text>
+    <text class="title" x="258" y="109">业务记录</text><text class="small" x="258" y="134">登记、跟踪和修正项目预算占用</text>
+    <rect x="1090" y="91" width="120" height="38" rx="8" fill="#fff" stroke="#d1d5db"/><text class="body" x="1150" y="115" text-anchor="middle">导入 Excel</text>
+    <rect x="1222" y="91" width="181" height="38" rx="8" fill="#6d28d9"/><text x="1312" y="115" text-anchor="middle" font-size="13" font-weight="650" fill="#fff">＋ 新增业务记录</text>
+
+    <g filter="url(#shadow)"><rect x="258" y="157" width="1145" height="126" rx="12" fill="#fff"/></g>
+    <text class="h2" x="280" y="188">筛选条件</text>
+    <rect x="280" y="204" width="220" height="36" rx="7" fill="#fff" stroke="#d1d5db"/><text class="small" x="294" y="227">全部项目</text><path d="m478 218 5 5 5-5" fill="none" stroke="#6b7280"/>
+    <rect x="514" y="204" width="126" height="36" rx="7" fill="#fff" stroke="#d1d5db"/><text class="small" x="528" y="227">2026 年度</text>
+    <rect x="654" y="204" width="180" height="36" rx="7" fill="#fff" stroke="#d1d5db"/><text class="small" x="668" y="227">全部业务状态</text>
+    <rect x="848" y="204" width="247" height="36" rx="7" fill="#fff" stroke="#d1d5db"/><text class="small" x="862" y="227">2026-01-01  至  2026-12-31</text>
+    <rect x="1109" y="204" width="174" height="36" rx="7" fill="#fff" stroke="#d1d5db"/><text class="small" x="1123" y="227">搜索摘要／经办人</text>
+    <rect x="1297" y="204" width="84" height="36" rx="7" fill="#111827"/><text x="1339" y="227" text-anchor="middle" font-size="12" font-weight="650" fill="#fff">查询</text>
+    <text class="small" x="280" y="264">已筛选：有效记录</text><text x="377" y="264" font-size="12" fill="#6d28d9">清空条件</text>
+
+    <g filter="url(#shadow)"><rect x="258" y="301" width="1145" height="567" rx="12" fill="#fff"/></g>
+    <text class="h2" x="280" y="335">记录明细</text>
+    <text class="small" x="368" y="335">共 1,248 条</text>
+    <rect x="1155" y="318" width="92" height="32" rx="7" fill="#fff" stroke="#d1d5db"/><text class="small" x="1201" y="339" text-anchor="middle">批量操作</text>
+    <rect x="1259" y="318" width="122" height="32" rx="7" fill="#fff" stroke="#d1d5db"/><text class="small" x="1320" y="339" text-anchor="middle">导出筛选结果</text>
+    <rect x="280" y="366" width="1101" height="42" rx="6" fill="#f8fafc"/>
+    <rect x="296" y="380" width="13" height="13" rx="2" fill="#fff" stroke="#9ca3af"/>
+    <g class="th"><text x="326" y="392">业务发生日期</text><text x="442" y="392">项目 / 科目</text><text x="670" y="392">摘要</text><text x="886" y="392">金额</text><text x="998" y="392">经办人</text><text x="1090" y="392">业务状态</text><text x="1242" y="392">可用预算</text><text x="1345" y="392">操作</text></g>
+
+    <g>
+      <rect x="296" y="430" width="13" height="13" rx="2" fill="#fff" stroke="#9ca3af"/>
+      <text class="body" x="326" y="441">2026-07-28</text>
+      <text class="body" x="442" y="433" font-weight="650">无人系统智能设计方法研究</text><text class="small" x="442" y="451">直接费 / 设备费 / 服务器</text>
+      <text class="body" x="670" y="441">GPU 服务器采购首付款</text><text class="body" x="886" y="441">¥ 135,000</text><text class="body" x="998" y="441">张珺</text>
+      <rect x="1088" y="422" width="74" height="25" rx="13" fill="#e0f2fe"/><text x="1125" y="440" text-anchor="middle" font-size="11" fill="#0369a1">合同</text>
+      <text x="1242" y="441" font-size="13" fill="#15803d">¥ 65,000</text><text x="1345" y="441" font-size="12" fill="#6d28d9">查看</text>
+      <line x1="280" y1="469" x2="1381" y2="469" stroke="#eef0f3"/>
+
+      <rect x="296" y="491" width="13" height="13" rx="2" fill="#fff" stroke="#9ca3af"/>
+      <text class="body" x="326" y="502">2026-07-25</text>
+      <text class="body" x="442" y="494" font-weight="650">极端环境无人机验证平台</text><text class="small" x="442" y="512">直接费 / 材料费</text>
+      <text class="body" x="670" y="502">复合材料与连接件采购</text><text class="body" x="886" y="502">¥ 82,400</text><text class="body" x="998" y="502">卢欣妍</text>
+      <rect x="1088" y="483" width="98" height="25" rx="13" fill="#fef3c7"/><text x="1137" y="501" text-anchor="middle" font-size="11" fill="#a16207">财务系统审批</text>
+      <text x="1242" y="502" font-size="13" fill="#dc2626">-¥ 82,400</text><text x="1345" y="502" font-size="12" fill="#6d28d9">查看</text>
+      <rect x="1228" y="513" width="66" height="21" rx="11" fill="#fee2e2"/><text x="1261" y="528" text-anchor="middle" font-size="10.5" fill="#b91c1c">超预算</text>
+      <line x1="280" y1="546" x2="1381" y2="546" stroke="#eef0f3"/>
+
+      <rect x="296" y="568" width="13" height="13" rx="2" fill="#fff" stroke="#9ca3af"/>
+      <text class="body" x="326" y="579">2026-07-19</text>
+      <text class="body" x="442" y="571" font-weight="650">六足灵巧机器人关键技术</text><text class="small" x="442" y="589">直接费 / 外部协作费</text>
+      <text class="body" x="670" y="579">控制器样机加工测试</text><text class="body" x="886" y="579">¥ 96,000</text><text class="body" x="998" y="579">宋洁</text>
+      <rect x="1088" y="560" width="74" height="25" rx="13" fill="#dcfce7"/><text x="1125" y="578" text-anchor="middle" font-size="11" fill="#15803d">已支出</text>
+      <text x="1242" y="579" font-size="13" fill="#15803d">¥ 75,000</text><text x="1345" y="579" font-size="12" fill="#6d28d9">查看</text>
+      <line x1="280" y1="623" x2="1381" y2="623" stroke="#eef0f3"/>
+
+      <rect x="296" y="645" width="13" height="13" rx="2" fill="#fff" stroke="#9ca3af"/>
+      <text class="body" x="326" y="656">2026-07-16</text>
+      <text class="body" x="442" y="648" font-weight="650">无人系统智能设计方法研究</text><text class="small" x="442" y="666">直接费 / 差旅费</text>
+      <text class="body" x="670" y="656">外场试验差旅预留</text><text class="body" x="886" y="656">¥ 40,000</text><text class="body" x="998" y="656">王晨</text>
+      <rect x="1088" y="637" width="74" height="25" rx="13" fill="#ede9fe"/><text x="1125" y="655" text-anchor="middle" font-size="11" fill="#6d28d9">登记占位</text>
+      <text x="1242" y="656" font-size="13" fill="#15803d">¥ 40,000</text><text x="1345" y="656" font-size="12" fill="#6d28d9">查看</text>
+      <line x1="280" y1="700" x2="1381" y2="700" stroke="#eef0f3"/>
+
+      <rect x="296" y="722" width="13" height="13" rx="2" fill="#fff" stroke="#9ca3af"/>
+      <text class="body" x="326" y="733">2026-07-12</text>
+      <text class="body" x="442" y="725" font-weight="650" fill="#9ca3af">无人系统智能设计方法研究</text><text class="small" x="442" y="743">直接费 / 专家咨询费</text>
+      <text class="body" x="670" y="733" fill="#9ca3af">方案评审专家咨询</text><text class="body" x="886" y="733" fill="#9ca3af">¥ 12,000</text><text class="body" x="998" y="733" fill="#9ca3af">张珺</text>
+      <rect x="1088" y="714" width="62" height="25" rx="13" fill="#f3f4f6"/><text x="1119" y="732" text-anchor="middle" font-size="11" fill="#6b7280">已作废</text>
+      <text x="1242" y="733" font-size="13" fill="#9ca3af">不占用</text><text x="1345" y="733" font-size="12" fill="#6d28d9">查看</text>
+    </g>
+
+    <rect x="280" y="792" width="1101" height="54" rx="8" fill="#fafafa"/>
+    <text class="small" x="298" y="824">本页有效记录合计</text>
+    <text class="body" x="858" y="824">金额</text><text x="931" y="824" font-size="15" font-weight="700" fill="#111827">¥ 353,400</text>
+    <text class="body" x="1088" y="824">总占用</text><text x="1160" y="824" font-size="15" font-weight="700" fill="#111827">¥ 353,400</text>
+    <text class="small" x="1320" y="824">1 / 63 页</text>
+  </g>
+</svg>
