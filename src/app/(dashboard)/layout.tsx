@@ -37,8 +37,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         <Menu
           mode="inline"
-          defaultSelectedKeys={['projects']}
+          defaultSelectedKeys={['dashboard']}
           items={[
+            {
+              key: 'dashboard',
+              label: <Link href="/">工作台</Link>,
+            },
             {
               key: 'projects',
               label: <Link href="/projects">项目管理</Link>,
@@ -50,6 +54,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {
               key: 'statistics',
               label: <Link href="/statistics">统计分析</Link>,
+            },
+            {
+              key: 'audit-logs',
+              label: <Link href="/audit-logs">操作日志</Link>,
             },
             {
               key: 'budget-placeholder',
