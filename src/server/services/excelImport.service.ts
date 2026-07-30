@@ -582,6 +582,14 @@ export async function confirmImport(
   const createdIds: string[] = [];
 
   await prisma.$transaction(async (tx) => {
+    // 原子地占用批次(pending→confirming),防止并发重复确认导致业务记录重复创建。
+    const claimed = await tx.importBatch.updateMany({
+      where: { id: batchId, status: 'pending' },
+      data: { status: 'confirming' },
+    });
+    if (claimed.count === 0) {
+      throw new HTTPError(409, '该批次正在被确认或已确认,不可重复操作');
+    }
     for (const row of eligibleRows) {
       const data = row.parsedData as unknown as ParsedRowData;
       const subj = data.subjectCode ? subjectByCode.get(data.subjectCode) : null;
