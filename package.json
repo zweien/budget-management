@@ -24,6 +24,7 @@
     ]
   },
   "dependencies": {
+    "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "@prisma/client": "^5.22.0",
     "antd": "^5.29.3",
     "decimal.js": "^10.6.0",
