@@ -20,14 +20,16 @@ describe('foundation smoke (prisma + audit + id)', () => {
     await prisma.user.create({
       data: { id: userId, name: 'tester', role: 'BUDGET_ADMIN' },
     });
-    const audit = await recordAudit(prisma, {
-      objectType: 'test',
-      objectId: userId,
-      action: 'create',
-      operatorId: userId,
-      before: { amount: '0' },
-      after: { amount: '100.50' },
-    });
+    const audit = await prisma.$transaction(async (tx) =>
+      recordAudit(tx, {
+        objectType: 'test',
+        objectId: userId,
+        action: 'create',
+        operatorId: userId,
+        before: { amount: '0' },
+        after: { amount: '100.50' },
+      }),
+    );
     expect(audit.afterData).toEqual({ amount: '100.50' });
     // 清理
     await prisma.auditLog.delete({ where: { id: audit.id } });

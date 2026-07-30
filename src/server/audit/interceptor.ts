@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { snapshotRow } from './snapshot';
 import { uuidv7 } from '@/lib/id';
 
@@ -14,9 +14,9 @@ export interface AuditContext {
 
 /**
  * 在业务事务内写一条审计日志(§14.1)。
- * 调用方传入 tx(来自 prisma.$transaction),保证日志与业务同事务、审计链不断(§14.2)。
+ * 调用方必须传入 tx(来自 prisma.$transaction),保证日志与业务同事务、审计链不断(§14.2)。
  */
-export function recordAudit(tx: Prisma.TransactionClient | PrismaClient, ctx: AuditContext) {
+export function recordAudit(tx: Prisma.TransactionClient, ctx: AuditContext) {
   return tx.auditLog.create({
     data: {
       id: uuidv7(),

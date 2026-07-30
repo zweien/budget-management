@@ -55,7 +55,7 @@ enum LevelType {
 }
 
 model User {
-  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String     @id @db.Uuid
   name      String
   role      UserRole
   status    String     @default("active")
@@ -67,6 +67,8 @@ model User {
   createdRecords    BusinessRecord[]   @relation("RecordCreator")
   modifiedRecords   BusinessRecord[]   @relation("RecordModifier")
   initApplications  InitialBudgetApplication[] @relation("AppInitApplicant") // back-relation for InitialBudgetApplication.applicant (not in brief; required by prisma)
+  subjectChangeApplications SubjectChangeApplication[] @relation("SubjectChangeApplicant")
+  approvedSubjectChanges    SubjectChangeApplication[] @relation("SubjectChangeAppApprover")
   auditLogs         AuditLog[]
   approvalLogs      ApprovalLog[]
   receipts          ReceiptRecord[]
@@ -94,6 +96,7 @@ model Project {
   subjectBudgets  SubjectBudget[]
   projectBudget   ProjectBudget?
   applications    InitialBudgetApplication[]
+  subjectChanges  SubjectChangeApplication[]
   adjustments     BudgetAdjustment[]
   records         BusinessRecord[]
   receipts        ReceiptRecord[]
@@ -258,6 +261,10 @@ model SubjectChangeApplication {
   approverId      String?        @map("approver_id") @db.Uuid
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  project   Project @relation(fields: [projectId], references: [id])
+  applicant User    @relation("SubjectChangeApplicant", fields: [applicantId], references: [id])
+  approver  User?   @relation("SubjectChangeAppApprover", fields: [approverId], references: [id])
 
   @@map("subject_change_applications")
 }
