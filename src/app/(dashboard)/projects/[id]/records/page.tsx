@@ -7,6 +7,8 @@ import {
   Button,
   Checkbox,
   DatePicker,
+  Descriptions,
+  Drawer,
   Dropdown,
   Form,
   Input,
@@ -41,6 +43,16 @@ const STATUS_META: Record<BusinessStatus, { label: string; color: string }> = {
   PAID: { label: '已支出', color: 'success' },
 };
 
+/** §17.7 history.action 的中文展示。 */
+const HISTORY_ACTION_LABEL: Record<string, string> = {
+  create: '新增',
+  update: '修改',
+  void: '作废',
+  status_switch: '状态切换',
+  carryover_out: '结转(源)',
+  carryover_in: '结转(新)',
+};
+
 /** 业务记录行(对应 GET /records 返回的 BusinessRecord 列)。 */
 interface BusinessRecordRow {
   id: string;
@@ -60,6 +72,18 @@ interface BusinessRecordRow {
   voidedAt: string | null;
   createdById: string;
   createdAt: string;
+}
+
+/** §17.7 业务记录变更历史行(对应 business_record_history)。 */
+interface BusinessRecordHistoryRow {
+  id: string;
+  businessRecordId: string;
+  action: string;
+  beforeData: Record<string, unknown> | null;
+  afterData: Record<string, unknown> | null;
+  operatorId: string;
+  operatedAt: string;
+  reason: string | null;
 }
 
 /** 叶科目(用于筛选 + 新增表单的科目下拉,从 ledger nodes 中 isLeaf=true 取得)。 */
@@ -146,6 +170,10 @@ export default function BusinessRecordsPage() {
   // 作废 Modal。
   const [voidTarget, setVoidTarget] = useState<BusinessRecordRow | null>(null);
   const [voidForm] = Form.useForm<{ reason: string }>();
+  // §17.7 历史 Drawer。
+  const [historyTarget, setHistoryTarget] = useState<BusinessRecordRow | null>(null);
+  const [historyRows, setHistoryRows] = useState<BusinessRecordHistoryRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // subjectId → {code, name} 映射,用于表格展示"科目(code+name)"。
   const subjectMap = useMemo(() => {
@@ -375,6 +403,23 @@ export default function BusinessRecordsPage() {
     }
   };
 
+  /** §17.7 打开变更历史 Drawer,拉取该记录的 history 行。 */
+  const openHistory = async (row: BusinessRecordRow) => {
+    setHistoryTarget(row);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const data = await apiFetch<{ history: BusinessRecordHistoryRow[] }>(
+        `/api/projects/${projectId}/records/${row.id}/history`,
+      );
+      setHistoryRows(data.history ?? []);
+    } catch (e) {
+      if (e instanceof Error) message.error(e.message);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const columns: ColumnsType<BusinessRecordRow> = [
     {
       title: '年度',
@@ -448,7 +493,7 @@ export default function BusinessRecordsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 200,
+      width: 240,
       fixed: 'right',
       render: (_: unknown, row: BusinessRecordRow) => {
         const statusMenuItems = BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => ({
@@ -471,6 +516,9 @@ export default function BusinessRecordsPage() {
             </Dropdown.Button>
             <Button size="small" danger onClick={() => setVoidTarget(row)} disabled={row.isVoid}>
               作废
+            </Button>
+            <Button size="small" onClick={() => void openHistory(row)}>
+              历史
             </Button>
           </Space>
         );
@@ -664,6 +712,99 @@ export default function BusinessRecordsPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Drawer
+        title="变更历史"
+        open={historyTarget !== null}
+        onClose={() => setHistoryTarget(null)}
+        width={640}
+        destroyOnHidden
+      >
+        {historyTarget ? (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Descriptions bordered column={1} size="small">
+              <Descriptions.Item label="业务发生日期">
+                {formatDate(historyTarget.businessDate)}
+              </Descriptions.Item>
+              <Descriptions.Item label="摘要">{historyTarget.summary}</Descriptions.Item>
+              <Descriptions.Item label="金额">
+                <MoneyText value={historyTarget.amount} riskOnNegative={false} />
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Text type="secondary">§17.7 变更链(按时间正序),共 {historyRows.length} 条。</Text>
+
+            <Table<BusinessRecordHistoryRow>
+              rowKey="id"
+              size="small"
+              loading={historyLoading}
+              dataSource={historyRows}
+              pagination={false}
+              scroll={{ x: 'max-content' }}
+              locale={{ emptyText: historyLoading ? '加载中…' : '暂无变更历史' }}
+              columns={[
+                {
+                  title: '时间',
+                  dataIndex: 'operatedAt',
+                  key: 'operatedAt',
+                  width: 150,
+                  render: (d: string) => formatDateTime(d),
+                },
+                {
+                  title: '操作',
+                  dataIndex: 'action',
+                  key: 'action',
+                  width: 110,
+                  render: (a: string) => HISTORY_ACTION_LABEL[a] ?? a,
+                },
+                {
+                  title: '操作人',
+                  dataIndex: 'operatorId',
+                  key: 'operatorId',
+                  width: 120,
+                  ellipsis: true,
+                  render: (id: string) => id.slice(0, 8),
+                },
+                {
+                  title: '原因',
+                  dataIndex: 'reason',
+                  key: 'reason',
+                  ellipsis: true,
+                  render: (r: string | null) => r ?? <Text type="secondary">—</Text>,
+                },
+                {
+                  title: '变更前',
+                  key: 'before',
+                  render: (_: unknown, row: BusinessRecordHistoryRow) =>
+                    row.beforeData ? (
+                      <Text
+                        style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}
+                      >
+                        {JSON.stringify(row.beforeData, null, 2)}
+                      </Text>
+                    ) : (
+                      <Text type="secondary">—</Text>
+                    ),
+                },
+                {
+                  title: '变更后',
+                  key: 'after',
+                  render: (_: unknown, row: BusinessRecordHistoryRow) =>
+                    row.afterData ? (
+                      <Text
+                        style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}
+                      >
+                        {JSON.stringify(row.afterData, null, 2)}
+                      </Text>
+                    ) : (
+                      <Text type="secondary">—</Text>
+                    ),
+                },
+              ]}
+            />
+          </Space>
+        ) : null}
+      </Drawer>
     </>
   );
 }

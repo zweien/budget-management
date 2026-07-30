@@ -102,6 +102,69 @@ export function bootstrapMockUser(): Promise<string | null> {
 export type ApiFetchOptions = RequestInit;
 
 /**
+ * 下载文件(xlsx 等二进制响应,§10.5 导出场景)。
+ *
+ * 与 `apiFetch` 的差异:响应是二进制 blob(非 JSON),因此不能走 apiFetch 的
+ * JSON 解析路径。这里仍以同样的方式注入 `x-mock-user-id` header(服务端鉴权
+ * 需要),拿到 blob 后用 `URL.createObjectURL` + 临时 `<a>` 触发浏览器下载。
+ *
+ * - filename:浏览器下载文件名(若服务端未给或调用方需自定义时使用)。
+ * - 非 OK 响应:尝试读 JSON body 的 error 字段,否则抛通用错误。
+ *
+ * 仅在浏览器环境可用(SSR 无 window 时直接抛错,调用方不应在 SSR 调用)。
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  if (typeof window === 'undefined') {
+    throw new Error('downloadFile 仅在浏览器环境可用');
+  }
+  const mockUserId = await bootstrapMockUser();
+  const headers = new Headers({ Accept: 'application/octet-stream' });
+  if (mockUserId) {
+    headers.set('x-mock-user-id', mockUserId);
+  }
+
+  const res = await fetch(path, { headers });
+  if (!res.ok) {
+    // 服务端错误仍以 JSON 返回(如 { error: '...' }),尽量解析出可读信息。
+    let message = `请求失败 (${res.status})`;
+    try {
+      const ct = res.headers.get('Content-Type') ?? '';
+      if (ct.includes('application/json')) {
+        const body = (await res.json()) as { error?: unknown };
+        if (body && typeof body.error === 'string') message = body.error;
+      }
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  // 优先用响应头 Content-Disposition 里的文件名,回退到调用方传入的 filename。
+  const finalName =
+    parseFilenameFromDisposition(res.headers.get('Content-Disposition')) ?? filename;
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = finalName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    // 给浏览器一点时间发起下载再回收 object URL。
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+}
+
+/** 解析 Content-Disposition: attachment; filename="xxx.xlsx" 中的文件名。 */
+function parseFilenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const m = /filename="?([^";]+)"?/i.exec(header);
+  return m ? m[1].trim() : null;
+}
+
+/**
  * 统一 fetch 封装:相对路径 + 注入 `x-mock-user-id` header + JSON 解析 + 错误规范化。
  * 非 OK 响应抛出 `{ status, message, body }`,调用方可 `try/catch` 取 `e.message`。
  *

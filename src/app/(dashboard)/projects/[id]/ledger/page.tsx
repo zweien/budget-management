@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Alert, Button, Result, Select, Skeleton, Space, Typography, message } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 
-import { apiFetch } from '@/lib/api/client';
+import { apiFetch, downloadFile } from '@/lib/api/client';
 import { BudgetTreeTable, type LedgerNode } from '@/components/ui/BudgetTreeTable';
 
 const { Title, Text } = Typography;
@@ -36,6 +37,7 @@ export default function ProjectLedgerPage() {
   const [ledger, setLedger] = useState<ProjectLedger | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // 拉取项目标题(仅一次)。
   useEffect(() => {
@@ -82,6 +84,22 @@ export default function ProjectLedgerPage() {
     setYear(next);
   };
 
+  /** 导出当前年度台账为 xlsx(§10.5)。 */
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await downloadFile(
+        `/api/projects/${projectId}/export/ledger?year=${year}`,
+        `ledger-${year}.xlsx`,
+      );
+      message.success('已开始下载台账');
+    } catch (e) {
+      if (e instanceof Error) message.error(e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <>
       <Title level={3} style={{ marginTop: 0 }}>
@@ -97,6 +115,9 @@ export default function ProjectLedgerPage() {
           style={{ width: 120 }}
           options={yearOptions().map((y) => ({ label: `${y} 年`, value: y }))}
         />
+        <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
+          导出台账
+        </Button>
       </Space>
 
       {loading ? (
