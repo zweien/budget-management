@@ -12,7 +12,11 @@
     "check-types": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:seed": "tsx prisma/seed.ts",
     "prepare": "husky"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -51,6 +55,7 @@
     "lint-staged": "^17.2.0",
     "prettier": "^3.9.6",
     "prisma": "^5.22.0",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^1.6.1"
   }
