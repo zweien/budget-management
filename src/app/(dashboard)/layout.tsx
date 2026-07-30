@@ -44,6 +44,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               label: <Link href="/projects">项目管理</Link>,
             },
             {
+              key: 'approvals',
+              label: <Link href="/approvals">审批中心</Link>,
+            },
+            {
               key: 'budget-placeholder',
               label: '预算编制',
               disabled: true,
