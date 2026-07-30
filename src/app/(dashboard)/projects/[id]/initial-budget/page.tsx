@@ -296,10 +296,14 @@ export default function InitialBudgetPage() {
         );
         appId = created.appId;
       } else {
-        // 已存在草稿(DRAFT/REJECTED/WITHDRAWN):用已有 appId 直接提交。
-        // 注意:REJECTED/WITHDRAWN 后端 submit 仅允许 DRAFT,会返回 409;
-        // 这里仍按现有 API 尽力提交,错误由 message.error 提示。
+        // 已存在草稿(DRAFT/REJECTED/WITHDRAWAN):先 PATCH 保存最新编辑内容,
+        // 把状态置回 DRAFT(§6.2),再提交。
         appId = draft.id;
+        const payload = buildPayload();
+        await apiFetch<{ appId: string }>(`/api/projects/${projectId}/initial-budget/${appId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
       }
       await apiFetch<{ appId: string; status: ApprovalStatus }>(
         `/api/projects/${projectId}/initial-budget/${appId}/submit`,
@@ -321,18 +325,26 @@ export default function InitialBudgetPage() {
     setSubmitting(true);
     try {
       const payload = buildPayload();
-      const created = await apiFetch<{ appId: string }>(
-        `/api/projects/${projectId}/initial-budget`,
-        { method: 'POST', body: JSON.stringify(payload) },
-      );
+      if (draft) {
+        // 已存在草稿 → PATCH 保存最新编辑(状态置回 DRAFT)。
+        await apiFetch<{ appId: string }>(`/api/projects/${projectId}/initial-budget/${draft.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+      } else {
+        // 无草稿 → 创建。
+        await apiFetch<{ appId: string }>(`/api/projects/${projectId}/initial-budget`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+      }
       message.success('草稿已保存');
-      // 创建成功后刷新本页,进入"已有草稿(DRAFT)"的可再编辑态。
+      // 刷新本页,进入"已有草稿(DRAFT)"的可再编辑态。
       const fresh = await apiFetch<InitialBudgetDraftView>(
         `/api/projects/${projectId}/initial-budget`,
       );
       setDraft(fresh);
       hydrateForm(fresh);
-      void created;
     } catch (e) {
       if (e instanceof Error) message.error(e.message);
     } finally {

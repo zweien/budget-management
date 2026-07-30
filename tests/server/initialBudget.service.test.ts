@@ -7,6 +7,7 @@ import {
   createDraft,
   getDraft,
   submitDraft,
+  updateDraft,
   type InitialBudgetPayload,
 } from '@/server/services/initialBudget.service';
 import { createProject } from '@/server/services/project.service';
@@ -216,6 +217,52 @@ describe('initialBudget.service (integration, real PG)', () => {
 
     await expect(
       submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('updateDraft: 修改 DRAFT 草稿(重建科目/预算),current 仍为 0;PENDING 不可改→409', async () => {
+    const code = `UPD-${uuidv7().slice(0, 8)}`;
+    const project = await createProject({ code, name: 'upd' }, { id: adminId });
+    createdProjectIds.push(project.id);
+    const { appId } = await createDraft(project.id, validPayload(), {
+      id: adminId,
+      role: UserRole.BUDGET_ADMIN,
+    });
+
+    // 修改:总预算改 2000,叶 A 改 1000(仍满足 §6.4)。
+    const updated: InitialBudgetPayload = {
+      projectTotal: '2000.00',
+      annualBudgets: [{ year: 2026, amount: '2000.00' }],
+      subjects: [
+        { code: 'ROOT', name: '根', parentCode: null, isLeaf: false },
+        { code: 'A', name: '叶A', parentCode: 'ROOT', isLeaf: true },
+        { code: 'C', name: '叶C', parentCode: 'ROOT', isLeaf: true },
+      ],
+      subjectBudgets: [
+        { year: 2026, subjectCode: 'A', amount: '1000.00' },
+        { year: 2026, subjectCode: 'C', amount: '1000.00' },
+      ],
+    };
+    const res = await updateDraft(appId, updated, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    expect(res.appId).toBe(appId);
+
+    // 重建后:B 应被删除,C 应存在;A=1000;current 仍为 0(§6.3)。
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    expect(subjects.find((s) => s.code === 'B')).toBeUndefined();
+    expect(subjects.find((s) => s.code === 'C')).toBeDefined();
+    const sbA = await prisma.subjectBudget.findFirst({
+      where: { projectId: project.id, subject: { code: 'A' } },
+    });
+    expect(sbA?.initialAmount.toFixed(2)).toBe('1000.00');
+    expect(sbA?.currentAmount.toFixed(2)).toBe('0.00');
+    // 状态保持 DRAFT。
+    const app = await prisma.initialBudgetApplication.findUnique({ where: { id: appId } });
+    expect(app?.status).toBe(ApprovalStatus.DRAFT);
+
+    // PENDING 不可改 → 提交后 updateDraft 应 409。
+    await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await expect(
+      updateDraft(appId, validPayload(), { id: adminId, role: UserRole.BUDGET_ADMIN }),
     ).rejects.toMatchObject({ status: 409 });
   });
 });
