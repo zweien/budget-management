@@ -352,6 +352,127 @@ export async function createDraft(
 }
 
 /**
+ * §6.2 修改编制草稿(驳回/撤回后回到可编辑态,或 DRAFT 直接改)。
+ * 仅当 application 处于 DRAFT/REJECTED/WITHDRAWN 时允许;PENDING/APPROVED 不可改(409)。
+ * 实现等同 createDraft 的写入逻辑,但在同一事务内先清空旧 subjects/budgets 再重建。
+ */
+export async function updateDraft(
+  appId: string,
+  payload: InitialBudgetPayload,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<{ appId: string }> {
+  const existing = await prisma.initialBudgetApplication.findUnique({
+    where: { id: appId },
+  });
+  if (!existing) throw new HTTPError(404, '编制单不存在');
+
+  const editable: ApprovalStatus[] = [
+    ApprovalStatus.DRAFT,
+    ApprovalStatus.REJECTED,
+    ApprovalStatus.WITHDRAWN,
+  ];
+  if (!editable.includes(existing.status)) {
+    throw new HTTPError(409, `当前状态 ${existing.status} 不可修改`);
+  }
+
+  const projectId = existing.projectId;
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) throw new HTTPError(404, '项目不存在');
+  if (project.archivedAt) throw new HTTPError(409, '项目已归档,不可编制预算');
+  await requirePermission(user, 'budget:editInitial', projectId);
+
+  validatePayload(payload);
+  const projectTotal = fromStored(payload.projectTotal);
+
+  await prisma.$transaction(async (tx) => {
+    // 清空旧编制数据(subjects 级联带走 subject_budgets;同时清 annual_budgets 草稿值)。
+    await tx.subjectBudget.deleteMany({ where: { projectId } });
+    await tx.budgetSubject.deleteMany({ where: { projectId } });
+    await tx.annualBudget.deleteMany({ where: { projectId } });
+
+    // 重建科目树(两遍:先建后接 parent)。
+    const codeToId = new Map<string, string>();
+    for (const s of payload.subjects) {
+      const id = uuidv7();
+      codeToId.set(s.code, id);
+      await tx.budgetSubject.create({
+        data: {
+          id,
+          projectId,
+          parentId: null,
+          code: s.code,
+          name: s.name,
+          description: s.description ?? null,
+          level: 0,
+          isLeaf: s.isLeaf,
+        },
+      });
+    }
+    for (const s of payload.subjects) {
+      if (s.parentCode) {
+        const parentId = codeToId.get(s.parentCode);
+        if (!parentId) throw new HTTPError(422, `父科目 ${s.parentCode} 不存在`);
+        await tx.budgetSubject.update({ where: { id: codeToId.get(s.code) }, data: { parentId } });
+      }
+    }
+
+    // 重建年度预算 + 叶节点科目预算(current 保持 0,§6.3 审批前不影响)。
+    for (const a of payload.annualBudgets) {
+      await tx.annualBudget.create({
+        data: {
+          id: uuidv7(),
+          projectId,
+          year: a.year,
+          initialAmount: toStored(fromStored(a.amount)),
+          adjustmentAmount: toStored(ZERO),
+          currentAmount: toStored(ZERO),
+        },
+      });
+    }
+    for (const sb of payload.subjectBudgets) {
+      const subjectId = codeToId.get(sb.subjectCode);
+      if (!subjectId) throw new HTTPError(422, `科目 ${sb.subjectCode} 不存在`);
+      await tx.subjectBudget.create({
+        data: {
+          id: uuidv7(),
+          projectId,
+          year: sb.year,
+          subjectId,
+          initialAmount: toStored(fromStored(sb.amount)),
+          adjustmentAmount: toStored(ZERO),
+          currentAmount: toStored(ZERO),
+        },
+      });
+    }
+
+    await tx.projectBudget.update({
+      where: { projectId },
+      data: { initialAmount: toStored(projectTotal) },
+    });
+
+    await tx.initialBudgetApplication.update({
+      where: { id: appId },
+      data: { status: ApprovalStatus.DRAFT, applicantId: user.id },
+    });
+
+    await recordAudit(tx, {
+      projectId,
+      objectType: 'initial_budget_applications',
+      objectId: appId,
+      action: 'update',
+      operatorId: user.id,
+      after: {
+        projectTotal: projectTotal.toFixed(2),
+        subjectCount: payload.subjects.length,
+        annualYears: payload.annualBudgets.map((a) => a.year),
+      },
+    });
+  });
+
+  return { appId };
+}
+
+/**
  * §6 取编制草稿(含 subjects + budgets,扁平结构便于表单回填)。
  * 不存在时抛 404。
  */
