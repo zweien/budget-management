@@ -173,12 +173,16 @@ export default function ProjectDetailPage() {
         {project.name}
       </Title>
 
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Button onClick={() => router.push('/projects')}>返回列表</Button>
         <Button type="primary" onClick={() => router.push(`/projects/${projectId}/initial-budget`)}>
           编制预算
         </Button>
         <Button onClick={() => router.push(`/projects/${projectId}/ledger`)}>预算执行台账</Button>
+        <Button type="primary" onClick={() => router.push(`/projects/${projectId}/records`)}>
+          业务记录
+        </Button>
+        <Button onClick={() => router.push(`/projects/${projectId}/receipts`)}>到账流水</Button>
         <Button onClick={() => router.push(`/projects/${projectId}/imports`)}>Excel 导入</Button>
         <Button
           onClick={() => {
