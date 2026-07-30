@@ -34,4 +34,10 @@ describe('RBAC matrix (§2.2)', () => {
   it('所有角色都不能执行未定义动作(can 返回 false)', () => {
     expect(can(owner, 'budget:approve' as Action)).toBe(false);
   });
+
+  it('所有角色均可维护项目基础信息(project:edit, §2.2)', () => {
+    expect(can(owner, 'project:edit')).toBe(true);
+    expect(can(handler, 'project:edit')).toBe(true);
+    expect(can(admin, 'project:edit')).toBe(true);
+  });
 });

@@ -101,12 +101,15 @@ export async function createProject(
  */
 export async function listProjects(user: { id: string; role: User['role'] }): Promise<Project[]> {
   if (user.role === 'BUDGET_ADMIN') {
-    return prisma.project.findMany({ orderBy: { createdAt: 'desc' } });
+    return prisma.project.findMany({
+      where: { archivedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
   }
   const ids = await getAccessibleProjectIds(user);
   if (ids.length === 0) return [];
   return prisma.project.findMany({
-    where: { id: { in: ids } },
+    where: { id: { in: ids }, archivedAt: null },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -128,7 +131,7 @@ export async function updateProject(
   input: UpdateProjectInput,
   user: { id: string; role: User['role'] },
 ): Promise<Project> {
-  await requirePermission(user, 'project:view', id);
+  await requirePermission(user, 'project:edit', id);
   const before = await prisma.project.findUnique({ where: { id } });
   if (!before) throw new HTTPError(404, '项目不存在');
 
@@ -167,7 +170,7 @@ export async function archiveProject(
   id: string,
   user: { id: string; role: User['role'] },
 ): Promise<Project> {
-  await requirePermission(user, 'project:view', id);
+  await requirePermission(user, 'project:edit', id);
   const before = await prisma.project.findUnique({ where: { id } });
   if (!before) throw new HTTPError(404, '项目不存在');
 

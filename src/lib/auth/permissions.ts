@@ -6,6 +6,7 @@ import { HTTPError } from '@/lib/auth/session';
 export type Action =
   | 'project:view' // 查看获授权项目
   | 'project:viewAll' // 查看全部项目(仅管理员)
+  | 'project:edit' // 维护项目基础信息/归档(owner/handler/admin 均可)
   | 'budget:editInitial' // 编制初始预算
   | 'budget:editSubjectTree' // 维护初始科目树
   | 'budget:adjust' // 发起预算调整
@@ -20,6 +21,7 @@ export type Action =
 const MATRIX: Record<UserRole, Set<Action>> = {
   PROJECT_OWNER: new Set<Action>([
     'project:view',
+    'project:edit',
     'budget:editInitial',
     'budget:editSubjectTree',
     'budget:adjust',
@@ -32,6 +34,7 @@ const MATRIX: Record<UserRole, Set<Action>> = {
   ]),
   AUTHORIZED_HANDLER: new Set<Action>([
     'project:view',
+    'project:edit',
     'budget:editInitial',
     'budget:editSubjectTree',
     'budget:adjust',
@@ -45,6 +48,7 @@ const MATRIX: Record<UserRole, Set<Action>> = {
   BUDGET_ADMIN: new Set<Action>([
     'project:view',
     'project:viewAll',
+    'project:edit',
     'budget:editInitial',
     'budget:editSubjectTree',
     'budget:adjust',

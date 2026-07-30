@@ -3,7 +3,6 @@ import { UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
-import { HTTPError } from '@/lib/auth/session';
 import { createProject, listProjects, getProject } from '@/server/services/project.service';
 
 // 集成测试直连真实 PG(:5434)。createProject 在事务内建 project + budget + member,
@@ -124,7 +123,7 @@ describe('project.service (integration, real PG)', () => {
         id: outsiderId,
         role: UserRole.AUTHORIZED_HANDLER,
       }),
-    ).rejects.toBeInstanceOf(HTTPError);
+    ).rejects.toMatchObject({ status: 403 });
     expect.assertions(1);
   });
 
