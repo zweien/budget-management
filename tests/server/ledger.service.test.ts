@@ -310,4 +310,60 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
     expect(nodeA2027.executionRate).toBeNull();
     expect(nodeA2027.totalOccupied).toBe('0.00');
   });
+
+  it('三级树:祖父节点汇总全部叶后代(非仅直接子节点)', async () => {
+    // 树:ROOT → MID(非叶) → {A,B 叶};ROOT → C(叶)。验证 ROOT 与 MID 各自汇总正确的叶后代集合。
+    const code = `T5-3L-${uuidv7().slice(0, 8)}`;
+    const project = await createProject({ code, name: 't5 3level' }, { id: adminId });
+    createdProjectIds.push(project.id);
+
+    const payload: InitialBudgetPayload = {
+      projectTotal: '1000.00',
+      annualBudgets: [{ year: 2026, amount: '1000.00' }],
+      subjects: [
+        { code: 'ROOT', name: '根', parentCode: null, isLeaf: false },
+        { code: 'MID', name: '中', parentCode: 'ROOT', isLeaf: false },
+        { code: 'A', name: '叶A', parentCode: 'MID', isLeaf: true },
+        { code: 'B', name: '叶B', parentCode: 'MID', isLeaf: true },
+        { code: 'C', name: '叶C', parentCode: 'ROOT', isLeaf: true },
+      ],
+      subjectBudgets: [
+        { year: 2026, subjectCode: 'A', amount: '300.00' },
+        { year: 2026, subjectCode: 'B', amount: '200.00' },
+        { year: 2026, subjectCode: 'C', amount: '100.00' },
+      ],
+    };
+    const { appId } = await createDraft(project.id, payload, {
+      id: adminId,
+      role: UserRole.BUDGET_ADMIN,
+    });
+    await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await approveApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    const leafA = subjects.find((s) => s.code === 'A')!;
+    // A 占用 50(paid)。MID 应=A+B current=500;ROOT 应=A+B+C current=600。
+    await insertRecord({
+      projectId: project.id,
+      subjectId: leafA.id,
+      budgetYear: 2026,
+      amount: '50.00',
+      status: BusinessStatus.PAID,
+      createdById: adminId,
+    });
+
+    const ledger = await getProjectLedger(project.id, 2026, {
+      id: adminId,
+      role: UserRole.BUDGET_ADMIN,
+    });
+    const mid = ledger.nodes.find((n) => n.code === 'MID')!;
+    const root = ledger.nodes.find((n) => n.code === 'ROOT')!;
+
+    // MID 仅含叶 A+B → current 500,占用 50。
+    expect(mid.current).toBe('500.00');
+    expect(mid.totalOccupied).toBe('50.00');
+    // ROOT 含叶 A+B+C → current 600(current 不能只算直接子 MID 的 500,必须含 C 的 100)。
+    expect(root.current).toBe('600.00');
+    expect(root.totalOccupied).toBe('50.00');
+  });
 });
