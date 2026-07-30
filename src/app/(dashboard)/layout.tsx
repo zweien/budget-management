@@ -1,9 +1,15 @@
-import { Layout, Menu } from 'antd';
+import { Menu } from 'antd';
+import Sider from 'antd/es/layout/Sider';
+import Layout, { Content, Header } from 'antd/es/layout/layout';
 import Link from 'next/link';
 
 import { MockUserSelector } from '@/components/auth/MockUserSelector';
 
-const { Header, Sider, Content } = Layout;
+// 注意:不要用 `const { Sider } = Layout` 顶层解构,也不要依赖 `Layout.Sider` 属性访问。
+// antd 的 Layout.Header/Sider/Content 是运行期挂载的 compounded 属性
+// (见 antd/es/layout/index.js)。在 Turbopack(Next 16)bundle 中这些副作用赋值不可靠,
+// 导致其为 undefined → "Element type is invalid ... Check the render method of DashboardLayout"。
+// 这里直接具名 / 默认导入各子组件的源模块,绕开 compounded 属性挂载。
 
 // Dashboard 下所有页面均依赖 mock 鉴权 header + 运行时数据拉取,不可静态预渲染。
 export const dynamic = 'force-dynamic';
