@@ -505,7 +505,6 @@ export async function submitAdjustment(
     }
 
     // ④ 状态 DRAFT→PENDING + 审计 submit。
-    const now = new Date();
     const updated = await tx.budgetAdjustment.update({
       where: { id: adjId },
       data: { status: ApprovalStatus.PENDING },
@@ -517,7 +516,7 @@ export async function submitAdjustment(
       action: 'submit',
       operatorId: user.id,
       before: snapshotAdjustment(adj),
-      after: { ...snapshotAdjustment(updated), submittedAt: now.toISOString() },
+      after: snapshotAdjustment(updated),
     });
 
     return updated;
