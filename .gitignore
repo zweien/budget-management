@@ -42,3 +42,6 @@ Thumbs.db
 # (issues live in .scratch/<feature>/ per docs/agents/issue-tracker.md;
 #  remove this line if you want issues version-controlled)
 .scratch/
+
+# Playwright CLI artifacts (browser session snapshots, screenshots, traces)
+.playwright-cli/
