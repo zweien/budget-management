@@ -1,66 +1,40 @@
-import Image from 'next/image';
-import styles from './page.module.css';
+'use client';
 
+import Link from 'next/link';
+import { Card, Typography, Button } from 'antd';
+
+const { Title, Paragraph } = Typography;
+
+/**
+ * 根落地页:替代 create-next-app 默认营销页(M4 修复)。
+ * 简单的标题卡片 + 进入「项目管理」入口。详细业务页均在 /projects 之下。
+ * 用 client component 以确保 AntD cssinjs 在 SSR 时正确收集样式。
+ */
 export default function Home() {
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{' '}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{' '}
-            or the{' '}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{' '}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#f5f5f5',
+        padding: 24,
+      }}
+    >
+      <Card style={{ maxWidth: 520, width: '100%', textAlign: 'center' }}>
+        <Title level={2} style={{ color: '#7c3aed', marginBottom: 8 }}>
+          预算管理系统
+        </Title>
+        <Paragraph type="secondary">
+          科研项目预算管理:项目 → 初始预算编制 → 审批生效 → 预算执行台账全链路。
+        </Paragraph>
+        <Link href="/projects">
+          <Button type="primary" size="large">
+            进入项目管理
+          </Button>
+        </Link>
+      </Card>
     </div>
   );
 }
