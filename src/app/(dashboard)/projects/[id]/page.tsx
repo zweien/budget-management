@@ -108,6 +108,7 @@ export default function ProjectDetailPage() {
           编制预算
         </Button>
         <Button onClick={() => router.push(`/projects/${projectId}/ledger`)}>预算执行台账</Button>
+        <Button onClick={() => router.push(`/projects/${projectId}/imports`)}>Excel 导入</Button>
       </Space>
 
       <Descriptions bordered column={2} size="small">
