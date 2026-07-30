@@ -24,8 +24,9 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 
-import { apiFetch } from '@/lib/api/client';
+import { apiFetch, downloadFile } from '@/lib/api/client';
 import { MoneyText } from '@/components/ui/MoneyText';
+import { DownloadOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -268,6 +269,7 @@ function CustomStatisticsTab() {
   // 初始即 true:挂载自动查询,避免 mount effect 内同步 setState(react-hooks/set-state-in-effect)。
   const [loading, setLoading] = useState(true);
   const [hasQueried, setHasQueried] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const subjectMap = useMemo(() => {
     const m = new Map<string, LeafSubject>();
@@ -333,6 +335,37 @@ function CustomStatisticsTab() {
   const handleQueryClick = () => {
     setLoading(true);
     void runQuery();
+  };
+
+  /** 用当前表单筛选作为查询参数导出 xlsx(§10.5),与 /api/statistics/custom 同参。 */
+  const handleExport = async () => {
+    let values: CustomFilters;
+    try {
+      values = await form.validateFields();
+    } catch {
+      // 校验失败仍允许导出(忽略必填):只取已填字段。
+      values = form.getFieldsValue(true) as CustomFilters;
+    }
+    setExporting(true);
+    try {
+      const qs = new URLSearchParams();
+      if (values.projectId) qs.set('projectId', values.projectId);
+      if (values.budgetYear !== undefined) qs.set('budgetYear', String(values.budgetYear));
+      if (values.subjectId) qs.set('subjectId', values.subjectId);
+      if (values.status) qs.set('status', values.status);
+      if (values.dateRange?.[0])
+        qs.set('businessDateFrom', values.dateRange[0].format('YYYY-MM-DD'));
+      if (values.dateRange?.[1]) qs.set('businessDateTo', values.dateRange[1].format('YYYY-MM-DD'));
+      if (values.handler?.trim()) qs.set('handler', values.handler.trim());
+      if (values.includeVoid) qs.set('includeVoid', '1');
+      const suffix = qs.toString();
+      await downloadFile(`/api/statistics/export${suffix ? `?${suffix}` : ''}`, 'statistics.xlsx');
+      message.success('已开始导出');
+    } catch (e) {
+      if (e instanceof Error) message.error(e.message);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const columns: ColumnsType<CustomRecord> = [
@@ -461,6 +494,11 @@ function CustomStatisticsTab() {
         <Form.Item>
           <Button type="primary" loading={loading} onClick={handleQueryClick}>
             查询
+          </Button>
+        </Form.Item>
+        <Form.Item>
+          <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
+            导出
           </Button>
         </Form.Item>
       </Form>

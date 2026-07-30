@@ -2,7 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Button, Descriptions, Result, Skeleton, Space, Tag, Typography, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Descriptions,
+  Form,
+  InputNumber,
+  Modal,
+  Result,
+  Skeleton,
+  Space,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import dayjs from 'dayjs';
 
 import { apiFetch } from '@/lib/api/client';
@@ -27,6 +40,25 @@ interface InitialBudgetState {
   status?: string;
 }
 
+/** §8.7 跨年结转预警条目。 */
+interface CarryoverWarning {
+  originalRecordId: string;
+  subjectCode: string;
+  reason: string;
+}
+
+/** §8.7 carryOver 返回。 */
+interface CarryOverResult {
+  carriedCount: number;
+  warnings: CarryoverWarning[];
+}
+
+/** 跨年结转表单值。 */
+interface CarryoverFormValues {
+  fromYear: number;
+  toYear: number;
+}
+
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
   DRAFT: { text: '草稿中', color: 'default' },
   PENDING: { text: '待审批', color: 'processing' },
@@ -47,6 +79,11 @@ export default function ProjectDetailPage() {
   // 初始即为 true,避免 mount effect 内同步 setState(react-hooks/set-state-in-effect)。
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // §8.7 跨年结转 Modal。
+  const [carryoverOpen, setCarryoverOpen] = useState(false);
+  const [carryoverSubmitting, setCarryoverSubmitting] = useState(false);
+  const [carryoverResult, setCarryoverResult] = useState<CarryOverResult | null>(null);
+  const [carryoverForm] = Form.useForm<CarryoverFormValues>();
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +133,40 @@ export default function ProjectDetailPage() {
   const statusInfo = budget?.status ? STATUS_LABEL[budget.status] : undefined;
   const isEffective = budget?.status === 'APPROVED';
 
+  /** §8.7 跨年结转。 */
+  const handleCarryover = async () => {
+    let values: CarryoverFormValues;
+    try {
+      values = await carryoverForm.validateFields();
+    } catch {
+      return;
+    }
+    if (values.toYear <= values.fromYear) {
+      message.error('目标年度必须大于源年度');
+      return;
+    }
+    setCarryoverSubmitting(true);
+    try {
+      const result = await apiFetch<CarryOverResult>(`/api/projects/${projectId}/carryover`, {
+        method: 'POST',
+        body: JSON.stringify(values),
+      });
+      setCarryoverResult(result);
+      message.success(`已结转 ${result.carriedCount} 条记录`);
+    } catch (e) {
+      if (e instanceof Error) message.error(e.message);
+    } finally {
+      setCarryoverSubmitting(false);
+    }
+  };
+
+  /** 关闭结转 Modal,清空表单与结果。 */
+  const closeCarryover = () => {
+    setCarryoverOpen(false);
+    setCarryoverResult(null);
+    carryoverForm.resetFields();
+  };
+
   return (
     <>
       <Title level={3} style={{ marginTop: 0 }}>
@@ -109,6 +180,15 @@ export default function ProjectDetailPage() {
         </Button>
         <Button onClick={() => router.push(`/projects/${projectId}/ledger`)}>预算执行台账</Button>
         <Button onClick={() => router.push(`/projects/${projectId}/imports`)}>Excel 导入</Button>
+        <Button
+          onClick={() => {
+            setCarryoverResult(null);
+            carryoverForm.resetFields();
+            setCarryoverOpen(true);
+          }}
+        >
+          跨年结转
+        </Button>
       </Space>
 
       <Descriptions bordered column={2} size="small">
@@ -137,6 +217,89 @@ export default function ProjectDetailPage() {
           </Typography.Paragraph>
         </div>
       ) : null}
+
+      <Modal
+        title="跨年结转"
+        open={carryoverOpen}
+        onCancel={closeCarryover}
+        footer={
+          carryoverResult
+            ? [
+                <Button key="close" type="primary" onClick={closeCarryover}>
+                  关闭
+                </Button>,
+              ]
+            : [
+                <Button key="cancel" onClick={closeCarryover}>
+                  取消
+                </Button>,
+                <Button
+                  key="ok"
+                  type="primary"
+                  loading={carryoverSubmitting}
+                  onClick={handleCarryover}
+                >
+                  执行结转
+                </Button>,
+              ]
+        }
+        destroyOnHidden
+      >
+        {carryoverResult ? (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Alert
+              type="success"
+              showIcon
+              message={`已结转 ${carryoverResult.carriedCount} 条业务记录`}
+            />
+            {carryoverResult.warnings.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message="以下记录需人工确认(§8.7)"
+                description={
+                  <ul style={{ marginBottom: 0, paddingLeft: 18 }}>
+                    {carryoverResult.warnings.map((w) => (
+                      <li key={w.originalRecordId}>
+                        {w.subjectCode}:{w.reason}
+                      </li>
+                    ))}
+                  </ul>
+                }
+              />
+            )}
+          </Space>
+        ) : (
+          <>
+            <Typography.Paragraph type="secondary">
+              将源年度中尚未支出(非 PAID)的业务记录结转到目标年度,生成可追溯记录。
+            </Typography.Paragraph>
+            <Form<CarryoverFormValues>
+              form={carryoverForm}
+              layout="vertical"
+              initialValues={{
+                fromYear: new Date().getFullYear(),
+                toYear: new Date().getFullYear() + 1,
+              }}
+            >
+              <Form.Item
+                name="fromYear"
+                label="源年度"
+                rules={[{ required: true, message: '请输入源年度' }]}
+              >
+                <InputNumber min={1900} max={9999} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item
+                name="toYear"
+                label="目标年度"
+                rules={[{ required: true, message: '请输入目标年度' }]}
+              >
+                <InputNumber min={1900} max={9999} style={{ width: '100%' }} />
+              </Form.Item>
+            </Form>
+          </>
+        )}
+      </Modal>
     </>
   );
 }
