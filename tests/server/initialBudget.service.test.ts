@@ -62,7 +62,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     await prisma.$disconnect();
   });
 
-  it('createDraft: 事务内建 application(DRAFT)+ 科目树 + 叶/年度预算 + ProjectBudget.initialAmount,current = initial', async () => {
+  it('createDraft: 事务内建 application(DRAFT)+ 科目树 + 叶/年度预算 + ProjectBudget.initialAmount,current = 0(§6.3 审批生效才置位)', async () => {
     const code = `T3-OK-${uuidv7().slice(0, 8)}`;
     const project = await createProject({ code, name: 't3 ok' }, { id: adminId });
     createdProjectIds.push(project.id);
@@ -93,7 +93,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     expect(leafA.isLeaf).toBe(true);
     expect(leafA.level).toBe(2);
 
-    // 叶节点预算:initial = current,金额正确。
+    // 叶节点预算:initial = 金额,current = 0(§6.3 审批生效才置位 current)。
     const sbA = await prisma.subjectBudget.findUnique({
       where: {
         projectId_year_subjectId: {
@@ -104,15 +104,15 @@ describe('initialBudget.service (integration, real PG)', () => {
       },
     });
     expect(sbA!.initialAmount.toFixed(2)).toBe('600.00');
-    expect(sbA!.currentAmount.toFixed(2)).toBe('600.00');
+    expect(sbA!.currentAmount.toFixed(2)).toBe('0.00');
     expect(sbA!.adjustmentAmount.toFixed(2)).toBe('0.00');
 
-    // 年度预算:initial = current = 1000。
+    // 年度预算:initial = 1000,current = 0(§6.3 同上)。
     const annual = await prisma.annualBudget.findUnique({
       where: { projectId_year: { projectId: project.id, year: 2026 } },
     });
     expect(annual!.initialAmount.toFixed(2)).toBe('1000.00');
-    expect(annual!.currentAmount.toFixed(2)).toBe('1000.00');
+    expect(annual!.currentAmount.toFixed(2)).toBe('0.00');
 
     // ProjectBudget.initialAmount 已回填(§6.3:current 仍为 0,审批生效才置位)。
     const pb = await prisma.projectBudget.findUnique({

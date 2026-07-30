@@ -1,4 +1,4 @@
-import { ApprovalStatus, User } from '@prisma/client';
+import { ApprovalStatus, Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
@@ -62,6 +62,23 @@ export interface InitialBudgetDraftView {
  */
 function validatePayload(payload: InitialBudgetPayload): void {
   const projectTotal = new D(payload.projectTotal);
+
+  // 0) year 必须是合理的正整数(1900~9999),覆盖 annualBudgets 与 subjectBudgets。
+  const isSaneYear = (y: unknown): boolean =>
+    typeof y === 'number' && Number.isInteger(y) && y >= 1900 && y <= 9999;
+  for (const ab of payload.annualBudgets) {
+    if (!isSaneYear(ab.year)) {
+      throw new HTTPError(422, `年度 ${ab.year} 不是有效的正整数(1900~9999)`);
+    }
+  }
+  for (const sb of payload.subjectBudgets) {
+    if (!isSaneYear(sb.year)) {
+      throw new HTTPError(
+        422,
+        `科目 ${sb.subjectCode} 的年度 ${sb.year} 不是有效的正整数(1900~9999)`,
+      );
+    }
+  }
 
   // 1) 项目初始总预算不得为负。
   if (!projectTotal.gte(ZERO)) {
@@ -165,7 +182,7 @@ function computeLevels(payload: InitialBudgetPayload): Map<string, number> {
  * - 一个项目仅允许一份编制(任意状态)存在,重复抛 409。
  * - §6.4 校验失败抛 422。
  * - 事务内:建 application(DRAFT)+ 科目树(two-pass 解析 parentCode)
- *   + subject_budgets(initial=current)+ annual_budgets(initial=current)
+ *   + subject_budgets / annual_budgets(initial=金额,current=0,§6.3 审批生效才置位)
  *   + ProjectBudget.initialAmount + 审计。
  */
 export async function createDraft(
@@ -202,115 +219,124 @@ export async function createDraft(
   const projectTotal = new D(payload.projectTotal);
   const appId = uuidv7();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.initialBudgetApplication.create({
-      data: {
-        id: appId,
-        projectId,
-        status: ApprovalStatus.DRAFT,
-        applicantId: user.id,
-      },
-    });
-
-    // Pass 1:全部科目以 parentId=null 落库,记录 code → id。
-    const codeToId = new Map<string, string>();
-    for (const s of payload.subjects) {
-      const id = uuidv7();
-      codeToId.set(s.code, id);
-      await tx.budgetSubject.create({
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.initialBudgetApplication.create({
         data: {
-          id,
+          id: appId,
           projectId,
-          parentId: null,
-          code: s.code,
-          name: s.name,
-          description: s.description ?? null,
-          level: levels.get(s.code) ?? 1,
-          isLeaf: s.isLeaf,
+          status: ApprovalStatus.DRAFT,
+          applicantId: user.id,
         },
       });
-    }
 
-    // Pass 2:为非根科目回填 parentId。
-    for (const s of payload.subjects) {
-      if (s.parentCode === null) continue;
-      const childId = codeToId.get(s.code)!;
-      const parentId = codeToId.get(s.parentCode)!;
-      await tx.budgetSubject.update({
-        where: { id: childId },
-        data: { parentId },
-      });
-    }
-
-    // 年度预算:upsert(initial = current = 年度金额)。
-    for (const ab of payload.annualBudgets) {
-      const amt = new D(ab.amount);
-      await tx.annualBudget.upsert({
-        where: { projectId_year: { projectId, year: ab.year } },
-        update: {
-          initialAmount: toStored(amt),
-          adjustmentAmount: toStored(ZERO),
-          currentAmount: toStored(amt),
-        },
-        create: {
-          id: uuidv7(),
-          projectId,
-          year: ab.year,
-          initialAmount: toStored(amt),
-          adjustmentAmount: toStored(ZERO),
-          currentAmount: toStored(amt),
-        },
-      });
-    }
-
-    // 叶节点预算:initial = current(只允许 isLeaf)。
-    for (const sb of payload.subjectBudgets) {
-      const subjectId = codeToId.get(sb.subjectCode);
-      if (!subjectId) {
-        // 不应发生(validatePayload 已校验);防御性抛错。
-        throw new HTTPError(422, `科目 ${sb.subjectCode} 不存在`);
+      // Pass 1:全部科目以 parentId=null 落库,记录 code → id。
+      const codeToId = new Map<string, string>();
+      for (const s of payload.subjects) {
+        const id = uuidv7();
+        codeToId.set(s.code, id);
+        await tx.budgetSubject.create({
+          data: {
+            id,
+            projectId,
+            parentId: null,
+            code: s.code,
+            name: s.name,
+            description: s.description ?? null,
+            level: levels.get(s.code) ?? 1,
+            isLeaf: s.isLeaf,
+          },
+        });
       }
-      const amt = new D(sb.amount);
-      await tx.subjectBudget.upsert({
-        where: {
-          projectId_year_subjectId: { projectId, year: sb.year, subjectId },
-        },
-        update: {
-          initialAmount: toStored(amt),
-          adjustmentAmount: toStored(ZERO),
-          currentAmount: toStored(amt),
-        },
-        create: {
-          id: uuidv7(),
-          projectId,
-          year: sb.year,
-          subjectId,
-          initialAmount: toStored(amt),
-          adjustmentAmount: toStored(ZERO),
-          currentAmount: toStored(amt),
+
+      // Pass 2:为非根科目回填 parentId。
+      for (const s of payload.subjects) {
+        if (s.parentCode === null) continue;
+        const childId = codeToId.get(s.code)!;
+        const parentId = codeToId.get(s.parentCode)!;
+        await tx.budgetSubject.update({
+          where: { id: childId },
+          data: { parentId },
+        });
+      }
+
+      // 年度预算:upsert。§6.3 审批通过前不影响当前预算 → initial = 年度金额,
+      // current = 0(审批生效才置位,与 ProjectBudget 处理一致)。
+      for (const ab of payload.annualBudgets) {
+        const amt = new D(ab.amount);
+        await tx.annualBudget.upsert({
+          where: { projectId_year: { projectId, year: ab.year } },
+          update: {
+            initialAmount: toStored(amt),
+            adjustmentAmount: toStored(ZERO),
+            currentAmount: toStored(ZERO),
+          },
+          create: {
+            id: uuidv7(),
+            projectId,
+            year: ab.year,
+            initialAmount: toStored(amt),
+            adjustmentAmount: toStored(ZERO),
+            currentAmount: toStored(ZERO),
+          },
+        });
+      }
+
+      // 叶节点预算:initial = 金额,current = 0(§6.3 同上,只允许 isLeaf)。
+      for (const sb of payload.subjectBudgets) {
+        const subjectId = codeToId.get(sb.subjectCode);
+        if (!subjectId) {
+          // 不应发生(validatePayload 已校验);防御性抛错。
+          throw new HTTPError(422, `科目 ${sb.subjectCode} 不存在`);
+        }
+        const amt = new D(sb.amount);
+        await tx.subjectBudget.upsert({
+          where: {
+            projectId_year_subjectId: { projectId, year: sb.year, subjectId },
+          },
+          update: {
+            initialAmount: toStored(amt),
+            adjustmentAmount: toStored(ZERO),
+            currentAmount: toStored(ZERO),
+          },
+          create: {
+            id: uuidv7(),
+            projectId,
+            year: sb.year,
+            subjectId,
+            initialAmount: toStored(amt),
+            adjustmentAmount: toStored(ZERO),
+            currentAmount: toStored(ZERO),
+          },
+        });
+      }
+
+      // 项目总预算 initialAmount 回填(current 仍由审批生效才置位,§6.3)。
+      await tx.projectBudget.update({
+        where: { projectId },
+        data: { initialAmount: toStored(projectTotal) },
+      });
+
+      await recordAudit(tx, {
+        projectId,
+        objectType: 'initial_budget_applications',
+        objectId: appId,
+        action: 'create',
+        operatorId: user.id,
+        after: {
+          projectTotal: projectTotal.toFixed(2),
+          subjectCount: payload.subjects.length,
+          annualYears: payload.annualBudgets.map((a) => a.year),
         },
       });
+    });
+  } catch (e) {
+    // 并发重复编制:read-check 处理常见情况,唯一约束兜底竞态(§6.3)。
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      throw new HTTPError(409, '该项目已存在编制单,一个项目仅允许一份初始预算编制');
     }
-
-    // 项目总预算 initialAmount 回填(current 仍由审批生效才置位,§6.3)。
-    await tx.projectBudget.update({
-      where: { projectId },
-      data: { initialAmount: toStored(projectTotal) },
-    });
-
-    await recordAudit(tx, {
-      projectId,
-      objectType: 'initial_budget_applications',
-      objectId: appId,
-      action: 'create',
-      operatorId: user.id,
-      after: {
-        projectTotal: projectTotal.toFixed(2),
-        subjectCount: payload.subjects.length,
-        annualYears: payload.annualBudgets.map((a) => a.year),
-      },
-    });
-  });
+    throw e;
+  }
 
   return { appId };
 }

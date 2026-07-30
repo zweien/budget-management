@@ -199,6 +199,8 @@ model InitialBudgetApplication {
   project   Project @relation(fields: [projectId], references: [id])
   applicant User    @relation("AppInitApplicant", fields: [applicantId], references: [id])
 
+  // §6.3 一个项目仅允许一份编制单(任意状态),DB 层兜底防并发重复。
+  @@unique([projectId])
   @@map("initial_budget_applications")
 }
 
