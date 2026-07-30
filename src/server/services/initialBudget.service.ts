@@ -26,6 +26,16 @@ export interface InitialBudgetPayload {
   subjectBudgets: { year: number; subjectCode: string; amount: string }[];
 }
 
+/** 审批/驳回/撤回流转返回结构(精简版,仅状态相关字段)。 */
+export interface InitialBudgetApplicationResult {
+  id: string;
+  projectId: string;
+  status: ApprovalStatus;
+  approverId: string | null;
+  approvedAt: Date | null;
+  opinion: string | null;
+}
+
 /** getDraft 返回结构:便于表单回填再编辑(扁平 + 树引用 parentCode)。 */
 export interface InitialBudgetDraftView {
   id: string;
@@ -444,4 +454,266 @@ export async function submitDraft(
   });
 
   return { appId, status: ApprovalStatus.PENDING };
+}
+
+/**
+ * 从已落库的编制数据重建一份 InitialBudgetPayload,用于 §6.4 校验在审批/生效时的复跑。
+ * 仅取 initialAmount(原始申报金额),与 createDraft 写入语义一致。
+ */
+async function rebuildPayloadFromStored(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+): Promise<InitialBudgetPayload> {
+  const [project, subjects, annualBudgets, subjectBudgets] = await Promise.all([
+    tx.projectBudget.findUnique({ where: { projectId } }),
+    tx.budgetSubject.findMany({
+      where: { projectId },
+      include: { parent: { select: { code: true } } },
+    }),
+    tx.annualBudget.findMany({ where: { projectId } }),
+    tx.subjectBudget.findMany({
+      where: { projectId },
+      include: { subject: { select: { code: true } } },
+    }),
+  ]);
+
+  if (!project) {
+    throw new HTTPError(404, '项目预算记录不存在');
+  }
+
+  const subjectIdToCode = new Map(subjects.map((s) => [s.id, s.code] as const));
+
+  return {
+    projectTotal: fromStored(project.initialAmount).toFixed(2),
+    annualBudgets: annualBudgets.map((a) => ({
+      year: a.year,
+      amount: fromStored(a.initialAmount).toFixed(2),
+    })),
+    subjects: subjects.map((s) => ({
+      code: s.code,
+      name: s.name,
+      parentCode: s.parent?.code ?? null,
+      isLeaf: s.isLeaf,
+      description: s.description ?? undefined,
+    })),
+    subjectBudgets: subjectBudgets.map((sb) => ({
+      year: sb.year,
+      subjectCode: subjectIdToCode.get(sb.subjectId) ?? sb.subject.code,
+      amount: fromStored(sb.initialAmount).toFixed(2),
+    })),
+  };
+}
+
+/**
+ * §6.3 审批生效(整体生效,原子事务):
+ * - 权限:budget:approve + 项目范围(仅管理员有该动作)。
+ * - 必须 PENDING,否则 HTTPError 409。
+ * - 事务内:复跑 §6.4 校验(防数据被改后失效);PENDING→APPROVED,置 approverId/
+ *   approvedAt/opinion;把 ProjectBudget / annual_budgets / subject_budgets 三层
+ *   currentAmount 全部置为各自的 initialAmount(createDraft 时 current=0,生效才置位)。
+ *   审计 approve 同事务写入。
+ */
+export async function approveApplication(
+  appId: string,
+  user: Pick<User, 'id' | 'role'>,
+  opinion?: string,
+): Promise<InitialBudgetApplicationResult> {
+  const app = await prisma.initialBudgetApplication.findUnique({
+    where: { id: appId },
+    select: { id: true, projectId: true, status: true },
+  });
+  if (!app) {
+    throw new HTTPError(404, '编制单不存在');
+  }
+
+  await requirePermission(user, 'budget:approve', app.projectId);
+
+  if (app.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${app.status} 不允许审批,仅 PENDING 可审批`);
+  }
+
+  const now = new Date();
+
+  const updated = await prisma.$transaction(async (tx) => {
+    // §6.4 复跑:数据落库后可能被改,生效前再校验一次,失败抛 422(整体事务回滚)。
+    const payload = await rebuildPayloadFromStored(tx, app.projectId);
+    validatePayload(payload);
+
+    // §6.3 整体生效:三层 current ← initial。
+    // 1) ProjectBudget.currentAmount = initialAmount。
+    const projectBudget = await tx.projectBudget.findUnique({
+      where: { projectId: app.projectId },
+    });
+    if (!projectBudget) {
+      throw new HTTPError(404, '项目预算记录不存在');
+    }
+    await tx.projectBudget.update({
+      where: { projectId: app.projectId },
+      data: { currentAmount: toStored(fromStored(projectBudget.initialAmount)) },
+    });
+
+    // 2) annual_budgets:每行 current ← initial。
+    const annuals = await tx.annualBudget.findMany({
+      where: { projectId: app.projectId },
+    });
+    for (const a of annuals) {
+      await tx.annualBudget.update({
+        where: { id: a.id },
+        data: { currentAmount: toStored(fromStored(a.initialAmount)) },
+      });
+    }
+
+    // 3) subject_budgets:每行 current ← initial。
+    const subjects = await tx.subjectBudget.findMany({
+      where: { projectId: app.projectId },
+    });
+    for (const sb of subjects) {
+      await tx.subjectBudget.update({
+        where: { id: sb.id },
+        data: { currentAmount: toStored(fromStored(sb.initialAmount)) },
+      });
+    }
+
+    // 4) application 状态流转 + 审批人/时间/意见。
+    const after = await tx.initialBudgetApplication.update({
+      where: { id: appId },
+      data: {
+        status: ApprovalStatus.APPROVED,
+        approverId: user.id,
+        approvedAt: now,
+        opinion: opinion ?? null,
+      },
+    });
+
+    await recordAudit(tx, {
+      projectId: app.projectId,
+      objectType: 'initial_budget_applications',
+      objectId: appId,
+      action: 'approve',
+      operatorId: user.id,
+      before: { status: ApprovalStatus.PENDING },
+      after: {
+        status: ApprovalStatus.APPROVED,
+        approverId: user.id,
+        approvedAt: now.toISOString(),
+        opinion: opinion ?? null,
+      },
+    });
+
+    return after;
+  });
+
+  return {
+    id: updated.id,
+    projectId: updated.projectId,
+    status: updated.status,
+    approverId: updated.approverId,
+    approvedAt: updated.approvedAt,
+    opinion: updated.opinion,
+  };
+}
+
+/**
+ * §6.2 驳回:PENDING → REJECTED。审批人写意见,审计 reject。
+ * 非 PENDING 抛 409。审批权按项目范围校验。
+ */
+export async function rejectApplication(
+  appId: string,
+  user: Pick<User, 'id' | 'role'>,
+  opinion: string,
+): Promise<InitialBudgetApplicationResult> {
+  const app = await prisma.initialBudgetApplication.findUnique({
+    where: { id: appId },
+    select: { id: true, projectId: true, status: true },
+  });
+  if (!app) {
+    throw new HTTPError(404, '编制单不存在');
+  }
+
+  await requirePermission(user, 'budget:approve', app.projectId);
+
+  if (app.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${app.status} 不允许驳回,仅 PENDING 可驳回`);
+  }
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (tx) => {
+    const after = await tx.initialBudgetApplication.update({
+      where: { id: appId },
+      data: {
+        status: ApprovalStatus.REJECTED,
+        approverId: user.id,
+        approvedAt: now,
+        opinion,
+      },
+    });
+    await recordAudit(tx, {
+      projectId: app.projectId,
+      objectType: 'initial_budget_applications',
+      objectId: appId,
+      action: 'reject',
+      operatorId: user.id,
+      before: { status: ApprovalStatus.PENDING },
+      after: { status: ApprovalStatus.REJECTED, opinion },
+    });
+    return after;
+  });
+
+  return {
+    id: updated.id,
+    projectId: updated.projectId,
+    status: updated.status,
+    approverId: updated.approverId,
+    approvedAt: updated.approvedAt,
+    opinion: updated.opinion,
+  };
+}
+
+/**
+ * §6.2 撤回:PENDING → DRAFT(已撤回 → 草稿:修改)。
+ * 由申请人本人发起(此处复用 budget:editInitial,有项目编辑权即可)。非 PENDING 抛 409。
+ */
+export async function withdrawApplication(
+  appId: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<InitialBudgetApplicationResult> {
+  const app = await prisma.initialBudgetApplication.findUnique({
+    where: { id: appId },
+    select: { id: true, projectId: true, status: true },
+  });
+  if (!app) {
+    throw new HTTPError(404, '编制单不存在');
+  }
+
+  await requirePermission(user, 'budget:editInitial', app.projectId);
+
+  if (app.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${app.status} 不允许撤回,仅 PENDING 可撤回`);
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const after = await tx.initialBudgetApplication.update({
+      where: { id: appId },
+      data: { status: ApprovalStatus.DRAFT, submittedAt: null },
+    });
+    await recordAudit(tx, {
+      projectId: app.projectId,
+      objectType: 'initial_budget_applications',
+      objectId: appId,
+      action: 'withdraw',
+      operatorId: user.id,
+      before: { status: ApprovalStatus.PENDING },
+      after: { status: ApprovalStatus.DRAFT },
+    });
+    return after;
+  });
+
+  return {
+    id: updated.id,
+    projectId: updated.projectId,
+    status: updated.status,
+    approverId: updated.approverId,
+    approvedAt: updated.approvedAt,
+    opinion: updated.opinion,
+  };
 }
