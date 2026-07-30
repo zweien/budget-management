@@ -522,3 +522,371 @@ export async function submitAdjustment(
     return updated;
   });
 }
+
+/**
+ * §7.6 释放某调整单关联的全部 budget_locks(releasedAt=now)。
+ * 用于 approve(已生效)、reject、withdraw。事务内执行。
+ */
+async function releaseLocks(tx: Prisma.TransactionClient, adjId: string, now: Date): Promise<void> {
+  await tx.budgetLock.updateMany({
+    where: { adjustmentId: adjId, releasedAt: null },
+    data: { releasedAt: now },
+  });
+}
+
+/**
+ * §7.6 审批生效事务(approveAdjustment):PENDING → APPROVED。
+ *
+ * 七步:
+ * ① 复跑 §7.1/7.4 约束(由 lines 重建 amounts 平衡、amount>0)。
+ * ② 重新校验每个 DECREASE 行的可调额度(提交后可能因新业务占用而不足 → 422 拒,
+ *    §7.5 "因新增业务导致审批时可调额度不足的,调整不得审批通过")。
+ * ③ (lines 已在 submit 时落库,这里不再写新明细)
+ * ④ 应用 current_amount:PROJECT_TOTAL→ProjectBudget;ANNUAL→annual_budgets;
+ *    SUBJECT/SUBJECT_TRANSFER→subject_budgets。INCREASE +amount,DECREASE -amount。
+ * ⑤ 释放本单全部 budget_locks(releasedAt=now)。
+ * ⑥ 汇总/结余/执行率通过 ledger 实时聚合,无需手动重算。
+ * ⑦ 状态 PENDING→APPROVED,记 approverId/approvedAt/opinion,审计 approve。
+ *
+ * 安全再断言:生效后任何叶节点 currentAmount 不得低于该节点总占用(§7.4),否则 422。
+ * 事务原子:任一步抛错 → 全部回滚,状态保持 PENDING、锁不释放。
+ */
+export async function approveAdjustment(
+  adjId: string,
+  user: Pick<User, 'id' | 'role'>,
+  opinion?: string,
+): Promise<BudgetAdjustment> {
+  const adj = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    include: { lines: true },
+  });
+  if (!adj) {
+    throw new HTTPError(404, '调整单不存在');
+  }
+  await requirePermission(user, 'budget:approve', adj.projectId);
+
+  if (adj.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adj.status} 不允许审批,仅 PENDING 可审批`);
+  }
+
+  const now = new Date();
+
+  return prisma.$transaction(async (tx) => {
+    // ① 复跑约束:每行 amount>0 + SUBJECT_TRANSFER 平衡(从已落库 lines 重建)。
+    const parsedLines = adj.lines.map((l) => ({
+      ...l,
+      amount: parsePositiveAmount(l.amount.toFixed(2)),
+    }));
+    assertTransferBalanced(
+      adj.type,
+      parsedLines.map((l) => ({ direction: l.direction, amount: l.amount })),
+    );
+
+    // ② 重新校验每个 DECREASE 叶节点行的可调额度(current - occupancy)。
+    //    提交后可能新增业务记录占用 operable 额度 → 不足以审批通过(§7.5)。
+    const decreaseSubjectKeys = new Set<string>();
+    for (const line of parsedLines) {
+      if (line.direction !== LineDirection.DECREASE) continue;
+      if (line.levelType !== LevelType.SUBJECT) continue;
+      if (line.year === null || line.year === undefined || !line.subjectId) {
+        throw new HTTPError(422, '科目级调减明细缺少 year/subjectId');
+      }
+      // SUBJECT_TRANSFER 多个 DECREASE 行可能落在同一叶节点;按 (year,subjectId) 合并校验。
+      const key = `${line.year}:${line.subjectId}`;
+      decreaseSubjectKeys.add(key);
+    }
+
+    // 收集每个 DECREASE 叶节点合计 + 重新校验可调额度。
+    const decreaseSubjectTotals = new Map<string, { year: number; subjectId: string; total: D }>();
+    for (const line of parsedLines) {
+      if (line.direction !== LineDirection.DECREASE || line.levelType !== LevelType.SUBJECT) {
+        continue;
+      }
+      const key = `${line.year}:${line.subjectId}`;
+      const prev = decreaseSubjectTotals.get(key);
+      const add = line.amount;
+      decreaseSubjectTotals.set(key, {
+        year: line.year!,
+        subjectId: line.subjectId!,
+        total: prev ? prev.total.plus(add) : add,
+      });
+    }
+
+    // ③ (lines 已存在;无新明细写入)
+
+    // ④ 应用 current_amount(先计算变更,稍后在锁校验后落地)。
+    // 按 (year, subjectId) 合并 SUBJECT 级变更(net = INCREASE - DECREASE)。
+    const subjectDeltas = new Map<string, { year: number; subjectId: string; delta: D }>();
+    const annualDeltas = new Map<number, D>();
+    let projectDelta = ZERO;
+
+    for (const line of parsedLines) {
+      const signed = line.direction === LineDirection.INCREASE ? line.amount : line.amount.neg();
+      if (line.levelType === LevelType.PROJECT) {
+        projectDelta = projectDelta.plus(signed);
+      } else if (line.levelType === LevelType.ANNUAL) {
+        if (line.year === null || line.year === undefined) {
+          throw new HTTPError(422, '年度调减明细缺少 year');
+        }
+        annualDeltas.set(line.year, (annualDeltas.get(line.year) ?? ZERO).plus(signed));
+      } else if (line.levelType === LevelType.SUBJECT) {
+        if (line.year === null || line.year === undefined || !line.subjectId) {
+          throw new HTTPError(422, '科目级明细缺少 year/subjectId');
+        }
+        const key = `${line.year}:${line.subjectId}`;
+        const prev = subjectDeltas.get(key);
+        subjectDeltas.set(key, {
+          year: line.year,
+          subjectId: line.subjectId,
+          delta: prev ? prev.delta.plus(signed) : signed,
+        });
+      }
+    }
+
+    // ②(续)对每个 DECREASE 叶节点重新校验可调额度,422 拒。
+    for (const [, info] of decreaseSubjectTotals.entries()) {
+      const [subjectBudget, records] = await Promise.all([
+        tx.subjectBudget.findUnique({
+          where: {
+            projectId_year_subjectId: {
+              projectId: adj.projectId,
+              year: info.year,
+              subjectId: info.subjectId,
+            },
+          },
+        }),
+        tx.businessRecord.findMany({
+          where: {
+            projectId: adj.projectId,
+            budgetYear: info.year,
+            subjectId: info.subjectId,
+            isVoid: false,
+          },
+          select: { amount: true, status: true, isVoid: true },
+        }),
+      ]);
+      const currentBudget = subjectBudget ? fromStored(subjectBudget.currentAmount) : ZERO;
+      const occ = computeOccupancy({
+        records: records.map((r) => ({
+          amount: r.amount,
+          status: r.status,
+          isVoid: r.isVoid,
+        })),
+      });
+      // §7.5 可调额度 = current - occupancy(此处仍含本单锁定额,但锁定本身不影响 current,
+      // 仅占用会让 current-occupancy 收窄)。若调减额 > 可调额度 → 422。
+      const adjustable = adjustableAmount(currentBudget, occ.totalOccupied);
+      if (info.total.gt(adjustable)) {
+        throw new HTTPError(
+          422,
+          `审批时额度不足:科目可调额度 ${adjustable.toFixed(2)},本次调减 ${info.total.toFixed(2)}(§7.5)`,
+        );
+      }
+    }
+
+    // 落地 current_amount 变更。
+    // SUBJECT 级
+    for (const [, info] of subjectDeltas.entries()) {
+      if (info.delta.eq(ZERO)) continue;
+      const sb = await tx.subjectBudget.findUnique({
+        where: {
+          projectId_year_subjectId: {
+            projectId: adj.projectId,
+            year: info.year,
+            subjectId: info.subjectId,
+          },
+        },
+      });
+      if (!sb) {
+        throw new HTTPError(422, `科目 ${info.subjectId} ${info.year} 年度预算不存在`);
+      }
+      const next = fromStored(sb.currentAmount).plus(info.delta);
+      await tx.subjectBudget.update({
+        where: { id: sb.id },
+        data: { currentAmount: toStored(next) },
+      });
+    }
+    // ANNUAL 级
+    for (const [year, delta] of annualDeltas.entries()) {
+      if (delta.eq(ZERO)) continue;
+      const ab = await tx.annualBudget.findUnique({
+        where: { projectId_year: { projectId: adj.projectId, year } },
+      });
+      if (!ab) {
+        throw new HTTPError(422, `${year} 年度预算不存在`);
+      }
+      const next = fromStored(ab.currentAmount).plus(delta);
+      await tx.annualBudget.update({
+        where: { id: ab.id },
+        data: { currentAmount: toStored(next) },
+      });
+    }
+    // PROJECT_TOTAL 级
+    if (!projectDelta.eq(ZERO)) {
+      const pb = await tx.projectBudget.findUnique({ where: { projectId: adj.projectId } });
+      if (!pb) {
+        throw new HTTPError(404, '项目预算记录不存在');
+      }
+      const next = fromStored(pb.currentAmount).plus(projectDelta);
+      await tx.projectBudget.update({
+        where: { projectId: adj.projectId },
+        data: { currentAmount: toStored(next) },
+      });
+    }
+
+    // 安全再断言(§7.4):生效后任何受影响叶节点 currentAmount 不得低于该节点总占用。
+    for (const key of decreaseSubjectKeys) {
+      const [yearStr, subjectId] = key.split(':');
+      const year = Number(yearStr);
+      const [sb, records] = await Promise.all([
+        tx.subjectBudget.findUnique({
+          where: {
+            projectId_year_subjectId: { projectId: adj.projectId, year, subjectId },
+          },
+        }),
+        tx.businessRecord.findMany({
+          where: {
+            projectId: adj.projectId,
+            budgetYear: year,
+            subjectId,
+            isVoid: false,
+          },
+          select: { amount: true, status: true, isVoid: true },
+        }),
+      ]);
+      const current = sb ? fromStored(sb.currentAmount) : ZERO;
+      const occ = computeOccupancy({
+        records: records.map((r) => ({
+          amount: r.amount,
+          status: r.status,
+          isVoid: r.isVoid,
+        })),
+      });
+      if (current.lt(occ.totalOccupied)) {
+        throw new HTTPError(
+          422,
+          `生效后科目当前预算 ${current.toFixed(2)} 低于总占用 ${occ.totalOccupied.toFixed(2)}(§7.4)`,
+        );
+      }
+    }
+
+    // ⑤ 释放本单全部 budget_locks。
+    await releaseLocks(tx, adjId, now);
+
+    // ⑦ 状态 PENDING→APPROVED + 审计。
+    const updated = await tx.budgetAdjustment.update({
+      where: { id: adjId },
+      data: {
+        status: ApprovalStatus.APPROVED,
+        approverId: user.id,
+        approvedAt: now,
+      },
+    });
+
+    const trimmedOpinion = opinion?.trim() ? opinion.trim() : null;
+    await recordAudit(tx, {
+      projectId: adj.projectId,
+      objectType: 'budget_adjustments',
+      objectId: adjId,
+      action: 'approve',
+      operatorId: user.id,
+      before: snapshotAdjustment(adj),
+      after: { ...snapshotAdjustment(updated), opinion: trimmedOpinion },
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * §7.6 驳回(rejectAdjustment):PENDING → REJECTED。
+ * 释放本单锁(releasedAt=now),不改变任何 current_amount,审计 reject。
+ * 非 PENDING 抛 409;审批权按项目范围校验。
+ */
+export async function rejectAdjustment(
+  adjId: string,
+  user: Pick<User, 'id' | 'role'>,
+  opinion: string,
+): Promise<BudgetAdjustment> {
+  const adj = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    include: { lines: true },
+  });
+  if (!adj) {
+    throw new HTTPError(404, '调整单不存在');
+  }
+  await requirePermission(user, 'budget:approve', adj.projectId);
+
+  if (adj.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adj.status} 不允许驳回,仅 PENDING 可驳回`);
+  }
+
+  const trimmedOpinion = opinion?.trim() ? opinion.trim() : null;
+  const now = new Date();
+
+  return prisma.$transaction(async (tx) => {
+    await releaseLocks(tx, adjId, now);
+    const updated = await tx.budgetAdjustment.update({
+      where: { id: adjId },
+      data: {
+        status: ApprovalStatus.REJECTED,
+        approverId: user.id,
+        approvedAt: now,
+      },
+    });
+    await recordAudit(tx, {
+      projectId: adj.projectId,
+      objectType: 'budget_adjustments',
+      objectId: adjId,
+      action: 'reject',
+      operatorId: user.id,
+      before: snapshotAdjustment(adj),
+      after: { ...snapshotAdjustment(updated), opinion: trimmedOpinion },
+    });
+    return updated;
+  });
+}
+
+/**
+ * §7 撤回(withdrawAdjustment):PENDING → DRAFT(回到草稿可继续修改)。
+ * 申请人可撤回;释放本单锁(releasedAt=now),审计 withdraw。
+ * 非 PENDING 抛 409。
+ */
+export async function withdrawAdjustment(
+  adjId: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<BudgetAdjustment> {
+  const adj = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    include: { lines: true },
+  });
+  if (!adj) {
+    throw new HTTPError(404, '调整单不存在');
+  }
+  // 申请人撤回:有项目调整权即可(与发起调整同一权限)。
+  await requirePermission(user, 'budget:adjust', adj.projectId);
+
+  if (adj.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adj.status} 不允许撤回,仅 PENDING 可撤回`);
+  }
+
+  const now = new Date();
+
+  return prisma.$transaction(async (tx) => {
+    await releaseLocks(tx, adjId, now);
+    const updated = await tx.budgetAdjustment.update({
+      where: { id: adjId },
+      data: { status: ApprovalStatus.DRAFT },
+    });
+    await recordAudit(tx, {
+      projectId: adj.projectId,
+      objectType: 'budget_adjustments',
+      objectId: adjId,
+      action: 'withdraw',
+      operatorId: user.id,
+      before: snapshotAdjustment(adj),
+      after: snapshotAdjustment(updated),
+    });
+    return updated;
+  });
+}
