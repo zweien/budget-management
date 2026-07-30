@@ -197,33 +197,59 @@ describe('subjectChange.service (integration, real PG)', () => {
     expect(sb).not.toBeNull();
   });
 
-  it('approve 时若受保护科目被使用→ 422(提交后新增业务记录触发)', async () => {
-    // 用未使用的科目 B(无业务记录但有 subject_budget)。subject_budget 存在即视为"已使用",
-    // 但 remove 操作在 create 时就已被拦截。这里改测:对 B 提交一个 remove 草稿前先清掉
-    // subject_budget 使其可用,提交后再插入 subject_budget,审批时应 422。
-    // 由于 subject_budget 在审批生效后已存在,简化为:验证 approve 复跑结构保护。
-    // 这里复用 add 测试路径,改测一个 remove B(无 subject_budget 的场景)无法在本测试构造,
-    // 改为直接断言 approve 路径:对已使用科目 A 的 remove 草稿理论上 create 即拒,
-    // 因此本用例聚焦"提交后业务记录新增导致 approve 时复跑保护"。
-    // 构造:对 ROOT(无 budget/record)做 remove 草稿(但 ROOT 有子 A/B,删除级联受保护)。
-    // 为保持测试稳定,这里仅校验 approve 对已提交的 add 草稿能正常通过(覆盖 approve 路径)。
+  it('approve 时复跑 §5.4:提交后新增 subject_budget 使科目变"已使用"→ 422', async () => {
+    // 真正的 TOCTOU:① 添加全新叶 C(无预算,可删)并审批落地 ② 发起删除 C 的变更并提交
+    // ③ 在 submit 与 approve 之间为 C 插入一条 subject_budget(使其变"已使用")
+    // ④ approve 必须复跑结构保护 → 422,且 C 仍在 DB。
     const { project } = await seedApprovedProject('approve-rerun');
-    const app = await createSubjectChange(
+
+    // ① 添加叶 C 并审批。
+    const addApp = await createSubjectChange(
       project.id,
       {
         operations: [
-          { type: 'add', newCode: 'D', newName: '叶D', newParentCode: 'ROOT', isLeaf: true },
+          { type: 'add', newCode: 'C', newName: '叶C', newParentCode: 'ROOT', isLeaf: true },
         ],
       },
       adminUser(),
     );
-    await submitSubjectChange(app.id, adminUser());
-    const approved = await approveSubjectChange(app.id, adminUser());
-    expect(approved.status).toBe(ApprovalStatus.APPROVED);
-    const d = await prisma.budgetSubject.findFirst({
-      where: { projectId: project.id, code: 'D' },
+    await submitSubjectChange(addApp.id, adminUser());
+    await approveSubjectChange(addApp.id, adminUser(), '新增 C');
+    const subjC = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, code: 'C' },
     });
-    expect(d).not.toBeNull();
+    expect(subjC).not.toBeNull();
+
+    // ② 发起删除 C 的变更并提交(create 时 C 无 subject_budget,通过结构保护)。
+    const removeApp = await createSubjectChange(
+      project.id,
+      { operations: [{ type: 'remove', subjectCode: 'C' }] },
+      adminUser(),
+    );
+    await submitSubjectChange(removeApp.id, adminUser());
+
+    // ③ 在 approve 前为 C 插入 subject_budget(模拟提交后有业务/预算占用)。
+    await prisma.subjectBudget.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        year: 2026,
+        subjectId: subjC!.id,
+        initialAmount: 0,
+        adjustmentAmount: 0,
+        currentAmount: 0,
+      },
+    });
+
+    // ④ approve 复跑 §5.4 → C 现已"已使用",删除被拒 → 422。
+    await expect(approveSubjectChange(removeApp.id, adminUser())).rejects.toMatchObject({
+      status: 422,
+    });
+    // C 仍在 DB(审批未生效)。
+    const stillThere = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, code: 'C' },
+    });
+    expect(stillThere).not.toBeNull();
   });
 
   it('非 PENDING 状态审批→ 409', async () => {
