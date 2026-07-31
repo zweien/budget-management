@@ -179,6 +179,7 @@ export default function ProjectDetailPage() {
           编制预算
         </Button>
         <Button onClick={() => router.push(`/projects/${projectId}/ledger`)}>预算执行台账</Button>
+        <Button onClick={() => router.push(`/projects/${projectId}/adjustments`)}>预算调整</Button>
         <Button type="primary" onClick={() => router.push(`/projects/${projectId}/records`)}>
           业务记录
         </Button>

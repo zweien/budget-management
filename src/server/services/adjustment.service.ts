@@ -275,6 +275,118 @@ export async function createAdjustment(
   });
 }
 
+/**
+ * §7 编辑调整草稿(仅 DRAFT 可改):重建明细行 + 更新类型/原因。
+ * 校验逻辑与 createAdjustment 一致;不涉及锁(DRAFT 无锁)。
+ */
+export async function updateDraftAdjustment(
+  adjId: string,
+  payload: AdjustmentPayload,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<BudgetAdjustment> {
+  await requirePermission(user, 'budget:adjust');
+
+  if (!payload || !Array.isArray(payload.lines) || payload.lines.length === 0) {
+    throw new HTTPError(422, '调整明细不能为空');
+  }
+  if (!ADJUSTMENT_TYPES.has(payload.type)) {
+    throw new HTTPError(422, `调整类型非法:${payload.type}`);
+  }
+
+  const parsedLines = payload.lines.map((line, i) => ({
+    ...line,
+    amount: validateLine(payload.type, line, i),
+  }));
+  assertTransferBalanced(
+    payload.type,
+    parsedLines.map((l) => ({ direction: l.direction, amount: l.amount })),
+  );
+
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
+    if (!existing) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (existing.status !== ApprovalStatus.DRAFT) {
+      throw new HTTPError(409, `仅草稿可编辑,当前状态:${existing.status}`);
+    }
+    const projectId = existing.projectId;
+
+    // SUBJECT/SUBJECT_TRANSFER 行的科目必须是该项目叶节点。
+    for (const line of parsedLines) {
+      if (line.subjectId) {
+        await requireLeafSubject(tx, projectId, line.subjectId);
+      }
+    }
+
+    const reason = payload.reason?.trim() ? payload.reason.trim() : null;
+    const updated = await tx.budgetAdjustment.update({
+      where: { id: adjId },
+      data: { type: payload.type, reason },
+    });
+
+    // 重建明细行(先删后建)。
+    await tx.budgetAdjustmentLine.deleteMany({ where: { adjustmentId: adjId } });
+    for (const line of parsedLines) {
+      await tx.budgetAdjustmentLine.create({
+        data: {
+          id: uuidv7(),
+          adjustmentId: adjId,
+          levelType: line.levelType,
+          year: line.year ?? null,
+          subjectId: line.subjectId ?? null,
+          direction: line.direction,
+          amount: toStored(line.amount),
+        },
+      });
+    }
+
+    await recordAudit(tx, {
+      projectId,
+      objectType: 'budget_adjustments',
+      objectId: adjId,
+      action: 'update',
+      operatorId: user.id,
+      before: snapshotAdjustment(existing),
+      after: snapshotAdjustment(updated),
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * §7 删除调整草稿(仅 DRAFT 可删;明细行级联清理)。
+ */
+export async function deleteDraftAdjustment(
+  adjId: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<void> {
+  await requirePermission(user, 'budget:adjust');
+
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
+    if (!existing) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (existing.status !== ApprovalStatus.DRAFT) {
+      throw new HTTPError(409, `仅草稿可删除,当前状态:${existing.status}`);
+    }
+
+    await tx.budgetAdjustmentLine.deleteMany({ where: { adjustmentId: adjId } });
+    await tx.budgetAdjustment.delete({ where: { id: adjId } });
+
+    await recordAudit(tx, {
+      projectId: existing.projectId,
+      objectType: 'budget_adjustments',
+      objectId: adjId,
+      action: 'delete',
+      operatorId: user.id,
+      before: snapshotAdjustment(existing),
+    });
+  });
+}
+
 /** 调整单 + 明细 + 锁的展开类型(getAdjustment / listAdjustments 返回)。 */
 export type AdjustmentWithRelations = Prisma.BudgetAdjustmentGetPayload<{
   include: { lines: true; locks: true };
