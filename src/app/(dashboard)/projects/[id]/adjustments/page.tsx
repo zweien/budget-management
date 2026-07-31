@@ -282,30 +282,41 @@ export default function AdjustmentsPage() {
   };
 
   /** 构建并校验 payload。 */
-  const buildPayload = (): { ok: boolean; payload?: unknown; error?: string } => {
+  /**
+   * 构建并校验 payload。
+   * @param requireBalance 是否强制双维度收支平衡(草稿=false,提交=true)。
+   *   草稿允许不平衡、允许调整额留空(留空按 0 处理),便于保存中间态。
+   */
+  const buildPayload = (
+    requireBalance: boolean,
+  ): { ok: boolean; payload?: unknown; error?: string } => {
     const valid = formLines.filter((l) => l.subjectId);
     if (valid.length === 0) {
       return { ok: false, error: '请至少选择一个科目' };
     }
-    for (const l of valid) {
-      if (l.totalAdjustment === '' || l.annualAdjustment === '') {
-        return { ok: false, error: '每行的「总预算调整额」「年度调整额」都需填写(可填 0)' };
-      }
-    }
     const sumField = (sel: 'totalAdjustment' | 'annualAdjustment') =>
       valid.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
-    const totalSum = sumField('totalAdjustment');
-    const annualSum = sumField('annualAdjustment');
-    if (Math.abs(totalSum) > 0.001) {
-      return { ok: false, error: `总预算维度调整不平衡:合计 ${totalSum.toFixed(2)} ≠ 0` };
-    }
-    if (Math.abs(annualSum) > 0.001) {
-      return { ok: false, error: `年度预算维度调整不平衡:合计 ${annualSum.toFixed(2)} ≠ 0` };
+    if (requireBalance) {
+      // 提交时:每行调整额必须明确填写(可填 0)。
+      for (const l of valid) {
+        if (l.totalAdjustment === '' || l.annualAdjustment === '') {
+          return { ok: false, error: '每行的「总预算调整额」「年度调整额」都需填写(可填 0)' };
+        }
+      }
+      const totalSum = sumField('totalAdjustment');
+      const annualSum = sumField('annualAdjustment');
+      if (Math.abs(totalSum) > 0.001) {
+        return { ok: false, error: `总预算维度调整不平衡:合计 ${totalSum.toFixed(2)} ≠ 0` };
+      }
+      if (Math.abs(annualSum) > 0.001) {
+        return { ok: false, error: `年度预算维度调整不平衡:合计 ${annualSum.toFixed(2)} ≠ 0` };
+      }
     }
     const lines = valid.map((l) => ({
       subjectId: l.subjectId,
-      totalAdjustment: Number(l.totalAdjustment).toFixed(2),
-      annualAdjustment: Number(l.annualAdjustment).toFixed(2),
+      // 草稿允许留空,按 0 落库;提交时已保证非空。
+      totalAdjustment: l.totalAdjustment === '' ? '0' : Number(l.totalAdjustment).toFixed(2),
+      annualAdjustment: l.annualAdjustment === '' ? '0' : Number(l.annualAdjustment).toFixed(2),
     }));
     return {
       ok: true,
@@ -314,7 +325,8 @@ export default function AdjustmentsPage() {
   };
 
   const handleSaveDraft = async () => {
-    const { ok, payload, error } = buildPayload();
+    // 草稿:不校验平衡,允许保存未完成的中间态。
+    const { ok, payload, error } = buildPayload(false);
     if (!ok) {
       message.warning(error);
       return;
@@ -344,7 +356,8 @@ export default function AdjustmentsPage() {
   };
 
   const handleSaveAndSubmit = async () => {
-    const { ok, payload, error } = buildPayload();
+    // 提交:强制双维度收支平衡。
+    const { ok, payload, error } = buildPayload(true);
     if (!ok) {
       message.warning(error);
       return;

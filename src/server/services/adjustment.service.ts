@@ -143,8 +143,8 @@ export async function createAdjustment(
   }
   assertValidYear(payload.year, 'year');
 
+  // 草稿允许不平衡(中间态),平衡校验推迟到提交(submitAdjustment)。
   const parsedLines = validateAndParseLines(payload);
-  assertBalanced(parsedLines);
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -219,8 +219,8 @@ export async function updateDraftAdjustment(
   }
   assertValidYear(payload.year, 'year');
 
+  // 草稿允许不平衡,平衡校验推迟到提交。
   const parsedLines = validateAndParseLines(payload);
-  assertBalanced(parsedLines);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });

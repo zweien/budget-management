@@ -156,44 +156,44 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(fromStored(lines[0].annualAdjustment).toFixed(2)).toBe('-100.00');
   });
 
-  it('createAdjustment: 总预算维度不平衡 → 422', async () => {
+  it('草稿允许不平衡:createAdjustment 总维度不平衡 → DRAFT(成功)', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('IMBTOT');
 
-    await expectHTTP(
-      () =>
-        createAdjustment(
-          project.id,
-          {
-            year: 2026,
-            lines: [
-              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
-              { subjectId: leafB.id, totalAdjustment: '50.00', annualAdjustment: '100.00' }, // 总维度 -100+50≠0
-            ],
-          },
-          adminUser(),
-        ),
-      422,
+    // 草稿是中间态,不校验平衡,允许保存。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '50.00', annualAdjustment: '100.00' }, // 总维度 -100+50≠0
+        ],
+      },
+      adminUser(),
     );
+    expect(adj.status).toBe(ApprovalStatus.DRAFT);
+
+    // 提交时才校验平衡 → 422。
+    await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
   });
 
-  it('createAdjustment: 年度维度不平衡 → 422', async () => {
+  it('草稿允许不平衡:createAdjustment 年度维度不平衡 → DRAFT,提交时 422', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('IMBANN');
 
-    await expectHTTP(
-      () =>
-        createAdjustment(
-          project.id,
-          {
-            year: 2026,
-            lines: [
-              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
-              { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '50.00' }, // 年度 -100+50≠0
-            ],
-          },
-          adminUser(),
-        ),
-      422,
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '50.00' }, // 年度 -100+50≠0
+        ],
+      },
+      adminUser(),
     );
+    expect(adj.status).toBe(ApprovalStatus.DRAFT);
+
+    await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
   });
 
   it('createAdjustment: 非叶科目 → 422', async () => {
@@ -386,7 +386,7 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(fromStored(lines[0].totalAdjustment).toFixed(2)).toBe('-200.00');
   });
 
-  it('updateDraftAdjustment: 不平衡 → 422', async () => {
+  it('updateDraftAdjustment: 草稿允许不平衡(更新成功)', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('EDITIMB');
     const adj = await createAdjustment(
       project.id,
@@ -400,21 +400,21 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       adminUser(),
     );
 
-    await expectHTTP(
-      () =>
-        updateDraftAdjustment(
-          adj.id,
-          {
-            year: 2026,
-            lines: [
-              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
-              { subjectId: leafB.id, totalAdjustment: '99.00', annualAdjustment: '100.00' },
-            ],
-          },
-          adminUser(),
-        ),
-      422,
+    // 草稿编辑允许不平衡,更新成功(平衡校验推迟到提交)。
+    const updated = await updateDraftAdjustment(
+      adj.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '99.00', annualAdjustment: '100.00' },
+        ],
+      },
+      adminUser(),
     );
+    expect(updated.status).toBe(ApprovalStatus.DRAFT);
+    // 提交时才校验平衡 → 422。
+    await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
   });
 
   it('deleteDraftAdjustment: DRAFT 删除成功(明细级联清理)', async () => {
