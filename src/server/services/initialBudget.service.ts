@@ -12,6 +12,8 @@ import { recordAudit } from '@/server/audit/interceptor';
  * - 金额统一为 decimal 字符串(JSON 传输,§global 约定)。
  * - 科目在 payload 内引用 parentCode(此时尚无 id),由 service 在事务内解析。
  * - subjectBudgets 只允许引用 isLeaf=true 的科目。
+ * - §B model:每个叶科目还可带一份跨年度「总预算」(subjectTotalBudgets)。
+ *   年度科目预算(subjectBudgets)是它的分配;分配合计 ≤ 该科目总预算(留余额允许)。
  */
 export interface InitialBudgetPayload {
   projectTotal: string;
@@ -23,7 +25,20 @@ export interface InitialBudgetPayload {
     isLeaf: boolean;
     description?: string;
   }[];
-  subjectBudgets: { year: number; subjectCode: string; amount: string }[];
+  /**
+   * §enhance 年度分配明细:金额 = quantity × unitPrice,由 service 端以
+   * decimal.js 计算为唯一真相源(client 传入的 amount 被忽略)。
+   * unit/quantity/unitPrice 三项在每次分配存在时均必填。
+   */
+  subjectBudgets: {
+    year: number;
+    subjectCode: string;
+    amount: string;
+    unit: string;
+    quantity: string;
+    unitPrice: string;
+  }[];
+  subjectTotalBudgets: { subjectCode: string; amount: string }[];
 }
 
 /** 审批/驳回/撤回流转返回结构(精简版,仅状态相关字段)。 */
@@ -59,16 +74,23 @@ export interface InitialBudgetDraftView {
     year: number;
     subjectCode: string;
     amount: string;
+    unit: string | null;
+    quantity: string | null;
+    unitPrice: string | null;
+  }[];
+  subjectTotalBudgets: {
+    subjectCode: string;
+    amount: string;
   }[];
 }
 
 /**
- * §6.4 提交校验(失败统一抛 HTTPError 422):
- * - 总预算非负
- * - 年度合计 ≤ 总预算
- * - 同年度叶节点合计 ≤ 该年度初始预算
- * - 叶节点编码项目内唯一(此处 payload 内 unique)
- * - 初始预算只允许填在叶节点
+ * §6.4 提交校验(失败统一抛 HTTPError 422)。三条独立规则:
+ *  - 规则1:Σ 叶科目总预算(subjectTotalBudgets)≤ 项目总预算(§B model NEW)
+ *  - 规则2:同年度叶节点分配合计 ≤ 该年度初始预算(原有 §6.4,保留)
+ *  - 规则3:每个叶科目跨年度分配合计 ≤ 该科目总预算(§B model NEW,留余额允许)
+ * 其余结构性校验(总预算非负、编码唯一、parentCode 合法、叶节点预算只填叶节点)
+ * 保持不变。
  */
 function validatePayload(payload: InitialBudgetPayload): void {
   const projectTotal = new D(payload.projectTotal);
@@ -88,6 +110,35 @@ function validatePayload(payload: InitialBudgetPayload): void {
         `科目 ${sb.subjectCode} 的年度 ${sb.year} 不是有效的正整数(1900~9999)`,
       );
     }
+  }
+
+  // §enhance 年度分配明细校验 + 服务端计算金额(唯一真相源)。
+  // 每条 subjectBudget 必须带 unit(非空)/quantity≥0/unitPrice≥0,
+  // amount 以 quantity × unitPrice(decimal.js)重算覆盖客户端传入值。
+  for (const sb of payload.subjectBudgets) {
+    const unit = typeof sb.unit === 'string' ? sb.unit.trim() : '';
+    if (unit === '') {
+      throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配缺少计量单位`);
+    }
+    let quantity: D;
+    let unitPrice: D;
+    try {
+      quantity = new D(sb.quantity);
+      unitPrice = new D(sb.unitPrice);
+    } catch {
+      throw new HTTPError(
+        422,
+        `科目 ${sb.subjectCode} 的 ${sb.year} 年分配 数量/单价 不是合法数字`,
+      );
+    }
+    if (!quantity.gte(ZERO)) {
+      throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配 数量不得为负`);
+    }
+    if (!unitPrice.gte(ZERO)) {
+      throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配 单价不得为负`);
+    }
+    // 覆盖金额:服务端 source of truth,忽略客户端 amount。
+    sb.amount = quantity.times(unitPrice).toFixed(2);
   }
 
   // 1) 项目初始总预算不得为负。
@@ -135,7 +186,7 @@ function validatePayload(payload: InitialBudgetPayload): void {
     throw new HTTPError(422, '各年度初始预算合计不得超过项目初始总预算');
   }
 
-  // 6) 同年度叶节点初始预算合计不得超过该年度初始预算。
+  // 6) 规则2:同年度叶节点初始预算合计不得超过该年度初始预算。
   for (const [year, annualAmount] of annualByYear.entries()) {
     const leafSum = sumAmounts(
       payload.subjectBudgets.filter((sb) => sb.year === year).map((sb) => new D(sb.amount)),
@@ -154,6 +205,49 @@ function validatePayload(payload: InitialBudgetPayload): void {
     }
     if (!new D(sb.amount).gte(ZERO)) {
       throw new HTTPError(422, `科目 ${sb.subjectCode} 的预算不得为负`);
+    }
+  }
+
+  // 7) §B model — subjectTotalBudgets 结构性校验:仅引用叶科目、金额非负、项目内唯一。
+  //    防御性:前端页面尚未传该字段时,缺省视为空数组(过渡期兼容)。
+  const totalByCode = new Map<string, D>();
+  for (const st of payload.subjectTotalBudgets ?? []) {
+    if (!leafCodes.has(st.subjectCode)) {
+      throw new HTTPError(422, `科目 ${st.subjectCode} 不是叶节点,跨年度总预算只允许填在叶节点`);
+    }
+    const amt = new D(st.amount);
+    if (!amt.gte(ZERO)) {
+      throw new HTTPError(422, `科目 ${st.subjectCode} 的跨年度总预算不得为负`);
+    }
+    if (totalByCode.has(st.subjectCode)) {
+      throw new HTTPError(422, `科目 ${st.subjectCode} 的跨年度总预算重复声明`);
+    }
+    totalByCode.set(st.subjectCode, amt);
+  }
+
+  // 8) §B model 规则1:Σ 叶科目跨年度总预算 ≤ 项目初始总预算。
+  const subjectTotalSum = sumAmounts([...totalByCode.values()]);
+  if (subjectTotalSum.gt(projectTotal)) {
+    throw new HTTPError(422, '叶科目跨年度总预算合计不得超过项目初始总预算');
+  }
+
+  // 9) §B model 规则3:每个叶科目跨年度分配合计 ≤ 该科目总预算(留余额允许)。
+  //    仅对声明了总预算的科目校验;未声明总预算的科目不约束(由调用方决定)。
+  const allocByCode = new Map<string, D>();
+  for (const sb of payload.subjectBudgets) {
+    if (!totalByCode.has(sb.subjectCode)) continue;
+    allocByCode.set(
+      sb.subjectCode,
+      (allocByCode.get(sb.subjectCode) ?? ZERO).plus(new D(sb.amount)),
+    );
+  }
+  for (const [code, total] of totalByCode.entries()) {
+    const alloc = allocByCode.get(code) ?? ZERO;
+    if (alloc.gt(total)) {
+      throw new HTTPError(
+        422,
+        `科目 ${code} 的跨年度分配合计(${alloc.toFixed(2)})超过其总预算(${total.toFixed(2)})`,
+      );
     }
   }
 }
@@ -292,7 +386,8 @@ export async function createDraft(
         });
       }
 
-      // 叶节点预算:initial = 金额,current = 0(§6.3 同上,只允许 isLeaf)。
+      // 叶节点预算:initial = 金额(current = 0,§6.3 同上,只允许 isLeaf)。
+      // §enhance:amount 已由 validatePayload 以 quantity×unitPrice 重算;同时落库明细。
       for (const sb of payload.subjectBudgets) {
         const subjectId = codeToId.get(sb.subjectCode);
         if (!subjectId) {
@@ -308,11 +403,46 @@ export async function createDraft(
             initialAmount: toStored(amt),
             adjustmentAmount: toStored(ZERO),
             currentAmount: toStored(ZERO),
+            unit: sb.unit,
+            quantity: toStored(new D(sb.quantity)),
+            unitPrice: toStored(new D(sb.unitPrice)),
           },
           create: {
             id: uuidv7(),
             projectId,
             year: sb.year,
+            subjectId,
+            initialAmount: toStored(amt),
+            adjustmentAmount: toStored(ZERO),
+            currentAmount: toStored(ZERO),
+            unit: sb.unit,
+            quantity: toStored(new D(sb.quantity)),
+            unitPrice: toStored(new D(sb.unitPrice)),
+          },
+        });
+      }
+
+      // §B model 叶科目跨年度总预算:initial = 总预算,current = 0(§6.3 同其他三层,
+      // 审批生效才置位)。仅对声明了总预算的叶科目落库,一行一科目。
+      // 缺省视为空数组(前端页面过渡期兼容)。
+      for (const st of payload.subjectTotalBudgets ?? []) {
+        const subjectId = codeToId.get(st.subjectCode);
+        if (!subjectId) {
+          throw new HTTPError(422, `科目 ${st.subjectCode} 不存在`);
+        }
+        const amt = new D(st.amount);
+        await tx.subjectTotalBudget.upsert({
+          where: {
+            projectId_subjectId: { projectId, subjectId },
+          },
+          update: {
+            initialAmount: toStored(amt),
+            adjustmentAmount: toStored(ZERO),
+            currentAmount: toStored(ZERO),
+          },
+          create: {
+            id: uuidv7(),
+            projectId,
             subjectId,
             initialAmount: toStored(amt),
             adjustmentAmount: toStored(ZERO),
@@ -385,7 +515,9 @@ export async function updateDraft(
   const projectTotal = fromStored(payload.projectTotal);
 
   await prisma.$transaction(async (tx) => {
-    // 清空旧编制数据(subjects 级联带走 subject_budgets;同时清 annual_budgets 草稿值)。
+    // 清空旧编制数据(subjects 级联带走 subject_budgets / subject_total_budgets;
+    // 同时清 annual_budgets 草稿值)。
+    await tx.subjectTotalBudget.deleteMany({ where: { projectId } });
     await tx.subjectBudget.deleteMany({ where: { projectId } });
     await tx.budgetSubject.deleteMany({ where: { projectId } });
     await tx.annualBudget.deleteMany({ where: { projectId } });
@@ -432,6 +564,7 @@ export async function updateDraft(
     for (const sb of payload.subjectBudgets) {
       const subjectId = codeToId.get(sb.subjectCode);
       if (!subjectId) throw new HTTPError(422, `科目 ${sb.subjectCode} 不存在`);
+      // §enhance:amount 已由 validatePayload 以 quantity×unitPrice 重算;同时落库明细。
       await tx.subjectBudget.create({
         data: {
           id: uuidv7(),
@@ -439,6 +572,25 @@ export async function updateDraft(
           year: sb.year,
           subjectId,
           initialAmount: toStored(fromStored(sb.amount)),
+          adjustmentAmount: toStored(ZERO),
+          currentAmount: toStored(ZERO),
+          unit: sb.unit,
+          quantity: toStored(new D(sb.quantity)),
+          unitPrice: toStored(new D(sb.unitPrice)),
+        },
+      });
+    }
+    // §B model:重建叶科目跨年度总预算(current 保持 0,§6.3 审批前不影响)。
+    // 缺省视为空数组(前端页面过渡期兼容)。
+    for (const st of payload.subjectTotalBudgets ?? []) {
+      const subjectId = codeToId.get(st.subjectCode);
+      if (!subjectId) throw new HTTPError(422, `科目 ${st.subjectCode} 不存在`);
+      await tx.subjectTotalBudget.create({
+        data: {
+          id: uuidv7(),
+          projectId,
+          subjectId,
+          initialAmount: toStored(fromStored(st.amount)),
           adjustmentAmount: toStored(ZERO),
           currentAmount: toStored(ZERO),
         },
@@ -492,7 +644,7 @@ export async function getDraft(
     throw new HTTPError(404, '该项目尚无初始预算编制单');
   }
 
-  const [subjects, annualBudgets, subjectBudgets] = await Promise.all([
+  const [subjects, annualBudgets, subjectBudgets, subjectTotalBudgets] = await Promise.all([
     prisma.budgetSubject.findMany({
       where: { projectId },
       orderBy: { code: 'asc' },
@@ -502,6 +654,11 @@ export async function getDraft(
     prisma.subjectBudget.findMany({
       where: { projectId },
       orderBy: [{ year: 'asc' }, { subject: { code: 'asc' } }],
+      include: { subject: { select: { code: true } } },
+    }),
+    prisma.subjectTotalBudget.findMany({
+      where: { projectId },
+      orderBy: { subject: { code: 'asc' } },
       include: { subject: { select: { code: true } } },
     }),
   ]);
@@ -531,6 +688,13 @@ export async function getDraft(
       year: sb.year,
       subjectCode: sb.subject.code,
       amount: fromStored(sb.initialAmount).toFixed(2),
+      unit: sb.unit,
+      quantity: sb.quantity == null ? null : fromStored(sb.quantity).toFixed(2),
+      unitPrice: sb.unitPrice == null ? null : fromStored(sb.unitPrice).toFixed(2),
+    })),
+    subjectTotalBudgets: subjectTotalBudgets.map((st) => ({
+      subjectCode: st.subject.code,
+      amount: fromStored(st.initialAmount).toFixed(2),
     })),
   };
 }
@@ -585,18 +749,24 @@ async function rebuildPayloadFromStored(
   tx: Prisma.TransactionClient,
   projectId: string,
 ): Promise<InitialBudgetPayload> {
-  const [project, subjects, annualBudgets, subjectBudgets] = await Promise.all([
-    tx.projectBudget.findUnique({ where: { projectId } }),
-    tx.budgetSubject.findMany({
-      where: { projectId },
-      include: { parent: { select: { code: true } } },
-    }),
-    tx.annualBudget.findMany({ where: { projectId } }),
-    tx.subjectBudget.findMany({
-      where: { projectId },
-      include: { subject: { select: { code: true } } },
-    }),
-  ]);
+  const [project, subjects, annualBudgets, subjectBudgets, subjectTotalBudgets] = await Promise.all(
+    [
+      tx.projectBudget.findUnique({ where: { projectId } }),
+      tx.budgetSubject.findMany({
+        where: { projectId },
+        include: { parent: { select: { code: true } } },
+      }),
+      tx.annualBudget.findMany({ where: { projectId } }),
+      tx.subjectBudget.findMany({
+        where: { projectId },
+        include: { subject: { select: { code: true } } },
+      }),
+      tx.subjectTotalBudget.findMany({
+        where: { projectId },
+        include: { subject: { select: { code: true } } },
+      }),
+    ],
+  );
 
   if (!project) {
     throw new HTTPError(404, '项目预算记录不存在');
@@ -617,10 +787,27 @@ async function rebuildPayloadFromStored(
       isLeaf: s.isLeaf,
       description: s.description ?? undefined,
     })),
-    subjectBudgets: subjectBudgets.map((sb) => ({
-      year: sb.year,
-      subjectCode: subjectIdToCode.get(sb.subjectId) ?? sb.subject.code,
-      amount: fromStored(sb.initialAmount).toFixed(2),
+    subjectBudgets: subjectBudgets.map((sb) => {
+      // §enhance:重新校验需要 unit/quantity/unitPrice。存量行可能为 null —— 此时
+      // 退化为按 initialAmount 反推(数量=金额,单价=1,单位=空会被校验拒绝);
+      // 但所有由本 service 写入的行均带明细,此分支仅为防御性兼容。
+      const qtyStr =
+        sb.quantity == null
+          ? fromStored(sb.initialAmount).toFixed(2)
+          : fromStored(sb.quantity).toFixed(2);
+      const priceStr = sb.unitPrice == null ? '1.00' : fromStored(sb.unitPrice).toFixed(2);
+      return {
+        year: sb.year,
+        subjectCode: subjectIdToCode.get(sb.subjectId) ?? sb.subject.code,
+        amount: fromStored(sb.initialAmount).toFixed(2),
+        unit: sb.unit ?? '',
+        quantity: qtyStr,
+        unitPrice: priceStr,
+      };
+    }),
+    subjectTotalBudgets: subjectTotalBudgets.map((st) => ({
+      subjectCode: subjectIdToCode.get(st.subjectId) ?? st.subject.code,
+      amount: fromStored(st.initialAmount).toFixed(2),
     })),
   };
 }
@@ -695,7 +882,18 @@ export async function approveApplication(
       });
     }
 
-    // 4) application 状态流转 + 审批人/时间/意见。
+    // 4) §B model subject_total_budgets:每行 current ← initial(整体生效,§6.3)。
+    const totalBudgets = await tx.subjectTotalBudget.findMany({
+      where: { projectId: app.projectId },
+    });
+    for (const st of totalBudgets) {
+      await tx.subjectTotalBudget.update({
+        where: { id: st.id },
+        data: { currentAmount: toStored(fromStored(st.initialAmount)) },
+      });
+    }
+
+    // 5) application 状态流转 + 审批人/时间/意见。
     const after = await tx.initialBudgetApplication.update({
       where: { id: appId },
       data: {

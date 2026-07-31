@@ -17,6 +17,7 @@ import { getProjectLedger } from '@/server/services/ledger.service';
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
   await prisma.businessRecord.deleteMany({ where: { projectId } }).catch(() => {});
+  await prisma.subjectTotalBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.annualBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
@@ -41,8 +42,27 @@ function validPayload(): InitialBudgetPayload {
       { code: 'B', name: '叶B', parentCode: 'ROOT', isLeaf: true },
     ],
     subjectBudgets: [
-      { year: 2026, subjectCode: 'A', amount: '600.00' },
-      { year: 2026, subjectCode: 'B', amount: '400.00' },
+      // §enhance3:金额 = 数量 × 单价(service 端重算)。A 6×100=600;B 4×100=400。
+      {
+        year: 2026,
+        subjectCode: 'A',
+        amount: '600.00',
+        unit: '次',
+        quantity: '6.00',
+        unitPrice: '100.00',
+      },
+      {
+        year: 2026,
+        subjectCode: 'B',
+        amount: '400.00',
+        unit: '次',
+        quantity: '4.00',
+        unitPrice: '100.00',
+      },
+    ],
+    subjectTotalBudgets: [
+      { subjectCode: 'A', amount: '600.00' },
+      { subjectCode: 'B', amount: '400.00' },
     ],
   };
 }
@@ -328,9 +348,37 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
         { code: 'C', name: '叶C', parentCode: 'ROOT', isLeaf: true },
       ],
       subjectBudgets: [
-        { year: 2026, subjectCode: 'A', amount: '300.00' },
-        { year: 2026, subjectCode: 'B', amount: '200.00' },
-        { year: 2026, subjectCode: 'C', amount: '100.00' },
+        // §enhance3:金额 = 数量 × 单价(service 端重算)。
+        // A 3×100=300;B 2×100=200;C 1×100=100。
+        {
+          year: 2026,
+          subjectCode: 'A',
+          amount: '300.00',
+          unit: '次',
+          quantity: '3.00',
+          unitPrice: '100.00',
+        },
+        {
+          year: 2026,
+          subjectCode: 'B',
+          amount: '200.00',
+          unit: '次',
+          quantity: '2.00',
+          unitPrice: '100.00',
+        },
+        {
+          year: 2026,
+          subjectCode: 'C',
+          amount: '100.00',
+          unit: '次',
+          quantity: '1.00',
+          unitPrice: '100.00',
+        },
+      ],
+      subjectTotalBudgets: [
+        { subjectCode: 'A', amount: '300.00' },
+        { subjectCode: 'B', amount: '200.00' },
+        { subjectCode: 'C', amount: '100.00' },
       ],
     };
     const { appId } = await createDraft(project.id, payload, {

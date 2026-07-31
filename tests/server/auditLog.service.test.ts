@@ -14,6 +14,7 @@ const cleanupProject = async (projectId: string) => {
     .deleteMany({ where: { businessRecord: { projectId } } })
     .catch(() => {});
   await prisma.businessRecord.deleteMany({ where: { projectId } }).catch(() => {});
+  await prisma.subjectTotalBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.annualBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
