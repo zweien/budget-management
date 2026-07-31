@@ -16,6 +16,7 @@ export interface LedgerNode {
   initial: string;
   adjustment: string;
   current: string;
+  totalCurrent: string;
   paid: string;
   payable: string;
   totalOccupied: string;
@@ -91,6 +92,8 @@ export function BudgetTreeTable({ nodes }: Props) {
     { title: '初始预算', dataIndex: 'initial', key: 'initial', render: rightMoney },
     { title: '预算调整', dataIndex: 'adjustment', key: 'adjustment', render: rightMoney },
     { title: '当前预算', dataIndex: 'current', key: 'current', render: rightMoney },
+    // 科目总预算(跨年度,SubjectTotalBudget):反映总预算维度的调整。
+    { title: '科目总预算', dataIndex: 'totalCurrent', key: 'totalCurrent', render: rightMoney },
     { title: '已支出', dataIndex: 'paid', key: 'paid', render: rightMoney },
     { title: '应付未付', dataIndex: 'payable', key: 'payable', render: rightMoney },
     { title: '总占用', dataIndex: 'totalOccupied', key: 'totalOccupied', render: rightMoney },

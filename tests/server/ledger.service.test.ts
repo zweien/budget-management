@@ -12,11 +12,21 @@ import {
 } from '@/server/services/initialBudget.service';
 import { createProject } from '@/server/services/project.service';
 import { getProjectLedger } from '@/server/services/ledger.service';
+import {
+  approveAdjustment,
+  createAdjustment,
+  submitAdjustment,
+} from '@/server/services/adjustment.service';
 
 // 集成测试直连真实 PG(:5434)。建项目 + 编制 + 审批 + 业务记录,需级联清理。
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
   await prisma.businessRecord.deleteMany({ where: { projectId } }).catch(() => {});
+  await prisma.budgetLock.deleteMany({ where: { projectId } }).catch(() => {});
+  await prisma.budgetAdjustmentLine
+    .deleteMany({ where: { adjustment: { projectId } } })
+    .catch(() => {});
+  await prisma.budgetAdjustment.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectTotalBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.annualBudget.deleteMany({ where: { projectId } }).catch(() => {});
@@ -413,5 +423,43 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
     // ROOT 含叶 A+B+C → current 600(current 不能只算直接子 MID 的 500,必须含 C 的 100)。
     expect(root.current).toBe('600.00');
     expect(root.totalOccupied).toBe('50.00');
+  });
+
+  it('科目总预算列(totalCurrent)反映总预算维度调整:仅调总预算(年度额=0)时 current 不变、totalCurrent 变化', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('TOTADJ');
+    const adminUser = { id: adminId, role: UserRole.BUDGET_ADMIN };
+
+    // 调整前:台账 totalCurrent = 初始总预算(A=600,B=400)。
+    const before = await getProjectLedger(project.id, 2026, adminUser);
+    const aBefore = before.nodes.find((n) => n.code === 'A')!;
+    const bBefore = before.nodes.find((n) => n.code === 'B')!;
+    expect(aBefore.totalCurrent).toBe('600.00');
+    expect(bBefore.totalCurrent).toBe('400.00');
+
+    // 总预算维度调整(A 总-100,B 总+100),年度维度全 0 → 收支平衡。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '0.00' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '0.00' },
+        ],
+      },
+      adminUser,
+    );
+    await submitAdjustment(adj.id, adminUser);
+    await approveAdjustment(adj.id, adminUser, '同意');
+
+    const after = await getProjectLedger(project.id, 2026, adminUser);
+    const aAfter = after.nodes.find((n) => n.code === 'A')!;
+    const bAfter = after.nodes.find((n) => n.code === 'B')!;
+
+    // 年度维度(current)不变(年度调整额为 0)。
+    expect(aAfter.current).toBe('600.00');
+    expect(bAfter.current).toBe('400.00');
+    // 总预算维度(totalCurrent)变化:A 600→500,B 400→500。
+    expect(aAfter.totalCurrent).toBe('500.00');
+    expect(bAfter.totalCurrent).toBe('500.00');
   });
 });

@@ -20,6 +20,8 @@ export interface LedgerNode {
   initial: string;
   adjustment: string;
   current: string;
+  /** 科目总预算当前值(SubjectTotalBudget.currentAmount,跨年度;父节点上卷)。 */
+  totalCurrent: string;
   paid: string;
   payable: string;
   totalOccupied: string;
@@ -48,14 +50,17 @@ export async function getProjectLedger(
 ): Promise<ProjectLedger> {
   await requirePermission(user, 'project:view', projectId);
 
-  // 1) 科目树(全部,按编制顺序排序)+ 该年度 subject_budgets + 该年度非作废 business_records。
-  const [subjects, subjectBudgets, records] = await Promise.all([
+  // 1) 科目树(全部,按编制顺序排序)+ 该年度 subject_budgets + 科目总预算(B模型) + 该年度非作废 business_records。
+  const [subjects, subjectBudgets, subjectTotalBudgets, records] = await Promise.all([
     prisma.budgetSubject.findMany({
       where: { projectId },
       orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
     }),
     prisma.subjectBudget.findMany({
       where: { projectId, year },
+    }),
+    prisma.subjectTotalBudget.findMany({
+      where: { projectId },
     }),
     prisma.businessRecord.findMany({
       where: { projectId, budgetYear: year, isVoid: false },
@@ -64,6 +69,8 @@ export async function getProjectLedger(
 
   // 2) 索引:subjectId → 该年度预算(可能没有,如未编制或非叶节点)。
   const budgetBySubject = new Map(subjectBudgets.map((sb) => [sb.subjectId, sb]));
+  // 索引:subjectId → 科目总预算(跨年度,叶节点有;非叶节点上卷)。
+  const totalBudgetBySubject = new Map(subjectTotalBudgets.map((stb) => [stb.subjectId, stb]));
   // 索引:subjectId → 该科目下的非作废记录(computeOccupancy 已自检 isVoid,此处也只查了非作废)。
   const recordsBySubject = new Map<string, typeof records>();
   for (const r of records) {
@@ -84,6 +91,7 @@ export async function getProjectLedger(
     initial: D;
     adjustment: D;
     current: D;
+    totalCurrent: D;
     paid: D;
     payable: D;
     totalOccupied: D;
@@ -96,6 +104,9 @@ export async function getProjectLedger(
       const initial = sb ? fromStored(sb.initialAmount) : ZERO;
       const current = sb ? fromStored(sb.currentAmount) : ZERO;
       const adjustment = current.minus(initial);
+      // 科目总预算(叶节点取自身 SubjectTotalBudget;未编制则为 0)。
+      const stb = totalBudgetBySubject.get(s.id);
+      const totalCurrent = stb ? fromStored(stb.currentAmount) : ZERO;
       const occ = computeOccupancy({
         records: (recordsBySubject.get(s.id) ?? []).map((r) => ({
           amount: r.amount,
@@ -113,6 +124,7 @@ export async function getProjectLedger(
         initial,
         adjustment,
         current,
+        totalCurrent,
         paid: occ.paid,
         payable: occ.payable,
         totalOccupied: occ.totalOccupied,
@@ -129,6 +141,7 @@ export async function getProjectLedger(
         initial: ZERO,
         adjustment: ZERO,
         current: ZERO,
+        totalCurrent: ZERO,
         paid: ZERO,
         payable: ZERO,
         totalOccupied: ZERO,
@@ -140,13 +153,22 @@ export async function getProjectLedger(
   //    children = 直接子节点(可能非叶或叶);叶节点直接返回自身值。
   const rollup = (
     nodeId: string,
-  ): { initial: D; adjustment: D; current: D; paid: D; payable: D; totalOccupied: D } => {
+  ): {
+    initial: D;
+    adjustment: D;
+    current: D;
+    totalCurrent: D;
+    paid: D;
+    payable: D;
+    totalOccupied: D;
+  } => {
     const node = aggById.get(nodeId);
     if (!node) {
       return {
         initial: ZERO,
         adjustment: ZERO,
         current: ZERO,
+        totalCurrent: ZERO,
         paid: ZERO,
         payable: ZERO,
         totalOccupied: ZERO,
@@ -157,6 +179,7 @@ export async function getProjectLedger(
         initial: node.initial,
         adjustment: node.adjustment,
         current: node.current,
+        totalCurrent: node.totalCurrent,
         paid: node.paid,
         payable: node.payable,
         totalOccupied: node.totalOccupied,
@@ -168,6 +191,7 @@ export async function getProjectLedger(
         initial: ZERO,
         adjustment: ZERO,
         current: ZERO,
+        totalCurrent: ZERO,
         paid: ZERO,
         payable: ZERO,
         totalOccupied: ZERO,
@@ -177,6 +201,7 @@ export async function getProjectLedger(
     node.initial = sumAmounts(childResults.map((c) => c.initial));
     node.adjustment = sumAmounts(childResults.map((c) => c.adjustment));
     node.current = sumAmounts(childResults.map((c) => c.current));
+    node.totalCurrent = sumAmounts(childResults.map((c) => c.totalCurrent));
     node.paid = sumAmounts(childResults.map((c) => c.paid));
     node.payable = sumAmounts(childResults.map((c) => c.payable));
     node.totalOccupied = sumAmounts(childResults.map((c) => c.totalOccupied));
@@ -184,6 +209,7 @@ export async function getProjectLedger(
       initial: node.initial,
       adjustment: node.adjustment,
       current: node.current,
+      totalCurrent: node.totalCurrent,
       paid: node.paid,
       payable: node.payable,
       totalOccupied: node.totalOccupied,
@@ -210,6 +236,7 @@ export async function getProjectLedger(
       initial: a.initial.toFixed(2),
       adjustment: a.adjustment.toFixed(2),
       current: a.current.toFixed(2),
+      totalCurrent: a.totalCurrent.toFixed(2),
       paid: a.paid.toFixed(2),
       payable: a.payable.toFixed(2),
       totalOccupied: a.totalOccupied.toFixed(2),
