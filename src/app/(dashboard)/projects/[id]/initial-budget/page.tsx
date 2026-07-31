@@ -65,6 +65,7 @@ interface InitialBudgetDraftView {
     subjectCode: string;
     amount: string;
   }[];
+  subjectTotalBudgets: { subjectCode: string; amount: string }[];
 }
 
 /** POST create 的 payload(InitialBudgetPayload)。 */
@@ -79,6 +80,7 @@ interface InitialBudgetPayload {
     description?: string;
   }[];
   subjectBudgets: { year: number; subjectCode: string; amount: string }[];
+  subjectTotalBudgets: { subjectCode: string; amount: string }[];
 }
 
 /** 表单内一行年度预算编辑。 */
@@ -166,6 +168,8 @@ export default function InitialBudgetPage() {
   const [subjectRows, setSubjectRows] = useState<SubjectRow[]>([]);
   // subjectBudgets 以 "subjectCode|year" → amount 的形式持有。
   const [subjectAmounts, setSubjectAmounts] = useState<Record<string, string>>({});
+  // subjectTotalBudgets 以 "subjectCode" → 总预算 amount 的形式持有(叶节点跨年度总额)。
+  const [subjectTotalAmounts, setSubjectTotalAmounts] = useState<Record<string, string>>({});
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -188,6 +192,11 @@ export default function InitialBudgetPage() {
       amounts[`${sb.subjectCode}|${sb.year}`] = sb.amount;
     }
     setSubjectAmounts(amounts);
+    const totals: Record<string, string> = {};
+    for (const st of d.subjectTotalBudgets ?? []) {
+      totals[st.subjectCode] = st.amount;
+    }
+    setSubjectTotalAmounts(totals);
   }, []);
 
   /** 加载项目头 + 编制草稿(仅一次)。 */
@@ -383,6 +392,10 @@ export default function InitialBudgetPage() {
           ...(s.description ? { description: s.description } : {}),
         })),
       subjectBudgets,
+      // 叶节点总预算(跨年度);仅保留叶节点且有值的。
+      subjectTotalBudgets: Object.entries(subjectTotalAmounts)
+        .filter(([code, amt]) => leafCodes.has(code) && amt !== '' && amt !== undefined)
+        .map(([subjectCode, amount]) => ({ subjectCode, amount })),
     };
   };
 
@@ -502,6 +515,7 @@ export default function InitialBudgetPage() {
           annualBudgets={draft?.annualBudgets ?? []}
           subjects={draft?.subjects ?? []}
           subjectBudgets={draft?.subjectBudgets ?? []}
+          subjectTotalBudgets={draft?.subjectTotalBudgets}
         />
       </>
     );
@@ -530,6 +544,7 @@ export default function InitialBudgetPage() {
           annualBudgets={draft?.annualBudgets ?? []}
           subjects={draft?.subjects ?? []}
           subjectBudgets={draft?.subjectBudgets ?? []}
+          subjectTotalBudgets={draft?.subjectTotalBudgets}
         />
       </>
     );
@@ -732,6 +747,8 @@ export default function InitialBudgetPage() {
           declaredYears,
           subjectAmounts,
           setSubjectAmounts,
+          subjectTotalAmounts,
+          setSubjectTotalAmounts,
           updateSubjectRow,
           addChildSubject,
           removeSubjectRow,
@@ -772,9 +789,16 @@ interface ReadOnlyProps {
     description: string | null;
   }[];
   subjectBudgets: { year: number; subjectCode: string; amount: string }[];
+  subjectTotalBudgets?: { subjectCode: string; amount: string }[];
 }
 
-function ReadOnlyView({ projectTotal, annualBudgets, subjects, subjectBudgets }: ReadOnlyProps) {
+function ReadOnlyView({
+  projectTotal,
+  annualBudgets,
+  subjects,
+  subjectBudgets,
+  subjectTotalBudgets,
+}: ReadOnlyProps) {
   const years = annualBudgets.map((a) => a.year);
   const amountFor = (code: string, year: number): string => {
     const hit = subjectBudgets.find((sb) => sb.subjectCode === code && sb.year === year);
@@ -795,6 +819,11 @@ function ReadOnlyView({ projectTotal, annualBudgets, subjects, subjectBudgets }:
     },
   }));
 
+  const totalFor = (code: string): string => {
+    const hit = subjectTotalBudgets?.find((st) => st.subjectCode === code);
+    return hit ? hit.amount : '';
+  };
+
   const columns: ColumnsType<ReadOnlyProps['subjects'][number]> = [
     { title: '编码', dataIndex: 'code', width: 120 },
     { title: '名称', dataIndex: 'name' },
@@ -809,6 +838,17 @@ function ReadOnlyView({ projectTotal, annualBudgets, subjects, subjectBudgets }:
       dataIndex: 'isLeaf',
       width: 90,
       render: (v: boolean) => (v ? <Tag color="blue">叶</Tag> : <Tag>非叶</Tag>),
+    },
+    {
+      title: '总预算',
+      key: 'subject-total',
+      width: 130,
+      align: 'right',
+      render: (_: unknown, row: ReadOnlyProps['subjects'][number]) => {
+        if (!row.isLeaf) return <Text type="secondary">—</Text>;
+        const t = totalFor(row.code);
+        return t ? <Text>{t}</Text> : <Text type="secondary">—</Text>;
+      },
     },
     ...dynamicYearCols,
   ];
@@ -859,6 +899,9 @@ interface SubjectColumnsArgs {
   declaredYears: number[];
   subjectAmounts: Record<string, string>;
   setSubjectAmounts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  /** 叶节点跨年度总预算:subjectCode → amount。 */
+  subjectTotalAmounts: Record<string, string>;
+  setSubjectTotalAmounts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   updateSubjectRow: (key: string, patch: Partial<SubjectRow>) => void;
   /** 在指定 key 的行下新增子节点。 */
   addChildSubject: (parentKey: string) => void;
@@ -875,6 +918,8 @@ function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectTreeN
     declaredYears,
     subjectAmounts,
     setSubjectAmounts,
+    subjectTotalAmounts,
+    setSubjectTotalAmounts,
     updateSubjectRow,
     addChildSubject,
     removeSubjectRow,
@@ -936,6 +981,39 @@ function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectTreeN
         ) : (
           row.name
         ),
+    },
+    {
+      // 科目总预算(跨年度):叶节点可填,非叶节点显示"非叶节点不可编制"。
+      title: '总预算',
+      key: 'subject-total',
+      width: 150,
+      align: 'right',
+      render: (_: unknown, row: SubjectTreeNode) => {
+        if (!editable) {
+          const t = subjectTotalAmounts[row.code];
+          return t ? <Text>{t}</Text> : <Text type="secondary">—</Text>;
+        }
+        if (!isLeafRow(row)) {
+          return <Text type="secondary">非叶节点不可编制</Text>;
+        }
+        return (
+          <AmountInput
+            value={subjectTotalAmounts[row.code] || undefined}
+            onChange={(v) =>
+              setSubjectTotalAmounts((prev) => {
+                const next = { ...prev };
+                if (v === undefined || v === '') {
+                  delete next[row.code];
+                } else {
+                  next[row.code] = v;
+                }
+                return next;
+              })
+            }
+            style={{ width: 140 }}
+          />
+        );
+      },
     },
     ...dynamicYearCols,
   ];
