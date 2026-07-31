@@ -54,8 +54,23 @@ function validPayload(): InitialBudgetPayload {
       { code: 'B', name: '叶B', parentCode: 'ROOT', isLeaf: true },
     ],
     subjectBudgets: [
-      { year: 2026, subjectCode: 'A', amount: '600.00' },
-      { year: 2026, subjectCode: 'B', amount: '400.00' },
+      // §enhance3:金额 = 数量 × 单价(service 端重算)。A 6×100=600;B 4×100=400。
+      {
+        year: 2026,
+        subjectCode: 'A',
+        amount: '600.00',
+        unit: '次',
+        quantity: '6.00',
+        unitPrice: '100.00',
+      },
+      {
+        year: 2026,
+        subjectCode: 'B',
+        amount: '400.00',
+        unit: '次',
+        quantity: '4.00',
+        unitPrice: '100.00',
+      },
     ],
     subjectTotalBudgets: [
       { subjectCode: 'A', amount: '600.00' },

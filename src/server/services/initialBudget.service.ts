@@ -25,7 +25,19 @@ export interface InitialBudgetPayload {
     isLeaf: boolean;
     description?: string;
   }[];
-  subjectBudgets: { year: number; subjectCode: string; amount: string }[];
+  /**
+   * §enhance 年度分配明细:金额 = quantity × unitPrice,由 service 端以
+   * decimal.js 计算为唯一真相源(client 传入的 amount 被忽略)。
+   * unit/quantity/unitPrice 三项在每次分配存在时均必填。
+   */
+  subjectBudgets: {
+    year: number;
+    subjectCode: string;
+    amount: string;
+    unit: string;
+    quantity: string;
+    unitPrice: string;
+  }[];
   subjectTotalBudgets: { subjectCode: string; amount: string }[];
 }
 
@@ -62,6 +74,9 @@ export interface InitialBudgetDraftView {
     year: number;
     subjectCode: string;
     amount: string;
+    unit: string | null;
+    quantity: string | null;
+    unitPrice: string | null;
   }[];
   subjectTotalBudgets: {
     subjectCode: string;
@@ -95,6 +110,35 @@ function validatePayload(payload: InitialBudgetPayload): void {
         `科目 ${sb.subjectCode} 的年度 ${sb.year} 不是有效的正整数(1900~9999)`,
       );
     }
+  }
+
+  // §enhance 年度分配明细校验 + 服务端计算金额(唯一真相源)。
+  // 每条 subjectBudget 必须带 unit(非空)/quantity≥0/unitPrice≥0,
+  // amount 以 quantity × unitPrice(decimal.js)重算覆盖客户端传入值。
+  for (const sb of payload.subjectBudgets) {
+    const unit = typeof sb.unit === 'string' ? sb.unit.trim() : '';
+    if (unit === '') {
+      throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配缺少计量单位`);
+    }
+    let quantity: D;
+    let unitPrice: D;
+    try {
+      quantity = new D(sb.quantity);
+      unitPrice = new D(sb.unitPrice);
+    } catch {
+      throw new HTTPError(
+        422,
+        `科目 ${sb.subjectCode} 的 ${sb.year} 年分配 数量/单价 不是合法数字`,
+      );
+    }
+    if (!quantity.gte(ZERO)) {
+      throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配 数量不得为负`);
+    }
+    if (!unitPrice.gte(ZERO)) {
+      throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配 单价不得为负`);
+    }
+    // 覆盖金额:服务端 source of truth,忽略客户端 amount。
+    sb.amount = quantity.times(unitPrice).toFixed(2);
   }
 
   // 1) 项目初始总预算不得为负。
@@ -342,7 +386,8 @@ export async function createDraft(
         });
       }
 
-      // 叶节点预算:initial = 金额,current = 0(§6.3 同上,只允许 isLeaf)。
+      // 叶节点预算:initial = 金额(current = 0,§6.3 同上,只允许 isLeaf)。
+      // §enhance:amount 已由 validatePayload 以 quantity×unitPrice 重算;同时落库明细。
       for (const sb of payload.subjectBudgets) {
         const subjectId = codeToId.get(sb.subjectCode);
         if (!subjectId) {
@@ -358,6 +403,9 @@ export async function createDraft(
             initialAmount: toStored(amt),
             adjustmentAmount: toStored(ZERO),
             currentAmount: toStored(ZERO),
+            unit: sb.unit,
+            quantity: toStored(new D(sb.quantity)),
+            unitPrice: toStored(new D(sb.unitPrice)),
           },
           create: {
             id: uuidv7(),
@@ -367,6 +415,9 @@ export async function createDraft(
             initialAmount: toStored(amt),
             adjustmentAmount: toStored(ZERO),
             currentAmount: toStored(ZERO),
+            unit: sb.unit,
+            quantity: toStored(new D(sb.quantity)),
+            unitPrice: toStored(new D(sb.unitPrice)),
           },
         });
       }
@@ -513,6 +564,7 @@ export async function updateDraft(
     for (const sb of payload.subjectBudgets) {
       const subjectId = codeToId.get(sb.subjectCode);
       if (!subjectId) throw new HTTPError(422, `科目 ${sb.subjectCode} 不存在`);
+      // §enhance:amount 已由 validatePayload 以 quantity×unitPrice 重算;同时落库明细。
       await tx.subjectBudget.create({
         data: {
           id: uuidv7(),
@@ -522,6 +574,9 @@ export async function updateDraft(
           initialAmount: toStored(fromStored(sb.amount)),
           adjustmentAmount: toStored(ZERO),
           currentAmount: toStored(ZERO),
+          unit: sb.unit,
+          quantity: toStored(new D(sb.quantity)),
+          unitPrice: toStored(new D(sb.unitPrice)),
         },
       });
     }
@@ -633,6 +688,9 @@ export async function getDraft(
       year: sb.year,
       subjectCode: sb.subject.code,
       amount: fromStored(sb.initialAmount).toFixed(2),
+      unit: sb.unit,
+      quantity: sb.quantity == null ? null : fromStored(sb.quantity).toFixed(2),
+      unitPrice: sb.unitPrice == null ? null : fromStored(sb.unitPrice).toFixed(2),
     })),
     subjectTotalBudgets: subjectTotalBudgets.map((st) => ({
       subjectCode: st.subject.code,
@@ -729,11 +787,24 @@ async function rebuildPayloadFromStored(
       isLeaf: s.isLeaf,
       description: s.description ?? undefined,
     })),
-    subjectBudgets: subjectBudgets.map((sb) => ({
-      year: sb.year,
-      subjectCode: subjectIdToCode.get(sb.subjectId) ?? sb.subject.code,
-      amount: fromStored(sb.initialAmount).toFixed(2),
-    })),
+    subjectBudgets: subjectBudgets.map((sb) => {
+      // §enhance:重新校验需要 unit/quantity/unitPrice。存量行可能为 null —— 此时
+      // 退化为按 initialAmount 反推(数量=金额,单价=1,单位=空会被校验拒绝);
+      // 但所有由本 service 写入的行均带明细,此分支仅为防御性兼容。
+      const qtyStr =
+        sb.quantity == null
+          ? fromStored(sb.initialAmount).toFixed(2)
+          : fromStored(sb.quantity).toFixed(2);
+      const priceStr = sb.unitPrice == null ? '1.00' : fromStored(sb.unitPrice).toFixed(2);
+      return {
+        year: sb.year,
+        subjectCode: subjectIdToCode.get(sb.subjectId) ?? sb.subject.code,
+        amount: fromStored(sb.initialAmount).toFixed(2),
+        unit: sb.unit ?? '',
+        quantity: qtyStr,
+        unitPrice: priceStr,
+      };
+    }),
     subjectTotalBudgets: subjectTotalBudgets.map((st) => ({
       subjectCode: subjectIdToCode.get(st.subjectId) ?? st.subject.code,
       amount: fromStored(st.initialAmount).toFixed(2),

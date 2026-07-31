@@ -47,8 +47,24 @@ function twoYearPayload(opts?: { x2026?: string; x2027?: string }): InitialBudge
       { code: 'X', name: '叶X', parentCode: 'ROOT', isLeaf: true },
     ],
     subjectBudgets: [
-      { year: 2026, subjectCode: 'X', amount: opts?.x2026 ?? '500.00' },
-      { year: 2027, subjectCode: 'X', amount: opts?.x2027 ?? '500.00' },
+      // §enhance3:金额 = 数量 × 单价(service 端重算);此处令 quantity=金额、unitPrice=1,
+      // 使 qty×price 仍等于原 amount(保持本测试既有的金额语义)。
+      {
+        year: 2026,
+        subjectCode: 'X',
+        amount: opts?.x2026 ?? '500.00',
+        unit: '次',
+        quantity: opts?.x2026 ?? '500.00',
+        unitPrice: '1.00',
+      },
+      {
+        year: 2027,
+        subjectCode: 'X',
+        amount: opts?.x2027 ?? '500.00',
+        unit: '次',
+        quantity: opts?.x2027 ?? '500.00',
+        unitPrice: '1.00',
+      },
     ],
     subjectTotalBudgets: [
       // X 跨两年合计:默认 1000(留余严格等于分配;若有 opts 则两段相加)。

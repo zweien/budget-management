@@ -177,6 +177,11 @@ model SubjectBudget {
   initialAmount    Decimal  @map("initial_amount") @db.Decimal(18, 2)
   adjustmentAmount Decimal  @map("adjustment_amount") @default(0) @db.Decimal(18, 2)
   currentAmount    Decimal  @map("current_amount") @db.Decimal(18, 2)
+  // §enhance 年度分配明细:计量单位 / 数量 / 单价;金额 = quantity × unitPrice。
+  // Nullable 以兼容存量行;service 层对新编制单强制三者齐备。
+  unit             String?
+  quantity         Decimal? @map("quantity") @db.Decimal(18, 2)
+  unitPrice        Decimal? @map("unit_price") @db.Decimal(18, 2)
 
   project Project        @relation(fields: [projectId], references: [id])
   subject BudgetSubject  @relation(fields: [subjectId], references: [id])
