@@ -17,11 +17,14 @@ export interface LedgerNode {
   isLeaf: boolean;
   level: number;
   parentId: string | null;
+  /** 总预算维度(SubjectTotalBudget,跨年度):原始/调整/当前。 */
+  totalInitial: string;
+  totalAdjustment: string;
+  totalCurrent: string;
+  /** 年度预算维度(SubjectBudget):原始/调整/当前。 */
   initial: string;
   adjustment: string;
   current: string;
-  /** 科目总预算当前值(SubjectTotalBudget.currentAmount,跨年度;父节点上卷)。 */
-  totalCurrent: string;
   paid: string;
   payable: string;
   totalOccupied: string;
@@ -88,10 +91,12 @@ export async function getProjectLedger(
     isLeaf: boolean;
     level: number;
     parentId: string | null;
+    totalInitial: D;
+    totalAdjustment: D;
+    totalCurrent: D;
     initial: D;
     adjustment: D;
     current: D;
-    totalCurrent: D;
     paid: D;
     payable: D;
     totalOccupied: D;
@@ -104,8 +109,10 @@ export async function getProjectLedger(
       const initial = sb ? fromStored(sb.initialAmount) : ZERO;
       const current = sb ? fromStored(sb.currentAmount) : ZERO;
       const adjustment = current.minus(initial);
-      // 科目总预算(叶节点取自身 SubjectTotalBudget;未编制则为 0)。
+      // 科目总预算三维度(叶节点取自身 SubjectTotalBudget;未编制则为 0)。
       const stb = totalBudgetBySubject.get(s.id);
+      const totalInitial = stb ? fromStored(stb.initialAmount) : ZERO;
+      const totalAdjustment = stb ? fromStored(stb.adjustmentAmount) : ZERO;
       const totalCurrent = stb ? fromStored(stb.currentAmount) : ZERO;
       const occ = computeOccupancy({
         records: (recordsBySubject.get(s.id) ?? []).map((r) => ({
@@ -121,10 +128,12 @@ export async function getProjectLedger(
         isLeaf: true,
         level: s.level,
         parentId: s.parentId,
+        totalInitial,
+        totalAdjustment,
+        totalCurrent,
         initial,
         adjustment,
         current,
-        totalCurrent,
         paid: occ.paid,
         payable: occ.payable,
         totalOccupied: occ.totalOccupied,
@@ -138,10 +147,12 @@ export async function getProjectLedger(
         isLeaf: false,
         level: s.level,
         parentId: s.parentId,
+        totalInitial: ZERO,
+        totalAdjustment: ZERO,
+        totalCurrent: ZERO,
         initial: ZERO,
         adjustment: ZERO,
         current: ZERO,
-        totalCurrent: ZERO,
         paid: ZERO,
         payable: ZERO,
         totalOccupied: ZERO,
@@ -154,10 +165,12 @@ export async function getProjectLedger(
   const rollup = (
     nodeId: string,
   ): {
+    totalInitial: D;
+    totalAdjustment: D;
+    totalCurrent: D;
     initial: D;
     adjustment: D;
     current: D;
-    totalCurrent: D;
     paid: D;
     payable: D;
     totalOccupied: D;
@@ -165,10 +178,12 @@ export async function getProjectLedger(
     const node = aggById.get(nodeId);
     if (!node) {
       return {
+        totalInitial: ZERO,
+        totalAdjustment: ZERO,
+        totalCurrent: ZERO,
         initial: ZERO,
         adjustment: ZERO,
         current: ZERO,
-        totalCurrent: ZERO,
         paid: ZERO,
         payable: ZERO,
         totalOccupied: ZERO,
@@ -176,10 +191,12 @@ export async function getProjectLedger(
     }
     if (node.isLeaf) {
       return {
+        totalInitial: node.totalInitial,
+        totalAdjustment: node.totalAdjustment,
+        totalCurrent: node.totalCurrent,
         initial: node.initial,
         adjustment: node.adjustment,
         current: node.current,
-        totalCurrent: node.totalCurrent,
         paid: node.paid,
         payable: node.payable,
         totalOccupied: node.totalOccupied,
@@ -188,28 +205,34 @@ export async function getProjectLedger(
     const children = subjects.filter((s) => s.parentId === nodeId);
     if (children.length === 0) {
       return {
+        totalInitial: ZERO,
+        totalAdjustment: ZERO,
+        totalCurrent: ZERO,
         initial: ZERO,
         adjustment: ZERO,
         current: ZERO,
-        totalCurrent: ZERO,
         paid: ZERO,
         payable: ZERO,
         totalOccupied: ZERO,
       };
     }
     const childResults = children.map((c) => rollup(c.id));
+    node.totalInitial = sumAmounts(childResults.map((c) => c.totalInitial));
+    node.totalAdjustment = sumAmounts(childResults.map((c) => c.totalAdjustment));
+    node.totalCurrent = sumAmounts(childResults.map((c) => c.totalCurrent));
     node.initial = sumAmounts(childResults.map((c) => c.initial));
     node.adjustment = sumAmounts(childResults.map((c) => c.adjustment));
     node.current = sumAmounts(childResults.map((c) => c.current));
-    node.totalCurrent = sumAmounts(childResults.map((c) => c.totalCurrent));
     node.paid = sumAmounts(childResults.map((c) => c.paid));
     node.payable = sumAmounts(childResults.map((c) => c.payable));
     node.totalOccupied = sumAmounts(childResults.map((c) => c.totalOccupied));
     return {
+      totalInitial: node.totalInitial,
+      totalAdjustment: node.totalAdjustment,
+      totalCurrent: node.totalCurrent,
       initial: node.initial,
       adjustment: node.adjustment,
       current: node.current,
-      totalCurrent: node.totalCurrent,
       paid: node.paid,
       payable: node.payable,
       totalOccupied: node.totalOccupied,
@@ -233,10 +256,12 @@ export async function getProjectLedger(
       isLeaf: a.isLeaf,
       level: a.level,
       parentId: a.parentId,
+      totalInitial: a.totalInitial.toFixed(2),
+      totalAdjustment: a.totalAdjustment.toFixed(2),
+      totalCurrent: a.totalCurrent.toFixed(2),
       initial: a.initial.toFixed(2),
       adjustment: a.adjustment.toFixed(2),
       current: a.current.toFixed(2),
-      totalCurrent: a.totalCurrent.toFixed(2),
       paid: a.paid.toFixed(2),
       payable: a.payable.toFixed(2),
       totalOccupied: a.totalOccupied.toFixed(2),
