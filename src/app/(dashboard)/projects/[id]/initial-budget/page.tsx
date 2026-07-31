@@ -9,12 +9,11 @@ import {
   InputNumber,
   Popconfirm,
   Result,
-  Select,
   Skeleton,
   Space,
-  Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -22,6 +21,7 @@ import type { ColumnsType } from 'antd/es/table';
 
 import { apiFetch } from '@/lib/api/client';
 import { AmountInput } from '@/components/ui/AmountInput';
+import { uuidv7 } from '@/lib/id';
 
 const { Title, Text } = Typography;
 
@@ -94,8 +94,15 @@ interface SubjectRow {
   code: string;
   name: string;
   parentCode: string | null;
-  isLeaf: boolean;
+  /** 不再由用户编辑;在提交时由 leafCodes 推导(无任何行把它作为父即叶)。 */
+  isLeaf?: boolean;
   description?: string;
+}
+
+/** AntD 树形 Table 的数据节点(在 SubjectRow 之上挂 children)。 */
+interface SubjectTreeNode extends SubjectRow {
+  key: string;
+  children?: SubjectTreeNode[];
 }
 
 /** 生成一个简易本地唯一 key(用于列表行的稳定 rowKey)。 */
@@ -172,7 +179,7 @@ export default function InitialBudgetPage() {
         code: s.code,
         name: s.name,
         parentCode: s.parentCode,
-        isLeaf: s.isLeaf,
+        // isLeaf 不再持久化到行:提交时由 leafCodes 推导。
         description: s.description ?? undefined,
       })),
     );
@@ -236,18 +243,35 @@ export default function InitialBudgetPage() {
   const updateAnnualRow = (key: string, patch: Partial<AnnualRow>) =>
     setAnnualRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
-  // ====== 科目编辑 ======
-  const addSubjectRow = () => {
-    setSubjectRows((rs) => [
-      ...rs,
-      { key: genKey(), code: '', name: '', parentCode: null, isLeaf: true },
-    ]);
+  // ====== 科目编辑(树形) ======
+  /** 新增根科目:code 用 UUIDv7 自动生成,父为空。 */
+  const addRootSubject = () => {
+    setSubjectRows((rs) => [...rs, { key: genKey(), code: uuidv7(), name: '', parentCode: null }]);
   };
-  const removeSubjectRow = (key: string) => setSubjectRows((rs) => rs.filter((r) => r.key !== key));
+  /** 在指定行下新增子科目:code 用 UUIDv7,parentCode 指向父 code。 */
+  const addChildSubject = (parentKey: string) => {
+    setSubjectRows((rs) => {
+      const parent = rs.find((r) => r.key === parentKey);
+      if (!parent) return rs;
+      return [...rs, { key: genKey(), code: uuidv7(), name: '', parentCode: parent.code }];
+    });
+  };
+  /**
+   * 删除科目:仅允许删除没有子节点的行(由调用方禁用按钮,此处再防御一次)。
+   */
+  const removeSubjectRow = (key: string) =>
+    setSubjectRows((rs) => {
+      const target = rs.find((r) => r.key === key);
+      if (!target) return rs;
+      const hasChildren = rs.some((r) => r.parentCode === target.code);
+      if (hasChildren) return rs; // 有下级 → 不删(防御)。
+      return rs.filter((r) => r.key !== key);
+    });
   const updateSubjectRow = (key: string, patch: Partial<SubjectRow>) =>
     setSubjectRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
-  /** 套用预设科目模板:替换当前科目树(用户可继续增删改)。 */
+  /** 套用预设科目模板:替换当前科目树(用户可继续增删改)。
+   *  模板自带稳定 code,沿用;isLeaf 不再持久化(提交时推导)。 */
   const applyDefaultTemplate = () => {
     setSubjectRows(
       DEFAULT_SUBJECT_TEMPLATE.map((t) => ({
@@ -255,22 +279,62 @@ export default function InitialBudgetPage() {
         code: t.code,
         name: t.name,
         parentCode: t.parentCode,
-        isLeaf: t.isLeaf,
       })),
     );
     message.success(`已套用预设模板(${DEFAULT_SUBJECT_TEMPLATE.length} 个科目),可在其上继续编辑`);
   };
 
-  const subjectCodeOptions = useMemo(
-    () =>
-      subjectRows.map((s) => ({
-        label: s.code ? `${s.code} ${s.name}` : '(空编码)',
-        value: s.code,
-      })),
-    [subjectRows],
-  );
-
   const declaredYears = useMemo(() => annualRows.map((r) => r.year), [annualRows]);
+
+  /**
+   * 叶节点集合(COMPUTED):一个 code 是叶 ⟺ 没有任何行把它作为 parentCode。
+   * 这是判定"金额单元格是否可编辑"的唯一真相源(取代了原 isLeaf Switch)。
+   */
+  const leafCodes = useMemo(() => {
+    const parentCodes = new Set<string>();
+    for (const r of subjectRows) {
+      if (r.parentCode) parentCodes.add(r.parentCode);
+    }
+    const leaves = new Set<string>();
+    for (const r of subjectRows) {
+      if (r.code && !parentCodes.has(r.code)) leaves.add(r.code);
+    }
+    return leaves;
+  }, [subjectRows]);
+
+  /** code → 是否有子节点(用于禁用"删除"按钮)。 */
+  const hasChildrenByCode = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const r of subjectRows) {
+      if (r.parentCode) m.set(r.parentCode, true);
+    }
+    return m;
+  }, [subjectRows]);
+
+  const isLeafRow = useCallback((row: SubjectRow) => leafCodes.has(row.code), [leafCodes]);
+
+  /**
+   * 把扁平 subjectRows 组装成 AntD Table 树形 dataSource。
+   * 根 = parentCode 为空;子按 subjectRows 的原始顺序(模板定义/用户新增顺序)追加,
+   * 不按 code 字母序重排 —— 保证模板顺序与用户预期一致(如直接费在间接费之前)。
+   */
+  const subjectTree = useMemo<SubjectTreeNode[]>(() => {
+    const byCode = new Map<string, SubjectTreeNode>();
+    subjectRows.forEach((r) => byCode.set(r.code, { ...r, key: r.key }));
+    const roots: SubjectTreeNode[] = [];
+    // 按 subjectRows 原始顺序遍历,保持插入顺序。
+    subjectRows.forEach((r) => {
+      const node = byCode.get(r.code)!;
+      if (node.parentCode && byCode.has(node.parentCode)) {
+        const parent = byCode.get(node.parentCode)!;
+        parent.children = parent.children ?? [];
+        parent.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    });
+    return roots;
+  }, [subjectRows]);
 
   /** §6.4 展示提示:年度合计对比项目总预算。 */
   const annualSum = useMemo(
@@ -282,7 +346,6 @@ export default function InitialBudgetPage() {
 
   /** 各年度叶节点合计提示。 */
   const leafSumByYear = useMemo(() => {
-    const leafCodes = new Set(subjectRows.filter((s) => s.isLeaf).map((s) => s.code));
     const m = new Map<number, number>();
     for (const [k, amt] of Object.entries(subjectAmounts)) {
       const [code, yearStr] = k.split('|');
@@ -291,12 +354,11 @@ export default function InitialBudgetPage() {
       m.set(year, (m.get(year) ?? 0) + toDisplayNumber(amt));
     }
     return m;
-  }, [subjectRows, subjectAmounts]);
+  }, [leafCodes, subjectAmounts]);
 
-  /** 组装提交 payload。 */
+  /** 组装提交 payload。isLeaf 由 leafCodes 在提交时推导。 */
   const buildPayload = (): InitialBudgetPayload => {
     // 仅保留叶子科目的预算,且仅对已声明年度。
-    const leafCodes = new Set(subjectRows.filter((s) => s.isLeaf && s.code).map((s) => s.code));
     const yearSet = new Set(declaredYears);
     const subjectBudgets: InitialBudgetPayload['subjectBudgets'] = [];
     for (const [k, amt] of Object.entries(subjectAmounts)) {
@@ -317,7 +379,7 @@ export default function InitialBudgetPage() {
           code: s.code,
           name: s.name,
           parentCode: s.parentCode,
-          isLeaf: s.isLeaf,
+          isLeaf: leafCodes.has(s.code),
           ...(s.description ? { description: s.description } : {}),
         })),
       subjectBudgets,
@@ -628,14 +690,14 @@ export default function InitialBudgetPage() {
         ]}
       />
 
-      {/* ====== 第三区:科目树 + 叶节点预算 ====== */}
+      {/* ====== 第三区:科目树 + 叶节点预算(树形可编辑表) ====== */}
       <Title level={5}>科目树与叶节点预算</Title>
       <Space size="large" style={{ marginBottom: 8 }}>
         <Text type="secondary">科目数:{subjectRows.length}</Text>
         {editable && (
           <>
-            <Button size="small" onClick={addSubjectRow}>
-              新增科目
+            <Button size="small" onClick={addRootSubject}>
+              新增根科目
             </Button>
             <Popconfirm
               title="套用预设模板"
@@ -655,22 +717,26 @@ export default function InitialBudgetPage() {
           </>
         )}
       </Space>
-      <Table<SubjectRow>
+      <Table<SubjectTreeNode>
         rowKey="key"
         size="small"
         pagination={false}
-        dataSource={subjectRows}
+        dataSource={subjectTree}
         scroll={{ x: 'max-content' }}
-        locale={{ emptyText: '暂无科目,点击「新增科目」' }}
+        locale={{ emptyText: '暂无科目,点击「新增根科目」' }}
         style={{ marginBottom: 24 }}
+        expandable={{ defaultExpandAllRows: true }}
+        childrenColumnName="children"
         columns={buildSubjectColumns({
           editable,
-          subjectCodeOptions,
           declaredYears,
           subjectAmounts,
           setSubjectAmounts,
           updateSubjectRow,
+          addChildSubject,
           removeSubjectRow,
+          isLeafRow,
+          hasChildrenByCode,
         })}
       />
 
@@ -790,36 +856,43 @@ function ReadOnlyView({ projectTotal, annualBudgets, subjects, subjectBudgets }:
 
 interface SubjectColumnsArgs {
   editable: boolean;
-  subjectCodeOptions: { label: string; value: string }[];
   declaredYears: number[];
   subjectAmounts: Record<string, string>;
   setSubjectAmounts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   updateSubjectRow: (key: string, patch: Partial<SubjectRow>) => void;
+  /** 在指定 key 的行下新增子节点。 */
+  addChildSubject: (parentKey: string) => void;
   removeSubjectRow: (key: string) => void;
+  /** 推导叶节点判定:code 不被任何行作为 parentCode。 */
+  isLeafRow: (row: SubjectRow) => boolean;
+  /** code → 是否存在子节点(用于禁用删除)。 */
+  hasChildrenByCode: Map<string, boolean>;
 }
 
-function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectRow> {
+function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectTreeNode> {
   const {
     editable,
-    subjectCodeOptions,
     declaredYears,
     subjectAmounts,
     setSubjectAmounts,
     updateSubjectRow,
+    addChildSubject,
     removeSubjectRow,
+    isLeafRow,
+    hasChildrenByCode,
   } = args;
 
-  const dynamicYearCols: ColumnsType<SubjectRow> = declaredYears.map((y) => ({
+  const dynamicYearCols: ColumnsType<SubjectTreeNode> = declaredYears.map((y) => ({
     title: `${y}`,
     key: `year-${y}`,
     width: 150,
     align: 'right',
-    render: (_: unknown, row: SubjectRow) => {
+    render: (_: unknown, row: SubjectTreeNode) => {
       if (!editable) {
         const a = subjectAmounts[`${row.code}|${y}`];
         return a ? <Text>{a}</Text> : <Text type="secondary">—</Text>;
       }
-      if (!row.isLeaf) {
+      if (!isLeafRow(row)) {
         return <Text type="secondary">非叶节点不可编制</Text>;
       }
       return (
@@ -842,72 +915,26 @@ function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectRow> 
     },
   }));
 
-  const base: ColumnsType<SubjectRow> = [
+  const base: ColumnsType<SubjectTreeNode> = [
     {
-      title: '编码',
-      dataIndex: 'code',
-      width: 140,
-      render: (_: unknown, row: SubjectRow) =>
-        editable ? (
-          <Input
-            value={row.code}
-            onChange={(e) => updateSubjectRow(row.key, { code: e.target.value })}
-            placeholder="如 101"
-          />
-        ) : (
-          <Text style={{ fontFamily: 'monospace' }}>{row.code}</Text>
-        ),
-    },
-    {
+      // 名称列即树形首列:AntD 会在该列按层级缩进并显示展开箭头
+      // (childrenColumnName="children" + expandable)。
+      // 用 flex 行布局,让 AntD 注入的展开箭头与名称输入框在同一行(不换行)。
       title: '名称',
       dataIndex: 'name',
-      render: (_: unknown, row: SubjectRow) =>
+      render: (_: unknown, row: SubjectTreeNode) =>
         editable ? (
-          <Input
-            value={row.name}
-            onChange={(e) => updateSubjectRow(row.key, { name: e.target.value })}
-            placeholder="如 人员经费"
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Input
+              value={row.name}
+              onChange={(e) => updateSubjectRow(row.key, { name: e.target.value })}
+              placeholder="如 设备购置费"
+              size="small"
+              style={{ flex: 1, minWidth: 120 }}
+            />
+          </div>
         ) : (
           row.name
-        ),
-    },
-    {
-      title: '父科目',
-      dataIndex: 'parentCode',
-      width: 220,
-      render: (_: unknown, row: SubjectRow) =>
-        editable ? (
-          <Select<string | null>
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            placeholder="选择父科目(根科目留空)"
-            value={row.parentCode ?? undefined}
-            onChange={(v) => updateSubjectRow(row.key, { parentCode: v ?? null })}
-            options={subjectCodeOptions.filter((o) => o.value && o.value !== row.code)}
-            style={{ width: '100%' }}
-          />
-        ) : row.parentCode ? (
-          <Text style={{ fontFamily: 'monospace' }}>{row.parentCode}</Text>
-        ) : (
-          <Text type="secondary">(根)</Text>
-        ),
-    },
-    {
-      title: '叶节点',
-      dataIndex: 'isLeaf',
-      width: 100,
-      render: (v: boolean, row: SubjectRow) =>
-        editable ? (
-          <Switch
-            checked={row.isLeaf}
-            onChange={(checked) => updateSubjectRow(row.key, { isLeaf: checked })}
-          />
-        ) : v ? (
-          <Tag color="blue">叶</Tag>
-        ) : (
-          <Tag>非叶</Tag>
         ),
     },
     ...dynamicYearCols,
@@ -917,15 +944,30 @@ function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectRow> 
     base.push({
       title: '操作',
       key: 'op',
-      width: 80,
+      width: 180,
       fixed: 'right',
-      render: (_: unknown, row: SubjectRow) => (
-        <Popconfirm title="删除该科目?" onConfirm={() => removeSubjectRow(row.key)}>
-          <Button size="small" type="link" danger>
-            删除
-          </Button>
-        </Popconfirm>
-      ),
+      render: (_: unknown, row: SubjectTreeNode) => {
+        const hasChildren = !!hasChildrenByCode.get(row.code);
+        const deleteBtn = (
+          <Popconfirm
+            title="删除该科目?"
+            disabled={hasChildren}
+            onConfirm={() => removeSubjectRow(row.key)}
+          >
+            <Button size="small" type="link" danger disabled={hasChildren}>
+              删除
+            </Button>
+          </Popconfirm>
+        );
+        return (
+          <Space size="small">
+            <Button size="small" type="link" onClick={() => addChildSubject(row.key)}>
+              + 子节点
+            </Button>
+            {hasChildren ? <Tooltip title="请先删除下级科目">{deleteBtn}</Tooltip> : deleteBtn}
+          </Space>
+        );
+      },
     });
   }
 
