@@ -46,7 +46,7 @@ interface InitialBudgetPending {
 interface AdjustmentPending {
   id: string;
   projectId: string;
-  type: string;
+  year: number;
   status: string;
   reason: string | null;
   applicantId: string;
@@ -87,13 +87,6 @@ const formatDateTime = (s: string | null): string => {
   if (!s) return '—';
   const d = dayjs(s);
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—';
-};
-
-const TYPE_LABEL: Record<string, string> = {
-  PROJECT_TOTAL: '项目总额调整',
-  ANNUAL: '年度调整',
-  SUBJECT: '科目调整',
-  SUBJECT_TRANSFER: '科目调剂',
 };
 
 export default function ApprovalsPage() {
@@ -245,10 +238,10 @@ export default function ApprovalsPage() {
   const adjustmentColumns: ColumnsType<AdjustmentPending> = [
     { title: '项目', key: 'project', render: (_, r) => `${r.project.code} · ${r.project.name}` },
     {
-      title: '类型',
-      key: 'type',
-      width: 120,
-      render: (_, r) => TYPE_LABEL[r.type] ?? r.type,
+      title: '年度',
+      key: 'year',
+      width: 80,
+      render: (_, r) => `${r.year}`,
     },
     {
       title: '明细数',

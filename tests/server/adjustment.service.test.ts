@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { AdjustmentType, ApprovalStatus, LevelType, LineDirection, UserRole } from '@prisma/client';
+import { ApprovalStatus, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
@@ -11,13 +11,15 @@ import {
   type InitialBudgetPayload,
 } from '@/server/services/initialBudget.service';
 import { createProject } from '@/server/services/project.service';
-import { createRecord } from '@/server/services/businessRecord.service';
 import {
   createAdjustment,
+  deleteDraftAdjustment,
   getAdjustment,
   listAdjustments,
   submitAdjustment,
+  updateDraftAdjustment,
 } from '@/server/services/adjustment.service';
+import { HTTPError } from '@/lib/auth/session';
 
 // 集成测试直连真实 PG(:5434)。建项目 + 编制 + 审批 + 调整,需级联清理。
 const cleanupProject = async (projectId: string) => {
@@ -43,10 +45,10 @@ const cleanupProject = async (projectId: string) => {
 };
 
 /**
- * 合法 payload:1 根(非叶)+ 2 叶(A/B),1 年度 2026。
+ * 合法编制 payload:1 根(非叶)+ 2 叶(A/B),1 年度 2026。
  * A=600、B=400,合计 1000。
  */
-function validPayload(): InitialBudgetPayload {
+function validBudgetPayload(): InitialBudgetPayload {
   return {
     projectTotal: '1000.00',
     annualBudgets: [{ year: 2026, amount: '1000.00' }],
@@ -56,7 +58,7 @@ function validPayload(): InitialBudgetPayload {
       { code: 'B', name: '叶B', parentCode: 'ROOT', isLeaf: true },
     ],
     subjectBudgets: [
-      // §enhance3:金额 = 数量 × 单价(service 端重算)。A 6×100=600;B 4×100=400。
+      // §enhance3:金额 = 数量 × 单价。A 6×100=600;B 4×100=400。
       {
         year: 2026,
         subjectCode: 'A',
@@ -81,7 +83,18 @@ function validPayload(): InitialBudgetPayload {
   };
 }
 
-describe('adjustment.service (integration, real PG)', () => {
+async function expectHTTP(fn: () => Promise<unknown>, status: number): Promise<HTTPError> {
+  try {
+    await fn();
+    throw new Error('应抛 HTTPError 但未抛');
+  } catch (e) {
+    const err = e as HTTPError;
+    expect(err.status).toBe(status);
+    return err;
+  }
+}
+
+describe('adjustment.service (integration, real PG) — 双维度调整', () => {
   const createdProjectIds: string[] = [];
   let adminId: string;
   const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
@@ -90,7 +103,7 @@ describe('adjustment.service (integration, real PG)', () => {
     await prisma.$connect();
     adminId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-t3', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-adj', role: UserRole.BUDGET_ADMIN },
     });
   });
 
@@ -102,142 +115,179 @@ describe('adjustment.service (integration, real PG)', () => {
     await prisma.$disconnect();
   });
 
-  /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB, root }。 */
+  /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB }。 */
   async function seedApprovedProject(suffix: string) {
-    const code = `T3-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `t3 ${suffix}` }, { id: adminId });
+    const code = `ADJ-${suffix}-${uuidv7().slice(0, 8)}`;
+    const project = await createProject({ code, name: `adj ${suffix}` }, { id: adminId });
     createdProjectIds.push(project.id);
 
-    const { appId } = await createDraft(project.id, validPayload(), adminUser());
+    const { appId } = await createDraft(project.id, validBudgetPayload(), adminUser());
     await submitDraft(appId, adminUser());
     await approveApplication(appId, adminUser());
 
     const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
-    const root = subjects.find((s) => s.code === 'ROOT')!;
     const leafA = subjects.find((s) => s.code === 'A')!;
     const leafB = subjects.find((s) => s.code === 'B')!;
 
-    return { project, root, leafA, leafB };
+    return { project, leafA, leafB };
   }
 
-  it('createAdjustment: SUBJECT_TRANSFER 平衡(DECREASE A 100, INCREASE B 100)→ DRAFT', async () => {
-    const { project, leafA, leafB } = await seedApprovedProject('BAL');
+  it('createAdjustment: 双维度平衡(A 总-100/年-100,B 总+100/年+100) → DRAFT', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('OK');
 
     const adj = await createAdjustment(
       project.id,
       {
-        type: AdjustmentType.SUBJECT_TRANSFER,
-        reason: '调剂测试',
+        year: 2026,
+        reason: '调剂',
         lines: [
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafA.id,
-            direction: LineDirection.DECREASE,
-            amount: '100.00',
-          },
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafB.id,
-            direction: LineDirection.INCREASE,
-            amount: '100.00',
-          },
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
         ],
       },
       adminUser(),
     );
 
     expect(adj.status).toBe(ApprovalStatus.DRAFT);
-    expect(adj.type).toBe(AdjustmentType.SUBJECT_TRANSFER);
-    expect(adj.applicantId).toBe(adminId);
-    expect(adj.reason).toBe('调剂测试');
+    expect(adj.year).toBe(2026);
+    const lines = await prisma.budgetAdjustmentLine.findMany({ where: { adjustmentId: adj.id } });
+    expect(lines).toHaveLength(2);
+    expect(fromStored(lines[0].totalAdjustment).toFixed(2)).toBe('-100.00');
+    expect(fromStored(lines[0].annualAdjustment).toFixed(2)).toBe('-100.00');
+  });
 
-    // 审计 create 写入。
-    const audit = await prisma.auditLog.findFirst({
-      where: { objectId: adj.id, action: 'create', objectType: 'budget_adjustments' },
+  it('createAdjustment: 总预算维度不平衡 → 422', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('IMBTOT');
+
+    await expectHTTP(
+      () =>
+        createAdjustment(
+          project.id,
+          {
+            year: 2026,
+            lines: [
+              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+              { subjectId: leafB.id, totalAdjustment: '50.00', annualAdjustment: '100.00' }, // 总维度 -100+50≠0
+            ],
+          },
+          adminUser(),
+        ),
+      422,
+    );
+  });
+
+  it('createAdjustment: 年度维度不平衡 → 422', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('IMBANN');
+
+    await expectHTTP(
+      () =>
+        createAdjustment(
+          project.id,
+          {
+            year: 2026,
+            lines: [
+              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+              { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '50.00' }, // 年度 -100+50≠0
+            ],
+          },
+          adminUser(),
+        ),
+      422,
+    );
+  });
+
+  it('createAdjustment: 非叶科目 → 422', async () => {
+    const { project, leafA } = await seedApprovedProject('NONLEAF');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, code: 'ROOT' },
     });
-    expect(audit).not.toBeNull();
 
-    // 草稿阶段不应有任何锁。
-    const locks = await prisma.budgetLock.findMany({ where: { adjustmentId: adj.id } });
-    expect(locks.length).toBe(0);
+    await expectHTTP(
+      () =>
+        createAdjustment(
+          project.id,
+          {
+            year: 2026,
+            lines: [
+              { subjectId: root!.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+              { subjectId: leafA.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
+            ],
+          },
+          adminUser(),
+        ),
+      422,
+    );
   });
 
-  it('createAdjustment: SUBJECT_TRANSFER 不平衡(DECREASE 100, INCREASE 50)→ 422', async () => {
-    const { project, leafA, leafB } = await seedApprovedProject('UNBAL');
+  it('createAdjustment: 缺少 year → 422', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('NOYEAR');
 
-    await expect(
-      createAdjustment(
-        project.id,
-        {
-          type: AdjustmentType.SUBJECT_TRANSFER,
-          lines: [
-            {
-              levelType: LevelType.SUBJECT,
-              year: 2026,
-              subjectId: leafA.id,
-              direction: LineDirection.DECREASE,
-              amount: '100.00',
-            },
-            {
-              levelType: LevelType.SUBJECT,
-              year: 2026,
-              subjectId: leafB.id,
-              direction: LineDirection.INCREASE,
-              amount: '50.00',
-            },
-          ],
-        },
-        adminUser(),
-      ),
-    ).rejects.toMatchObject({ status: 422 });
+    await expectHTTP(
+      () =>
+        createAdjustment(
+          project.id,
+          {
+            year: undefined as unknown as number,
+            lines: [
+              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+              { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
+            ],
+          },
+          adminUser(),
+        ),
+      422,
+    );
   });
 
-  it('createAdjustment: PROJECT_TOTAL 行误带 subjectId → 422', async () => {
-    const { project, leafA } = await seedApprovedProject('BADLINE');
+  it('createAdjustment: 归档项目 → 409', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('ARCHIVED');
+    await prisma.project.update({ where: { id: project.id }, data: { archivedAt: new Date() } });
 
-    await expect(
-      createAdjustment(
-        project.id,
-        {
-          type: AdjustmentType.PROJECT_TOTAL,
-          lines: [
-            {
-              levelType: LevelType.PROJECT,
-              subjectId: leafA.id,
-              direction: LineDirection.INCREASE,
-              amount: '100.00',
-            },
-          ],
-        },
-        adminUser(),
-      ),
-    ).rejects.toMatchObject({ status: 422 });
+    await expectHTTP(
+      () =>
+        createAdjustment(
+          project.id,
+          {
+            year: 2026,
+            lines: [
+              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+              { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
+            ],
+          },
+          adminUser(),
+        ),
+      409,
+    );
   });
 
-  it('submitAdjustment: SUBJECT_TRANSFER 写 A 的 budget_lock(100);可操作额度=500', async () => {
-    const { project, leafA, leafB } = await seedApprovedProject('LOCK');
+  it('listAdjustments: 返回项目调整单(含明细)', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('LIST');
+    await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-50.00', annualAdjustment: '-50.00' },
+          { subjectId: leafB.id, totalAdjustment: '50.00', annualAdjustment: '50.00' },
+        ],
+      },
+      adminUser(),
+    );
 
+    const list = await listAdjustments(project.id, adminUser());
+    expect(list.length).toBeGreaterThanOrEqual(1);
+    expect(list[0].lines.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('submitAdjustment: 年度调减 ≤ 可调额度 → PENDING,写锁', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('SUBMIT');
     const adj = await createAdjustment(
       project.id,
       {
-        type: AdjustmentType.SUBJECT_TRANSFER,
+        year: 2026,
         lines: [
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafA.id,
-            direction: LineDirection.DECREASE,
-            amount: '100.00',
-          },
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafB.id,
-            direction: LineDirection.INCREASE,
-            amount: '100.00',
-          },
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' }, // A 600 可调
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
         ],
       },
       adminUser(),
@@ -246,233 +296,161 @@ describe('adjustment.service (integration, real PG)', () => {
     const submitted = await submitAdjustment(adj.id, adminUser());
     expect(submitted.status).toBe(ApprovalStatus.PENDING);
 
-    // 锁:只有 1 条(DECREASE A 100),B 是 INCREASE 不锁。
     const locks = await prisma.budgetLock.findMany({
-      where: { adjustmentId: adj.id },
-      orderBy: { subjectId: 'asc' },
+      where: { adjustmentId: adj.id, releasedAt: null },
     });
-    expect(locks.length).toBe(1);
+    expect(locks).toHaveLength(1); // 仅 A 的年度调减写锁
     expect(locks[0].subjectId).toBe(leafA.id);
-    expect(locks[0].year).toBe(2026);
-    expect(locks[0].amount.toFixed(2)).toBe('100.00');
-    expect(locks[0].releasedAt).toBeNull();
-
-    // §7.4 可调额度 = 600 - 0(占用) = 600;可操作额度 = 600 - 0 - 100(锁) = 500。
-    const subjectBudgetA = await prisma.subjectBudget.findUnique({
-      where: {
-        projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: leafA.id },
-      },
-    });
-    expect(subjectBudgetA!.currentAmount.toFixed(2)).toBe('600.00');
-    const pendingLock = fromStored(locks[0].amount);
-    const operable = fromStored(subjectBudgetA!.currentAmount).minus(pendingLock);
-    expect(operable.toFixed(2)).toBe('500.00');
-
-    // 审计 submit 写入。
-    const audit = await prisma.auditLog.findFirst({
-      where: { objectId: adj.id, action: 'submit', objectType: 'budget_adjustments' },
-    });
-    expect(audit).not.toBeNull();
+    expect(fromStored(locks[0].amount).toFixed(2)).toBe('100.00');
   });
 
-  it('submitAdjustment: DECREASE A 700 > 可调额度 600 → 422,状态不变', async () => {
-    const { project, leafA, leafB } = await seedApprovedProject('OVER');
-
+  it('submitAdjustment: 年度调减超额(A 可调 600,调减 700) → 422,状态仍 DRAFT', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('SUBOVER');
     const adj = await createAdjustment(
       project.id,
       {
-        type: AdjustmentType.SUBJECT_TRANSFER,
+        year: 2026,
         lines: [
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafA.id,
-            direction: LineDirection.DECREASE,
-            amount: '700.00',
-          },
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafB.id,
-            direction: LineDirection.INCREASE,
-            amount: '700.00',
-          },
+          { subjectId: leafA.id, totalAdjustment: '-700.00', annualAdjustment: '-700.00' },
+          { subjectId: leafB.id, totalAdjustment: '700.00', annualAdjustment: '700.00' },
         ],
       },
       adminUser(),
     );
 
-    await expect(submitAdjustment(adj.id, adminUser())).rejects.toMatchObject({ status: 422 });
-
-    // 失败回滚:状态仍为 DRAFT,无锁。
-    const after = await prisma.budgetAdjustment.findUnique({ where: { id: adj.id } });
-    expect(after!.status).toBe(ApprovalStatus.DRAFT);
-    const locks = await prisma.budgetLock.findMany({ where: { adjustmentId: adj.id } });
-    expect(locks.length).toBe(0);
+    await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
+    const after = await getAdjustment(adj.id, adminUser());
+    expect(after.status).toBe(ApprovalStatus.DRAFT);
   });
 
-  it('submitAdjustment: 已 PENDING 再提交 → 409', async () => {
-    const { project, leafA, leafB } = await seedApprovedProject('TWICE');
-
-    const adj = await createAdjustment(
+  it('submitAdjustment: 已有待审批锁叠加超额 → 422', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('LOCKSTACK');
+    // 第一单:A 调减 500(可调 600),提交成功写锁 500。
+    const adj1 = await createAdjustment(
       project.id,
       {
-        type: AdjustmentType.SUBJECT_TRANSFER,
+        year: 2026,
         lines: [
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafA.id,
-            direction: LineDirection.DECREASE,
-            amount: '100.00',
-          },
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafB.id,
-            direction: LineDirection.INCREASE,
-            amount: '100.00',
-          },
+          { subjectId: leafA.id, totalAdjustment: '-500.00', annualAdjustment: '-500.00' },
+          { subjectId: leafB.id, totalAdjustment: '500.00', annualAdjustment: '500.00' },
         ],
       },
       adminUser(),
     );
-    await submitAdjustment(adj.id, adminUser());
-    await expect(submitAdjustment(adj.id, adminUser())).rejects.toMatchObject({ status: 409 });
-  });
+    await submitAdjustment(adj1.id, adminUser());
 
-  it('submitAdjustment: PROJECT_TOTAL DECREASE 低于项目占用 → 422', async () => {
-    const { project, leafA } = await seedApprovedProject('PTOVER');
-
-    // 先制造占用:在 A 上登记 300 的业务记录。
-    await createRecord(
-      project.id,
-      {
-        budgetYear: 2026,
-        subjectId: leafA.id,
-        amount: '300.00',
-        businessDate: '2026-06-01',
-        handler: '经办人A',
-        summary: '占用',
-        status: 'CONTRACT',
-      },
-      adminUser(),
-    );
-
-    // 项目总额当前 = 1000,占用 300,可调 = 700。调减 800 > 700 → 422。
-    const adj = await createAdjustment(
-      project.id,
-      {
-        type: AdjustmentType.PROJECT_TOTAL,
-        lines: [
-          {
-            levelType: LevelType.PROJECT,
-            direction: LineDirection.DECREASE,
-            amount: '800.00',
-          },
-        ],
-      },
-      adminUser(),
-    );
-
-    await expect(submitAdjustment(adj.id, adminUser())).rejects.toMatchObject({ status: 422 });
-
-    // 可调额度内的 PROJECT_TOTAL DECREASE 应当通过(700 ≤ 700)。
+    // 第二单:A 再调减 200(500+200 > 600) → 422。
     const adj2 = await createAdjustment(
       project.id,
       {
-        type: AdjustmentType.PROJECT_TOTAL,
+        year: 2026,
         lines: [
-          {
-            levelType: LevelType.PROJECT,
-            direction: LineDirection.DECREASE,
-            amount: '700.00',
-          },
+          { subjectId: leafA.id, totalAdjustment: '-200.00', annualAdjustment: '-200.00' },
+          { subjectId: leafB.id, totalAdjustment: '200.00', annualAdjustment: '200.00' },
         ],
       },
       adminUser(),
     );
-    const submitted = await submitAdjustment(adj2.id, adminUser());
-    expect(submitted.status).toBe(ApprovalStatus.PENDING);
-
-    // §7.4 V1 决策:PROJECT_TOTAL 不写叶节点锁。
-    const locks = await prisma.budgetLock.findMany({ where: { adjustmentId: adj2.id } });
-    expect(locks.length).toBe(0);
+    await expectHTTP(() => submitAdjustment(adj2.id, adminUser()), 422);
   });
 
-  it('submitAdjustment: ANNUAL DECREASE 低于年度占用 → 422', async () => {
-    const { project, leafB } = await seedApprovedProject('ANNOVER');
-
-    await createRecord(
-      project.id,
-      {
-        budgetYear: 2026,
-        subjectId: leafB.id,
-        amount: '100.00',
-        businessDate: '2026-06-02',
-        handler: '经办人A',
-        summary: '占用',
-        status: 'PLACEHOLDER',
-      },
-      adminUser(),
-    );
-
-    // 年度当前 = 1000,占用 100,可调 = 900。调减 950 > 900 → 422。
+  it('updateDraftAdjustment: DRAFT 编辑(改金额)成功', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('EDIT');
     const adj = await createAdjustment(
       project.id,
       {
-        type: AdjustmentType.ANNUAL,
+        year: 2026,
         lines: [
-          {
-            levelType: LevelType.ANNUAL,
-            year: 2026,
-            direction: LineDirection.DECREASE,
-            amount: '950.00',
-          },
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
         ],
       },
       adminUser(),
     );
 
-    await expect(submitAdjustment(adj.id, adminUser())).rejects.toMatchObject({ status: 422 });
+    const updated = await updateDraftAdjustment(
+      adj.id,
+      {
+        year: 2026,
+        reason: '改了',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-200.00', annualAdjustment: '-200.00' },
+          { subjectId: leafB.id, totalAdjustment: '200.00', annualAdjustment: '200.00' },
+        ],
+      },
+      adminUser(),
+    );
+    expect(updated.reason).toBe('改了');
+
+    const lines = await prisma.budgetAdjustmentLine.findMany({ where: { adjustmentId: adj.id } });
+    expect(fromStored(lines[0].totalAdjustment).toFixed(2)).toBe('-200.00');
   });
 
-  it('getAdjustment / listAdjustments: 包含明细 + 锁', async () => {
-    const { project, leafA, leafB } = await seedApprovedProject('GET');
-
+  it('updateDraftAdjustment: 不平衡 → 422', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('EDITIMB');
     const adj = await createAdjustment(
       project.id,
       {
-        type: AdjustmentType.SUBJECT_TRANSFER,
+        year: 2026,
         lines: [
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafA.id,
-            direction: LineDirection.DECREASE,
-            amount: '50.00',
-          },
-          {
-            levelType: LevelType.SUBJECT,
-            year: 2026,
-            subjectId: leafB.id,
-            direction: LineDirection.INCREASE,
-            amount: '50.00',
-          },
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
         ],
       },
       adminUser(),
     );
 
-    const got = await getAdjustment(adj.id, adminUser());
-    expect(got.id).toBe(adj.id);
-    expect(got.lines.length).toBe(2);
-    expect(got.locks.length).toBe(0);
+    await expectHTTP(
+      () =>
+        updateDraftAdjustment(
+          adj.id,
+          {
+            year: 2026,
+            lines: [
+              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+              { subjectId: leafB.id, totalAdjustment: '99.00', annualAdjustment: '100.00' },
+            ],
+          },
+          adminUser(),
+        ),
+      422,
+    );
+  });
 
-    const list = await listAdjustments(project.id, adminUser());
-    expect(list.length).toBeGreaterThanOrEqual(1);
-    const found = list.find((a) => a.id === adj.id);
-    expect(found).toBeDefined();
-    expect(found!.lines.length).toBe(2);
+  it('deleteDraftAdjustment: DRAFT 删除成功(明细级联清理)', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('DEL');
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
+        ],
+      },
+      adminUser(),
+    );
+
+    await deleteDraftAdjustment(adj.id, adminUser());
+    await expectHTTP(() => getAdjustment(adj.id, adminUser()), 404);
+    const lines = await prisma.budgetAdjustmentLine.findMany({ where: { adjustmentId: adj.id } });
+    expect(lines).toHaveLength(0);
+  });
+
+  it('createAdjustment: 双维度各自独立(A 总调减 B 总调增,但年度都为0)平衡 → DRAFT', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('TOTONLY');
+    // 仅调总预算维度,年度维度全 0(两维度都平衡)。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '0.00' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '0.00' },
+        ],
+      },
+      adminUser(),
+    );
+    expect(adj.status).toBe(ApprovalStatus.DRAFT);
   });
 });

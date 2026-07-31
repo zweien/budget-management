@@ -45,3 +45,6 @@ Thumbs.db
 
 # Playwright CLI artifacts (browser session snapshots, screenshots, traces)
 .playwright-cli/
+
+# ZCode 本地数据
+.zcode/

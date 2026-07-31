@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   Alert,
   Button,
-  Card,
   Descriptions,
   Drawer,
   Empty,
@@ -29,32 +28,14 @@ import { MoneyText } from '@/components/ui/MoneyText';
 const { Title, Text } = Typography;
 
 // ------------------------------------------------------------
-// 枚举(本地定义,不引 @prisma/client,遵循现有约定)。
+// 枚举(本地定义,不引 @prisma/client)。
 // ------------------------------------------------------------
-const ADJUSTMENT_TYPES = ['SUBJECT', 'SUBJECT_TRANSFER'] as const;
-type AdjustmentType = (typeof ADJUSTMENT_TYPES)[number];
-
-const TYPE_LABEL: Record<AdjustmentType, string> = {
-  SUBJECT: '科目调整',
-  SUBJECT_TRANSFER: '科目调剂',
-};
-
 const STATUS_META: Record<string, { label: string; color: string }> = {
   DRAFT: { label: '草稿', color: 'default' },
   PENDING: { label: '待审批', color: 'processing' },
   APPROVED: { label: '已通过', color: 'success' },
   REJECTED: { label: '已驳回', color: 'error' },
   WITHDRAWN: { label: '已撤回', color: 'default' },
-};
-
-const DIRECTION_LABEL: Record<string, string> = {
-  INCREASE: '增加',
-  DECREASE: '减少',
-};
-
-const DIRECTION_COLOR: Record<string, string> = {
-  INCREASE: 'green',
-  DECREASE: 'red',
 };
 
 // ------------------------------------------------------------
@@ -71,33 +52,33 @@ interface InitialBudgetState {
   status?: string;
 }
 
-interface LedgerNode {
+/** 科目预算基线(原总预算 + 原年度预算)。 */
+interface SubjectBaseline {
   subjectId: string;
   code: string;
   name: string;
-  isLeaf: boolean;
+  totalCurrent: string;
+  annualCurrent: string;
 }
 
-interface LeafSubject {
-  subjectId: string;
-  code: string;
-  name: string;
+interface BaselineResponse {
+  year: number;
+  baseline: SubjectBaseline[];
 }
 
 /** 调整明细行(对应后端 BudgetAdjustmentLine)。 */
 interface AdjustmentLine {
   id: string;
-  levelType: string;
-  year: number | null;
-  subjectId: string | null;
-  direction: 'INCREASE' | 'DECREASE';
-  amount: string;
+  year: number;
+  subjectId: string;
+  totalAdjustment: string;
+  annualAdjustment: string;
 }
 
-/** 调整单(对应后端 BudgetAdjustment,含 lines)。 */
+/** 调整单。 */
 interface AdjustmentRow {
   id: string;
-  type: string;
+  year: number;
   status: string;
   reason: string | null;
   applicantId: string;
@@ -105,24 +86,21 @@ interface AdjustmentRow {
   lines: AdjustmentLine[];
 }
 
-/** 列表响应。 */
 interface ListResponse {
   adjustments: AdjustmentRow[];
 }
 
-/** 表单内的明细编辑行(用本地 key 维护)。 */
+/** 表单内的明细编辑行。 */
 interface EditLine {
   key: string;
   subjectId: string | null;
-  year: number | null;
-  direction: 'INCREASE' | 'DECREASE';
-  amount: string;
+  totalAdjustment: string;
+  annualAdjustment: string;
 }
 
 let keySeq = 0;
 const genKey = () => `line-${++keySeq}`;
 
-/** 生成最近 5 年的年度选项(含当前年,按降序)。 */
 function yearOptions(): number[] {
   const now = new Date().getFullYear();
   return [now, now - 1, now - 2, now - 3, now - 4];
@@ -134,6 +112,13 @@ function formatDateTime(s: string | null): string {
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—';
 }
 
+/** 字符串金额 → 显示带正负号(用于明细摘要)。 */
+function signedAmount(v: string): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '0.00';
+  return n >= 0 ? `+${n.toFixed(2)}` : n.toFixed(2);
+}
+
 export default function AdjustmentsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -141,19 +126,20 @@ export default function AdjustmentsPage() {
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [budgetStatus, setBudgetStatus] = useState<string | null>(null);
-  const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
   const [adjustments, setAdjustments] = useState<AdjustmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fatal, setFatal] = useState<string | null>(null);
 
   // 列表 / 表单 视图切换。
   const [mode, setMode] = useState<'list' | 'form'>('list');
+
   // 表单状态。
-  const [formType, setFormType] = useState<AdjustmentType>('SUBJECT');
+  const [formYear, setFormYear] = useState<number>(() => new Date().getFullYear());
+  const [baseline, setBaseline] = useState<SubjectBaseline[]>([]);
   const [formReason, setFormReason] = useState('');
   const [formLines, setFormLines] = useState<EditLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  // 编辑现有草稿时记录其 id(保存走 PATCH 概念,但后端无 update,这里用"删旧建新"——见下)。
+  const [baselineLoading, setBaselineLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // 只读明细 Drawer。
@@ -162,33 +148,27 @@ export default function AdjustmentsPage() {
   /** 初始预算是否已生效(发起调整的前提)。 */
   const isEffective = budgetStatus === 'APPROVED';
 
+  const baselineMap = useMemo(() => new Map(baseline.map((b) => [b.subjectId, b])), [baseline]);
+
   const subjectName = (subjectId: string | null): string => {
     if (!subjectId) return '—';
-    return leafSubjects.find((s) => s.subjectId === subjectId)?.name ?? subjectId.slice(0, 8);
+    return baselineMap.get(subjectId)?.name ?? subjectId.slice(0, 8);
   };
 
-  // 拉取项目头 + 初始预算状态 + 叶科目(仅一次)。
+  // 拉取项目头 + 初始预算状态(仅一次)。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [proj, budget, ledger] = await Promise.all([
+        const [proj, budget] = await Promise.all([
           apiFetch<ProjectDetail>(`/api/projects/${projectId}`),
           apiFetch<InitialBudgetState | null>(`/api/projects/${projectId}/initial-budget`).catch(
             () => null,
           ),
-          apiFetch<{ nodes: LedgerNode[] }>(`/api/projects/${projectId}/ledger`).catch(() => ({
-            nodes: [],
-          })),
         ]);
         if (cancelled) return;
         setProject(proj);
         setBudgetStatus(budget?.status ?? null);
-        // ledger 已按 sortOrder 排序,保持原序,不再 localeCompare。
-        const leaves: LeafSubject[] = (ledger.nodes ?? [])
-          .filter((n) => n.isLeaf)
-          .map((n) => ({ subjectId: n.subjectId, code: n.code, name: n.name }));
-        setLeafSubjects(leaves);
       } catch (e) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : '加载项目信息失败';
@@ -204,10 +184,17 @@ export default function AdjustmentsPage() {
   // 拉取调整单列表。
   const reload = async () => {
     try {
-      const { adjustments: list } = await apiFetch<ListResponse>(
-        `/api/projects/${projectId}/adjustments`,
-      );
-      setAdjustments(list);
+      const [listRes, baseRes] = await Promise.all([
+        apiFetch<ListResponse>(`/api/projects/${projectId}/adjustments`),
+        // 拉一次科目基线(任意年度),用于列表/明细里 subjectId → 科目名称。
+        apiFetch<BaselineResponse>(
+          `/api/projects/${projectId}/adjustments/baseline?year=${new Date().getFullYear()}`,
+        ).catch(() => null),
+      ]);
+      setAdjustments(listRes.adjustments);
+      if (baseRes && baseline.length === 0) {
+        setBaseline(baseRes.baseline);
+      }
     } catch (e) {
       if (e instanceof Error) message.error(e.message);
     }
@@ -225,36 +212,45 @@ export default function AdjustmentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // 拉取某年度的科目预算基线(原总预算 + 原年度预算)。
+  const loadBaseline = async (year: number) => {
+    setBaselineLoading(true);
+    try {
+      const { baseline: b } = await apiFetch<BaselineResponse>(
+        `/api/projects/${projectId}/adjustments/baseline?year=${year}`,
+      );
+      setBaseline(b);
+    } catch (e) {
+      if (e instanceof Error) message.error(e.message);
+    } finally {
+      setBaselineLoading(false);
+    }
+  };
+
   // ------------------------------------------------------------
   // 表单操作
   // ------------------------------------------------------------
-  const openCreate = () => {
+  const openCreate = async () => {
     setEditingId(null);
-    setFormType('SUBJECT');
+    const y = new Date().getFullYear();
+    setFormYear(y);
     setFormReason('');
-    setFormLines([
-      {
-        key: genKey(),
-        subjectId: null,
-        year: new Date().getFullYear(),
-        direction: 'INCREASE',
-        amount: '',
-      },
-    ]);
+    await loadBaseline(y);
+    setFormLines([{ key: genKey(), subjectId: null, totalAdjustment: '', annualAdjustment: '' }]);
     setMode('form');
   };
 
-  const openEdit = (row: AdjustmentRow) => {
+  const openEdit = async (row: AdjustmentRow) => {
     setEditingId(row.id);
-    setFormType(row.type as AdjustmentType);
+    setFormYear(row.year);
     setFormReason(row.reason ?? '');
+    await loadBaseline(row.year);
     setFormLines(
       row.lines.map((l) => ({
         key: genKey(),
         subjectId: l.subjectId,
-        year: l.year,
-        direction: l.direction,
-        amount: l.amount,
+        totalAdjustment: l.totalAdjustment,
+        annualAdjustment: l.annualAdjustment,
       })),
     );
     setMode('form');
@@ -272,13 +268,7 @@ export default function AdjustmentsPage() {
   const addLine = () => {
     setFormLines((prev) => [
       ...prev,
-      {
-        key: genKey(),
-        subjectId: null,
-        year: new Date().getFullYear(),
-        direction: 'DECREASE',
-        amount: '',
-      },
+      { key: genKey(), subjectId: null, totalAdjustment: '', annualAdjustment: '' },
     ]);
   };
 
@@ -286,48 +276,43 @@ export default function AdjustmentsPage() {
     setFormLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev));
   };
 
-  /** 构建 payload,校验后返回 { ok, payload?, error? }。 */
-  const buildPayload = (): { ok: boolean; payload?: unknown; error?: string } => {
-    const valid = formLines.filter(
-      (l) => l.subjectId && l.year != null && l.amount && Number(l.amount) > 0,
-    );
-    if (valid.length === 0) {
-      return { ok: false, error: '请至少填写一行完整明细(科目、年度、金额)' };
-    }
-    for (const l of valid) {
-      if (!l.subjectId) return { ok: false, error: '每行需选择科目' };
-      if (l.year == null) return { ok: false, error: '每行需选择年度' };
-    }
-    const lines = valid.map((l) => ({
-      levelType: 'SUBJECT' as const,
-      year: l.year,
-      subjectId: l.subjectId,
-      direction: l.direction,
-      amount: l.amount,
-    }));
-
-    // 科目调剂:增加合计必须等于减少合计。
-    if (formType === 'SUBJECT_TRANSFER') {
-      const inc = valid
-        .filter((l) => l.direction === 'INCREASE')
-        .reduce((a, l) => a + Number(l.amount), 0);
-      const dec = valid
-        .filter((l) => l.direction === 'DECREASE')
-        .reduce((a, l) => a + Number(l.amount), 0);
-      if (inc === 0 || dec === 0) {
-        return { ok: false, error: '科目调剂需同时包含增加和减少明细' };
-      }
-      if (Math.abs(inc - dec) > 0.001) {
-        return {
-          ok: false,
-          error: `科目调剂需收支平衡:增加合计 ${inc.toFixed(2)} ≠ 减少合计 ${dec.toFixed(2)}`,
-        };
-      }
-    }
-    return { ok: true, payload: { type: formType, reason: formReason.trim() || null, lines } };
+  const handleYearChange = async (y: number) => {
+    setFormYear(y);
+    await loadBaseline(y);
   };
 
-  /** 保存草稿(新建 POST / 编辑 PATCH)。 */
+  /** 构建并校验 payload。 */
+  const buildPayload = (): { ok: boolean; payload?: unknown; error?: string } => {
+    const valid = formLines.filter((l) => l.subjectId);
+    if (valid.length === 0) {
+      return { ok: false, error: '请至少选择一个科目' };
+    }
+    for (const l of valid) {
+      if (l.totalAdjustment === '' || l.annualAdjustment === '') {
+        return { ok: false, error: '每行的「总预算调整额」「年度调整额」都需填写(可填 0)' };
+      }
+    }
+    const sumField = (sel: 'totalAdjustment' | 'annualAdjustment') =>
+      valid.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
+    const totalSum = sumField('totalAdjustment');
+    const annualSum = sumField('annualAdjustment');
+    if (Math.abs(totalSum) > 0.001) {
+      return { ok: false, error: `总预算维度调整不平衡:合计 ${totalSum.toFixed(2)} ≠ 0` };
+    }
+    if (Math.abs(annualSum) > 0.001) {
+      return { ok: false, error: `年度预算维度调整不平衡:合计 ${annualSum.toFixed(2)} ≠ 0` };
+    }
+    const lines = valid.map((l) => ({
+      subjectId: l.subjectId,
+      totalAdjustment: Number(l.totalAdjustment).toFixed(2),
+      annualAdjustment: Number(l.annualAdjustment).toFixed(2),
+    }));
+    return {
+      ok: true,
+      payload: { year: formYear, reason: formReason.trim() || null, lines },
+    };
+  };
+
   const handleSaveDraft = async () => {
     const { ok, payload, error } = buildPayload();
     if (!ok) {
@@ -358,7 +343,6 @@ export default function AdjustmentsPage() {
     }
   };
 
-  /** 保存并提交:POST 创建 → POST submit。 */
   const handleSaveAndSubmit = async () => {
     const { ok, payload, error } = buildPayload();
     if (!ok) {
@@ -384,7 +368,6 @@ export default function AdjustmentsPage() {
     }
   };
 
-  /** 列表行操作:提交审批。 */
   const submitRow = async (row: AdjustmentRow) => {
     try {
       await apiFetch(`/api/projects/${projectId}/adjustments/${row.id}/submit`, {
@@ -397,7 +380,6 @@ export default function AdjustmentsPage() {
     }
   };
 
-  /** 列表行操作:删除草稿(二次确认)。 */
   const deleteRow = (row: AdjustmentRow) => {
     Modal.confirm({
       title: '删除调整草稿',
@@ -420,19 +402,19 @@ export default function AdjustmentsPage() {
   };
 
   // ------------------------------------------------------------
-  // 实时校验提示(调剂平衡)。
+  // 汇总(实时平衡校验)
   // ------------------------------------------------------------
-  const balanceInfo = useMemo(() => {
-    if (formType !== 'SUBJECT_TRANSFER') return null;
-    const inc = formLines
-      .filter((l) => l.direction === 'INCREASE')
-      .reduce((a, l) => a + Number(l.amount || 0), 0);
-    const dec = formLines
-      .filter((l) => l.direction === 'DECREASE')
-      .reduce((a, l) => a + Number(l.amount || 0), 0);
-    const balanced = inc > 0 && dec > 0 && Math.abs(inc - dec) < 0.001;
-    return { inc, dec, balanced };
-  }, [formType, formLines]);
+  const summary = useMemo(() => {
+    const sumField = (sel: 'totalAdjustment' | 'annualAdjustment') =>
+      formLines.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
+    const totalSum = sumField('totalAdjustment');
+    const annualSum = sumField('annualAdjustment');
+    return {
+      totalSum,
+      annualSum,
+      balanced: Math.abs(totalSum) < 0.001 && Math.abs(annualSum) < 0.001,
+    };
+  }, [formLines]);
 
   // ------------------------------------------------------------
   // 渲染
@@ -470,67 +452,97 @@ export default function AdjustmentsPage() {
 
   // ============== 表单视图 ==============
   if (mode === 'form') {
+    /** 计算调整后值 = 原 + 调整额。 */
+    const afterTotal = (r: EditLine): string => {
+      const base = r.subjectId ? Number(baselineMap.get(r.subjectId)?.totalCurrent ?? 0) : 0;
+      const adj = Number(r.totalAdjustment) || 0;
+      return (base + adj).toFixed(2);
+    };
+    const afterAnnual = (r: EditLine): string => {
+      const base = r.subjectId ? Number(baselineMap.get(r.subjectId)?.annualCurrent ?? 0) : 0;
+      const adj = Number(r.annualAdjustment) || 0;
+      return (base + adj).toFixed(2);
+    };
+
     const lineCols: ColumnsType<EditLine> = [
       {
         title: '科目',
         dataIndex: 'subjectId',
-        width: 220,
+        width: 160,
         render: (_: unknown, r) => (
           <Select
             size="small"
             style={{ width: '100%' }}
-            placeholder="选择叶科目"
+            placeholder="选择科目"
             showSearch
             optionFilterProp="label"
             value={r.subjectId}
             onChange={(v) => updateLine(r.key, { subjectId: v })}
-            options={leafSubjects.map((s) => ({ value: s.subjectId, label: s.name }))}
+            options={baseline.map((s) => ({ value: s.subjectId, label: s.name }))}
           />
         ),
       },
       {
-        title: '年度',
-        dataIndex: 'year',
+        title: '原总预算',
+        key: 'origTotal',
         width: 110,
+        align: 'right',
         render: (_: unknown, r) => (
-          <Select<number>
-            size="small"
-            style={{ width: '100%' }}
-            value={r.year ?? undefined}
-            onChange={(v) => updateLine(r.key, { year: v })}
-            options={yearOptions().map((y) => ({ label: `${y}`, value: y }))}
-          />
+          <Text type="secondary">
+            {r.subjectId ? (baselineMap.get(r.subjectId)?.totalCurrent ?? '0.00') : '—'}
+          </Text>
         ),
       },
       {
-        title: '方向',
-        dataIndex: 'direction',
-        width: 110,
-        render: (_: unknown, r) => (
-          <Select
-            size="small"
-            style={{ width: '100%' }}
-            value={r.direction}
-            onChange={(v) => updateLine(r.key, { direction: v })}
-            options={[
-              { value: 'INCREASE', label: '增加' },
-              { value: 'DECREASE', label: '减少' },
-            ]}
-          />
-        ),
-      },
-      {
-        title: '金额',
-        dataIndex: 'amount',
-        width: 160,
+        title: '总预算调整额',
+        key: 'totalAdj',
+        width: 130,
         render: (_: unknown, r) => (
           <AmountInput
             size="small"
             allowNegative
-            value={r.amount}
-            onChange={(v) => updateLine(r.key, { amount: v ?? '' })}
+            value={r.totalAdjustment}
+            onChange={(v) => updateLine(r.key, { totalAdjustment: v ?? '' })}
           />
         ),
+      },
+      {
+        title: '调整后总预算',
+        key: 'afterTotal',
+        width: 120,
+        align: 'right',
+        render: (_: unknown, r) => <Text strong>{r.subjectId ? afterTotal(r) : '—'}</Text>,
+      },
+      {
+        title: '原年度预算',
+        key: 'origAnnual',
+        width: 110,
+        align: 'right',
+        render: (_: unknown, r) => (
+          <Text type="secondary">
+            {r.subjectId ? (baselineMap.get(r.subjectId)?.annualCurrent ?? '0.00') : '—'}
+          </Text>
+        ),
+      },
+      {
+        title: '年度调整额',
+        key: 'annualAdj',
+        width: 130,
+        render: (_: unknown, r) => (
+          <AmountInput
+            size="small"
+            allowNegative
+            value={r.annualAdjustment}
+            onChange={(v) => updateLine(r.key, { annualAdjustment: v ?? '' })}
+          />
+        ),
+      },
+      {
+        title: '调整后年度预算',
+        key: 'afterAnnual',
+        width: 130,
+        align: 'right',
+        render: (_: unknown, r) => <Text strong>{r.subjectId ? afterAnnual(r) : '—'}</Text>,
       },
       {
         title: '',
@@ -559,41 +571,35 @@ export default function AdjustmentsPage() {
           <Button onClick={cancelForm}>取消</Button>
         </Space>
 
-        <Card size="small" style={{ marginBottom: 16 }}>
-          <Descriptions column={1} size="small">
-            <Descriptions.Item label="调整类型">
-              <Select<AdjustmentType>
-                style={{ width: 200 }}
-                value={formType}
-                onChange={setFormType}
-                options={ADJUSTMENT_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }))}
-              />
-              <Text type="secondary" style={{ marginLeft: 12 }}>
-                {formType === 'SUBJECT'
-                  ? '对单个科目年度预算进行增减'
-                  : '同一年度内在科目间转移预算(收支须平衡)'}
-              </Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="调整原因">
-              <input
-                style={{
-                  width: 480,
-                  padding: '4px 11px',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: 6,
-                }}
-                placeholder="简要说明调整原因(选填)"
-                value={formReason}
-                onChange={(e) => setFormReason(e.target.value)}
-              />
-            </Descriptions.Item>
-          </Descriptions>
-        </Card>
+        <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="调整年度">
+            <Select<number>
+              style={{ width: 160 }}
+              value={formYear}
+              onChange={handleYearChange}
+              loading={baselineLoading}
+              options={yearOptions().map((y) => ({ label: `${y} 年`, value: y }))}
+            />
+          </Descriptions.Item>
+          <Descriptions.Item label="调整原因">
+            <input
+              style={{
+                width: 480,
+                padding: '4px 11px',
+                border: '1px solid #d9d9d9',
+                borderRadius: 6,
+              }}
+              placeholder="简要说明调整原因(选填)"
+              value={formReason}
+              onChange={(e) => setFormReason(e.target.value)}
+            />
+          </Descriptions.Item>
+        </Descriptions>
 
         <div style={{ marginBottom: 8 }}>
           <Text strong>调整明细</Text>
           <Button size="small" type="dashed" style={{ marginLeft: 12 }} onClick={addLine}>
-            + 新增明细
+            + 新增科目行
           </Button>
         </div>
         <Table<EditLine>
@@ -602,24 +608,26 @@ export default function AdjustmentsPage() {
           pagination={false}
           dataSource={formLines}
           columns={lineCols}
-          locale={{ emptyText: '请点击「新增明细」' }}
+          scroll={{ x: 'max-content' }}
+          locale={{ emptyText: '请点击「新增科目行」' }}
           style={{ marginBottom: 16 }}
         />
 
-        {balanceInfo && (
-          <Alert
-            style={{ marginBottom: 16 }}
-            type={balanceInfo.balanced ? 'success' : 'warning'}
-            showIcon
-            message={
-              <span>
-                增加合计 <MoneyText value={balanceInfo.inc.toFixed(2)} riskOnNegative={false} /> ·
-                减少合计 <MoneyText value={balanceInfo.dec.toFixed(2)} riskOnNegative={false} />
-                {balanceInfo.balanced ? ' · 收支平衡 ✓' : ' · 收支不平衡,需调整至相等'}
-              </span>
-            }
-          />
-        )}
+        <Alert
+          style={{ marginBottom: 16 }}
+          type={summary.balanced ? 'success' : 'error'}
+          showIcon
+          message={
+            <span>
+              汇总:总预算调整合计{' '}
+              <MoneyText value={summary.totalSum.toFixed(2)} riskOnNegative={false} /> ·
+              年度调整合计 <MoneyText value={summary.annualSum.toFixed(2)} riskOnNegative={false} />
+              {summary.balanced
+                ? ' · 两维度均已平衡 ✓ 可提交'
+                : ' · 调整合计须为 0 才可提交(原预算=调整后预算)'}
+            </span>
+          }
+        />
 
         <Space>
           <Button type="primary" loading={submitting} onClick={handleSaveDraft}>
@@ -637,10 +645,10 @@ export default function AdjustmentsPage() {
   // ============== 列表视图 ==============
   const listCols: ColumnsType<AdjustmentRow> = [
     {
-      title: '类型',
-      dataIndex: 'type',
-      width: 110,
-      render: (t: string) => <Tag>{TYPE_LABEL[t as AdjustmentType] ?? t}</Tag>,
+      title: '年度',
+      dataIndex: 'year',
+      width: 80,
+      render: (y: number) => `${y}`,
     },
     {
       title: '状态',
@@ -659,11 +667,11 @@ export default function AdjustmentsPage() {
         return (
           <Space size={4} wrap>
             {row.lines.slice(0, 2).map((l) => (
-              <Tag key={l.id} color={DIRECTION_COLOR[l.direction]}>
-                {subjectName(l.subjectId)}
-                {l.year ? ` ${l.year}` : ''}
-                {DIRECTION_LABEL[l.direction]} {Number(l.amount).toFixed(2)}
-              </Tag>
+              <span key={l.id}>
+                <Text strong>{subjectName(l.subjectId)}</Text>
+                <Text type="secondary"> 总{signedAmount(l.totalAdjustment)}</Text>
+                <Text type="secondary"> 年{signedAmount(l.annualAdjustment)}</Text>
+              </span>
             ))}
             {row.lines.length > 2 && <Text type="secondary">+{row.lines.length - 2} 行</Text>}
           </Space>
@@ -685,13 +693,13 @@ export default function AdjustmentsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 200,
+      width: 220,
       fixed: 'right',
       render: (_: unknown, row) => (
         <Space size={4}>
           {row.status === 'DRAFT' && (
             <>
-              <Button size="small" onClick={() => openEdit(row)}>
+              <Button size="small" onClick={() => void openEdit(row)}>
                 编辑
               </Button>
               <Button size="small" type="primary" onClick={() => void submitRow(row)}>
@@ -719,7 +727,7 @@ export default function AdjustmentsPage() {
 
       <Space style={{ marginBottom: 16 }}>
         <Button onClick={() => router.push(`/projects/${projectId}`)}>返回项目详情</Button>
-        <Button type="primary" onClick={openCreate} disabled={!isEffective}>
+        <Button type="primary" onClick={() => void openCreate()} disabled={!isEffective}>
           发起调整
         </Button>
       </Space>
@@ -748,19 +756,16 @@ export default function AdjustmentsPage() {
         }}
       />
 
-      {/* 只读明细 Drawer */}
       <Drawer
         title="调整单明细"
-        width={640}
+        width={680}
         open={!!detailTarget}
         onClose={() => setDetailTarget(null)}
       >
         {detailTarget && (
           <>
             <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="类型">
-                {TYPE_LABEL[detailTarget.type as AdjustmentType] ?? detailTarget.type}
-              </Descriptions.Item>
+              <Descriptions.Item label="年度">{detailTarget.year}</Descriptions.Item>
               <Descriptions.Item label="状态">
                 <Tag color={STATUS_META[detailTarget.status]?.color}>
                   {STATUS_META[detailTarget.status]?.label ?? detailTarget.status}
@@ -778,21 +783,22 @@ export default function AdjustmentsPage() {
               size="small"
               pagination={false}
               dataSource={detailTarget.lines}
+              scroll={{ x: 'max-content' }}
               columns={[
                 {
                   title: '科目',
                   dataIndex: 'subjectId',
-                  render: (v: string | null) => subjectName(v),
-                },
-                { title: '年度', dataIndex: 'year', render: (v: number | null) => v ?? '—' },
-                {
-                  title: '方向',
-                  dataIndex: 'direction',
-                  render: (d: string) => <Tag color={DIRECTION_COLOR[d]}>{DIRECTION_LABEL[d]}</Tag>,
+                  render: (v: string) => subjectName(v),
                 },
                 {
-                  title: '金额',
-                  dataIndex: 'amount',
+                  title: '总预算调整',
+                  dataIndex: 'totalAdjustment',
+                  align: 'right',
+                  render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
+                },
+                {
+                  title: '年度预算调整',
+                  dataIndex: 'annualAdjustment',
                   align: 'right',
                   render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
                 },

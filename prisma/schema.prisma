@@ -36,24 +36,6 @@ enum BusinessStatus {
   PAID        // 已支出
 }
 
-enum AdjustmentType {
-  PROJECT_TOTAL
-  ANNUAL
-  SUBJECT
-  SUBJECT_TRANSFER // 同年度科目调剂
-}
-
-enum LineDirection {
-  INCREASE
-  DECREASE
-}
-
-enum LevelType {
-  PROJECT
-  ANNUAL
-  SUBJECT
-}
-
 model User {
   id        String     @id @db.Uuid
   name      String
@@ -141,6 +123,7 @@ model BudgetSubject {
   subjectBudgets      SubjectBudget[]
   subjectTotalBudgets SubjectTotalBudget[]
   records             BusinessRecord[]
+  adjustmentLines     BudgetAdjustmentLine[]
 
   @@unique([projectId, code]) // §16.1 项目内唯一
   @@index([projectId])
@@ -234,9 +217,10 @@ model InitialBudgetApplication {
 model BudgetAdjustment {
   id          String          @id @db.Uuid
   projectId   String          @map("project_id") @db.Uuid
-  type        AdjustmentType
-  status      ApprovalStatus  @default(DRAFT)
+  // 一次调整针对的统一年度(所有明细行同属该年度)。
+  year        Int
   reason      String?
+  status      ApprovalStatus  @default(DRAFT)
   applicantId String          @map("applicant_id") @db.Uuid
   approverId  String?         @map("approver_id") @db.Uuid
   createdAt   DateTime        @default(now()) @map("created_at")
@@ -251,15 +235,17 @@ model BudgetAdjustment {
 }
 
 model BudgetAdjustmentLine {
-  id            String        @id @db.Uuid
-  adjustmentId  String        @map("adjustment_id") @db.Uuid
-  levelType     LevelType     @map("level_type")
-  year          Int?
-  subjectId     String?       @map("subject_id") @db.Uuid
-  direction     LineDirection
-  amount        Decimal       @db.Decimal(18, 2)
+  id               String   @id @db.Uuid
+  adjustmentId     String   @map("adjustment_id") @db.Uuid
+  year             Int
+  subjectId        String   @map("subject_id") @db.Uuid
+  // 总预算维度调整额(对应 SubjectTotalBudget;可正可负,正=增 负=减)。
+  totalAdjustment  Decimal  @map("total_adjustment") @db.Decimal(18, 2)
+  // 年度预算维度调整额(对应 SubjectBudget;可正可负)。
+  annualAdjustment Decimal  @map("annual_adjustment") @db.Decimal(18, 2)
 
   adjustment BudgetAdjustment @relation(fields: [adjustmentId], references: [id])
+  subject    BudgetSubject    @relation(fields: [subjectId], references: [id])
 
   @@map("budget_adjustment_lines")
 }

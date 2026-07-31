@@ -1,12 +1,4 @@
-import {
-  AdjustmentType,
-  ApprovalStatus,
-  BudgetAdjustment,
-  LevelType,
-  LineDirection,
-  Prisma,
-  User,
-} from '@prisma/client';
+import { ApprovalStatus, BudgetAdjustment, Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
@@ -17,33 +9,43 @@ import { adjustableAmount, computeOccupancy } from '@/lib/budget';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
 
-/** §7 调整单类型枚举集合。 */
-const ADJUSTMENT_TYPES = new Set<string>(Object.values(AdjustmentType));
-const LEVEL_TYPES = new Set<string>(Object.values(LevelType));
-const LINE_DIRECTIONS = new Set<string>(Object.values(LineDirection));
+/**
+ * §7 预算调整(双维度模型)。
+ *
+ * 一次调整针对一个统一年度,由若干叶科目行组成;每行同时调整两个维度:
+ * - 总预算维度(totalAdjustment):对应 SubjectTotalBudget.currentAmount。
+ * - 年度预算维度(annualAdjustment):对应 SubjectBudget.currentAmount。
+ *
+ * 两个维度各自收支平衡:Σ totalAdjustment === 0 且 Σ annualAdjustment === 0
+ * (科目间转移,总额不变)。提交时对年度维度调减(annualAdjustment < 0)写 budget_lock
+ * 并校验可调额度;审批生效后双维度 currentAmount 同步更新。
+ */
 
-/** §7 调整明细行入参(来自 payload)。 */
+/** 单行入参(来自 payload)。 */
 export interface AdjustmentLineInput {
-  levelType: LevelType;
-  year?: number | null;
-  subjectId?: string | null;
-  direction: LineDirection;
-  amount: string; // decimal 字符串
+  subjectId: string;
+  totalAdjustment: string; // decimal 字符串,可正可负
+  annualAdjustment: string; // decimal 字符串,可正可负
 }
 
-/** §7 创建/编辑调整单 payload。 */
+/** 创建/编辑调整单 payload。 */
 export interface AdjustmentPayload {
-  type: AdjustmentType;
+  year: number;
   reason?: string | null;
   lines: AdjustmentLineInput[];
 }
+
+/** 调整单 + 明细 + 锁的展开类型(getAdjustment / listAdjustments 返回)。 */
+export type AdjustmentWithRelations = Prisma.BudgetAdjustmentGetPayload<{
+  include: { lines: true; locks: true };
+}>;
 
 /** 把 BudgetAdjustment 行序列化为快照对象(用于审计)。 */
 function snapshotAdjustment(row: BudgetAdjustment): Record<string, unknown> {
   return snapshotRow({
     id: row.id,
     projectId: row.projectId,
-    type: row.type,
+    year: row.year,
     status: row.status,
     reason: row.reason,
     applicantId: row.applicantId,
@@ -58,16 +60,16 @@ function assertValidYear(year: number, label = 'year'): void {
   }
 }
 
-/** 校验金额字符串 > 0,返回领域 Decimal。 */
-function parsePositiveAmount(amount: string): D {
+/** 解析金额字符串为 Decimal(允许负数、允许 0)。 */
+function parseSignedAmount(amount: string, label: string): D {
   let d: D;
   try {
     d = new D(amount);
   } catch {
-    throw new HTTPError(422, `金额格式无效:${amount}`);
+    throw new HTTPError(422, `${label} 金额格式无效:${amount}`);
   }
-  if (!d.isFinite() || d.lte(ZERO)) {
-    throw new HTTPError(422, '金额必须大于 0');
+  if (!d.isFinite()) {
+    throw new HTTPError(422, `${label} 金额格式无效:${amount}`);
   }
   return d;
 }
@@ -91,101 +93,43 @@ async function requireLeafSubject(
   return subject;
 }
 
-/**
- * §7.1 校验单个调整明细行的合法性与字段一致性。
- * - amount > 0(转 Decimal 返回)。
- * - SUBJECT / SUBJECT_TRANSFER 类型:必须 levelType=SUBJECT、必填 year、必填 subjectId(叶)。
- * - ANNUAL 类型:levelType=ANNUAL、必填 year、不得填 subjectId。
- * - PROJECT_TOTAL 类型:levelType=PROJECT、不得填 year、不得填 subjectId。
- *
- * 返回 { amount: Decimal }。subjectId 叶校验由调用方在事务内完成(需要 tx)。
- */
-function validateLine(type: AdjustmentType, line: AdjustmentLineInput, index: number): D {
-  if (!LEVEL_TYPES.has(line.levelType)) {
-    throw new HTTPError(422, `第 ${index + 1} 行 levelType 非法:${line.levelType}`);
-  }
-  if (!LINE_DIRECTIONS.has(line.direction)) {
-    throw new HTTPError(422, `第 ${index + 1} 行 direction 非法:${line.direction}`);
-  }
-  const amount = parsePositiveAmount(line.amount);
+/** 单行校验 + 解析金额,返回 { total, annual }。subjectId 叶校验由调用方在事务内完成。 */
+interface ParsedLine {
+  subjectId: string;
+  total: D;
+  annual: D;
+}
 
-  const expectLevel: Record<AdjustmentType, LevelType> = {
-    [AdjustmentType.PROJECT_TOTAL]: LevelType.PROJECT,
-    [AdjustmentType.ANNUAL]: LevelType.ANNUAL,
-    [AdjustmentType.SUBJECT]: LevelType.SUBJECT,
-    [AdjustmentType.SUBJECT_TRANSFER]: LevelType.SUBJECT,
-  };
-  const want = expectLevel[type];
-  if (line.levelType !== want) {
-    throw new HTTPError(
-      422,
-      `第 ${index + 1} 行 levelType=${line.levelType} 与调整类型 ${type}(应为 ${want})不一致`,
-    );
+function validateAndParseLines(payload: AdjustmentPayload): ParsedLine[] {
+  if (!payload || !Array.isArray(payload.lines) || payload.lines.length === 0) {
+    throw new HTTPError(422, '调整明细不能为空');
   }
-
-  if (type === AdjustmentType.SUBJECT || type === AdjustmentType.SUBJECT_TRANSFER) {
-    if (line.year === null || line.year === undefined) {
-      throw new HTTPError(422, `第 ${index + 1} 行缺少 year(科目级调整必填年度)`);
-    }
-    assertValidYear(line.year, `第 ${index + 1} 行 year`);
-    if (!line.subjectId) {
-      throw new HTTPError(422, `第 ${index + 1} 行缺少 subjectId(科目级调整必填科目)`);
-    }
-  } else if (type === AdjustmentType.ANNUAL) {
-    if (line.year === null || line.year === undefined) {
-      throw new HTTPError(422, `第 ${index + 1} 行缺少 year(年度调整必填年度)`);
-    }
-    assertValidYear(line.year, `第 ${index + 1} 行 year`);
-    if (line.subjectId) {
-      throw new HTTPError(422, `第 ${index + 1} 行不得填写 subjectId(年度调整不带科目)`);
-    }
-  } else {
-    // PROJECT_TOTAL
-    if (line.year !== null && line.year !== undefined) {
-      throw new HTTPError(422, `第 ${index + 1} 行不得填写 year(项目总额调整不带年度)`);
-    }
-    if (line.subjectId) {
-      throw new HTTPError(422, `第 ${index + 1} 行不得填写 subjectId(项目总额调整不带科目)`);
-    }
-  }
-
-  return amount;
+  return payload.lines.map((line, i) => ({
+    subjectId: line.subjectId,
+    total: parseSignedAmount(line.totalAdjustment, `第 ${i + 1} 行总预算调整额`),
+    annual: parseSignedAmount(line.annualAdjustment, `第 ${i + 1} 行年度调整额`),
+  }));
 }
 
 /**
- * §7.1 SUBJECT_TRANSFER 调剂两端金额必须平衡(调增合计 == 调减合计)。
- * 其他类型无此约束(单边即可)。
+ * §7 双维度收支平衡校验:Σ total === 0 且 Σ annual === 0。
+ * 不平衡 → 422。
  */
-function assertTransferBalanced(
-  type: AdjustmentType,
-  amounts: { direction: LineDirection; amount: D }[],
-): void {
-  if (type !== AdjustmentType.SUBJECT_TRANSFER) return;
-  const inc = sumAmounts(
-    amounts.filter((a) => a.direction === LineDirection.INCREASE).map((a) => a.amount),
-  );
-  const dec = sumAmounts(
-    amounts.filter((a) => a.direction === LineDirection.DECREASE).map((a) => a.amount),
-  );
-  if (!inc.eq(dec)) {
-    throw new HTTPError(
-      422,
-      `科目调剂两端金额不平衡(调增 ${inc.toFixed(2)} ≠ 调减 ${dec.toFixed(2)}),§7.1 年度内部调增和调减必须金额平衡`,
-    );
+function assertBalanced(parsedLines: ParsedLine[]): void {
+  const totalSum = sumAmounts(parsedLines.map((l) => l.total));
+  const annualSum = sumAmounts(parsedLines.map((l) => l.annual));
+  if (!totalSum.eq(ZERO)) {
+    throw new HTTPError(422, `总预算维度调整不平衡:合计 ${totalSum.toFixed(2)} ≠ 0(须收支平衡)`);
   }
-  if (inc.lte(ZERO)) {
-    throw new HTTPError(422, '科目调剂必须同时包含调增与调减明细');
+  if (!annualSum.eq(ZERO)) {
+    throw new HTTPError(422, `年度预算维度调整不平衡:合计 ${annualSum.toFixed(2)} ≠ 0(须收支平衡)`);
   }
 }
 
 /**
- * §7 草稿创建调整单:createAdjustment。
- * - 权限:budget:adjust + 项目范围(§2.2)。
- * - 校验:每行 levelType/direction/year/subjectId 与 type 一致;amount > 0;
- *   SUBJECT/SUBJECT_TRANSFER 行的 subjectId 必须为该项目叶节点;
- *   SUBJECT_TRANSFER 两端必须金额平衡(§7.1)。
- * - 落库:adjustment(DRAFT)+ lines + 审计 create。
- * - 不写 budget_locks(锁定在 submitAdjustment 时按 §7.4/7.5 落地)。
+ * §7 创建调整草稿。
+ * - 校验:行结构、平衡、项目存在且未归档、subjectId 为项目叶节点。
+ * - 状态 DRAFT,不写锁。
  */
 export async function createAdjustment(
   projectId: string,
@@ -194,26 +138,14 @@ export async function createAdjustment(
 ): Promise<BudgetAdjustment> {
   await requirePermission(user, 'budget:adjust', projectId);
 
-  if (!payload || !Array.isArray(payload.lines) || payload.lines.length === 0) {
-    throw new HTTPError(422, '调整明细不能为空');
+  if (payload?.year === undefined || payload?.year === null) {
+    throw new HTTPError(422, '缺少 year(调整年度)');
   }
-  if (!ADJUSTMENT_TYPES.has(payload.type)) {
-    throw new HTTPError(422, `调整类型非法:${payload.type}`);
-  }
+  assertValidYear(payload.year, 'year');
 
-  // 行级基础校验 + 解析金额。
-  const parsedLines = payload.lines.map((line, i) => ({
-    ...line,
-    amount: validateLine(payload.type, line, i),
-  }));
+  const parsedLines = validateAndParseLines(payload);
+  assertBalanced(parsedLines);
 
-  // SUBJECT_TRANSFER 平衡校验。
-  assertTransferBalanced(
-    payload.type,
-    parsedLines.map((l) => ({ direction: l.direction, amount: l.amount })),
-  );
-
-  // 项目必须存在(避免悬空外键)。
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: { id: true, archivedAt: true },
@@ -225,39 +157,35 @@ export async function createAdjustment(
     throw new HTTPError(409, '项目已归档,不可发起调整');
   }
 
-  // SUBJECT/SUBJECT_TRANSFER 行的科目必须是该项目叶节点。
   for (const line of parsedLines) {
-    if (line.subjectId) {
-      await requireLeafSubject(prisma, projectId, line.subjectId);
-    }
+    await requireLeafSubject(prisma, projectId, line.subjectId);
   }
 
   const id = uuidv7();
   const reason = payload.reason?.trim() ? payload.reason.trim() : null;
+  const year = payload.year;
 
   return prisma.$transaction(async (tx) => {
     const created = await tx.budgetAdjustment.create({
       data: {
         id,
         projectId,
-        type: payload.type,
+        year,
         status: ApprovalStatus.DRAFT,
         reason,
         applicantId: user.id,
       },
     });
 
-    // 落库明细行。
     for (const line of parsedLines) {
       await tx.budgetAdjustmentLine.create({
         data: {
           id: uuidv7(),
           adjustmentId: id,
-          levelType: line.levelType,
-          year: line.year ?? null,
-          subjectId: line.subjectId ?? null,
-          direction: line.direction,
-          amount: toStored(line.amount),
+          year,
+          subjectId: line.subjectId,
+          totalAdjustment: toStored(line.total),
+          annualAdjustment: toStored(line.annual),
         },
       });
     }
@@ -276,7 +204,7 @@ export async function createAdjustment(
 }
 
 /**
- * §7 编辑调整草稿(仅 DRAFT 可改):重建明细行 + 更新类型/原因。
+ * §7 编辑调整草稿(仅 DRAFT 可改):重建明细行 + 更新年度/原因。
  * 校验逻辑与 createAdjustment 一致;不涉及锁(DRAFT 无锁)。
  */
 export async function updateDraftAdjustment(
@@ -286,21 +214,13 @@ export async function updateDraftAdjustment(
 ): Promise<BudgetAdjustment> {
   await requirePermission(user, 'budget:adjust');
 
-  if (!payload || !Array.isArray(payload.lines) || payload.lines.length === 0) {
-    throw new HTTPError(422, '调整明细不能为空');
+  if (payload?.year === undefined || payload?.year === null) {
+    throw new HTTPError(422, '缺少 year(调整年度)');
   }
-  if (!ADJUSTMENT_TYPES.has(payload.type)) {
-    throw new HTTPError(422, `调整类型非法:${payload.type}`);
-  }
+  assertValidYear(payload.year, 'year');
 
-  const parsedLines = payload.lines.map((line, i) => ({
-    ...line,
-    amount: validateLine(payload.type, line, i),
-  }));
-  assertTransferBalanced(
-    payload.type,
-    parsedLines.map((l) => ({ direction: l.direction, amount: l.amount })),
-  );
+  const parsedLines = validateAndParseLines(payload);
+  assertBalanced(parsedLines);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
@@ -312,17 +232,14 @@ export async function updateDraftAdjustment(
     }
     const projectId = existing.projectId;
 
-    // SUBJECT/SUBJECT_TRANSFER 行的科目必须是该项目叶节点。
     for (const line of parsedLines) {
-      if (line.subjectId) {
-        await requireLeafSubject(tx, projectId, line.subjectId);
-      }
+      await requireLeafSubject(tx, projectId, line.subjectId);
     }
 
     const reason = payload.reason?.trim() ? payload.reason.trim() : null;
     const updated = await tx.budgetAdjustment.update({
       where: { id: adjId },
-      data: { type: payload.type, reason },
+      data: { year: payload.year, reason },
     });
 
     // 重建明细行(先删后建)。
@@ -332,11 +249,10 @@ export async function updateDraftAdjustment(
         data: {
           id: uuidv7(),
           adjustmentId: adjId,
-          levelType: line.levelType,
-          year: line.year ?? null,
-          subjectId: line.subjectId ?? null,
-          direction: line.direction,
-          amount: toStored(line.amount),
+          year: payload.year,
+          subjectId: line.subjectId,
+          totalAdjustment: toStored(line.total),
+          annualAdjustment: toStored(line.annual),
         },
       });
     }
@@ -387,11 +303,6 @@ export async function deleteDraftAdjustment(
   });
 }
 
-/** 调整单 + 明细 + 锁的展开类型(getAdjustment / listAdjustments 返回)。 */
-export type AdjustmentWithRelations = Prisma.BudgetAdjustmentGetPayload<{
-  include: { lines: true; locks: true };
-}>;
-
 /** §7 列出调整单(包含明细 + 锁)。 */
 export async function listAdjustments(
   projectId: string,
@@ -405,7 +316,7 @@ export async function listAdjustments(
   });
 }
 
-/** §7 取单个调整单(包含明细 + 锁)。不存在抛 404。 */
+/** §7 取单个调整单(含明细 + 锁)。 */
 export async function getAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
@@ -421,7 +332,7 @@ export async function getAdjustment(
   return adj;
 }
 
-/** 取某叶科目某年度:已有待审批(未释放)锁的金额合计。 */
+/** 查询某 (year, subjectId) 上已存在且未释放的待审批锁合计。 */
 async function existingPendingLock(
   tx: Prisma.TransactionClient,
   projectId: string,
@@ -436,18 +347,11 @@ async function existingPendingLock(
 }
 
 /**
- * §7.4 提交调整单(DRAFT→PENDING):落地 §7.4/7.5 调出锁。
- *
- * - 仅 DRAFT 可提交(否则 409)。
- * - SUBJECT/SUBJECT_TRANSFER 的 DECREASE 叶节点行:校验 line.amount ≤ 该科目可调额度
- *   (current_budget - 总占用);超出 → 422 "调出额度不足";并为每个 DECREASE 行写一条
- *   budget_lock(amount=line.amount, year, subjectId, releasedAt=null)。
- * - PROJECT_TOTAL 的 DECREASE:校验 (project_total_current - 总占用) ≥ line.amount,
- *   即项目总当前预算扣除业务占用后仍不跌破调减额;否则 422。不写叶节点锁(§7.4 颗粒度在科目)。
- * - ANNUAL 的 DECREASE:校验 (annual_current - 该年度业务占用) ≥ line.amount;否则 422。
- *   不写叶节点锁。
- * - INCREASE 行不锁定(§7.5 待审批调入金额不可提前使用)。
- * - 事务内写完锁后置 status=PENDING,审计 submit。
+ * §7 提交审批(DRAFT → PENDING)。
+ * - 复跑平衡校验。
+ * - 对年度维度调减(annualAdjustment < 0)的每个 (year, subjectId):
+ *   校验 |调减| ≤ 可调额度(current - 占用),并叠加已有待审批锁;为每个调减行写一条锁。
+ * - 写完锁置 PENDING。
  */
 export async function submitAdjustment(
   adjId: string,
@@ -466,45 +370,30 @@ export async function submitAdjustment(
     throw new HTTPError(409, `当前状态 ${adj.status} 不可提交,仅 DRAFT 可提交`);
   }
 
-  // 按 levelType 分组收集 DECREASE 金额(校验 + 锁定用)。
-  // 把同一 (year, subjectId) 的多条 DECREASE 行金额合并。
-  const decreaseSubjectLines = new Map<string, { year: number; subjectId: string; amount: D }>();
-  const annualDecreaseByYear = new Map<number, D>();
-  const ptDecrease = sumAmounts(
-    adj.lines
-      .filter((l) => l.levelType === LevelType.PROJECT && l.direction === LineDirection.DECREASE)
-      .map((l) => fromStored(l.amount)),
-  );
-  for (const line of adj.lines) {
-    if (line.direction !== LineDirection.DECREASE) continue;
-    if (line.levelType === LevelType.SUBJECT) {
-      // SUBJECT / SUBJECT_TRANSFER 叶节点行。
-      if (line.year === null || line.year === undefined || !line.subjectId) {
-        throw new HTTPError(422, '科目级调减明细缺少 year/subjectId');
-      }
-      const key = `${line.year}:${line.subjectId}`;
-      const prev = decreaseSubjectLines.get(key);
-      const add = fromStored(line.amount);
-      decreaseSubjectLines.set(key, {
-        year: line.year,
-        subjectId: line.subjectId,
-        amount: prev ? prev.amount.plus(add) : add,
-      });
-    } else if (line.levelType === LevelType.ANNUAL) {
-      if (line.year === null || line.year === undefined) {
-        throw new HTTPError(422, '年度调减明细缺少 year');
-      }
-      annualDecreaseByYear.set(
-        line.year,
-        (annualDecreaseByYear.get(line.year) ?? ZERO).plus(fromStored(line.amount)),
-      );
-    }
-    // LevelType.PROJECT 已在 ptDecrease 收集。
-  }
+  const parsedLines = adj.lines.map((l) => ({
+    subjectId: l.subjectId,
+    total: fromStored(l.totalAdjustment),
+    annual: fromStored(l.annualAdjustment),
+  }));
+  assertBalanced(parsedLines);
 
   return prisma.$transaction(async (tx) => {
-    // ① SUBJECT 级 DECREASE:校验可调额度 + 写叶节点锁。
-    for (const [, info] of decreaseSubjectLines) {
+    // 按科目合并年度调减合计(同一科目多行可能分别调减)。
+    const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
+    for (const line of parsedLines) {
+      if (!line.annual.isNeg()) continue; // 仅年度维度调减
+      const key = `${adj.year}:${line.subjectId}`;
+      const prev = decreaseBySubject.get(key);
+      const decAmount = line.annual.abs();
+      decreaseBySubject.set(key, {
+        year: adj.year,
+        subjectId: line.subjectId,
+        amount: prev ? prev.amount.plus(decAmount) : decAmount,
+      });
+    }
+
+    // 校验可调额度 + 写锁。
+    for (const [, info] of decreaseBySubject.entries()) {
       const [subjectBudget, records] = await Promise.all([
         tx.subjectBudget.findUnique({
           where: {
@@ -526,31 +415,22 @@ export async function submitAdjustment(
         }),
       ]);
       const currentBudget = subjectBudget ? fromStored(subjectBudget.currentAmount) : ZERO;
-      const occ = computeOccupancy({
-        records: records.map((r) => ({
-          amount: r.amount,
-          status: r.status,
-          isVoid: r.isVoid,
-        })),
-      });
-      // §7.4 可调额度 = current - 占用(不含尚未提交的本次锁;在 create 阶段无锁,故直接用 adjustableAmount)。
+      const occ = computeOccupancy({ records });
       const adjustable = adjustableAmount(currentBudget, occ.totalOccupied);
       if (info.amount.gt(adjustable)) {
         throw new HTTPError(
           422,
-          `调出额度不足:科目 ${info.subjectId} 可调额度 ${adjustable.toFixed(2)},本次调减 ${info.amount.toFixed(2)}`,
+          `调出额度不足:科目可调额度 ${adjustable.toFixed(2)},本次年度调减 ${info.amount.toFixed(2)}`,
         );
       }
-      // 已有待审批锁则叠加上限(避免多张调减单累计超过可调额度)。
       const prevLock = await existingPendingLock(tx, adj.projectId, info.year, info.subjectId);
       if (prevLock.plus(info.amount).gt(adjustable)) {
         throw new HTTPError(
           422,
-          `调出额度不足:科目 ${info.subjectId} 可调额度 ${adjustable.toFixed(2)},已有待审批锁 ${prevLock.toFixed(2)},本次再调减 ${info.amount.toFixed(2)} 将超额`,
+          `调出额度不足:已有待审批锁 ${prevLock.toFixed(2)},本次再调减 ${info.amount.toFixed(2)} 将超额`,
         );
       }
-
-      // §7.5 写叶节点锁(releasedAt=null;审批生效或驳回/撤回时释放,见 Task 4)。
+      // 写锁。
       await tx.budgetLock.create({
         data: {
           id: uuidv7(),
@@ -564,63 +444,11 @@ export async function submitAdjustment(
       });
     }
 
-    // ② PROJECT_TOTAL DECREASE:项目总当前预算 - 项目总业务占用 ≥ 调减额;否则 422。
-    if (ptDecrease.gt(ZERO)) {
-      const projectBudget = await tx.projectBudget.findUnique({
-        where: { projectId: adj.projectId },
-      });
-      if (!projectBudget) {
-        throw new HTTPError(404, '项目预算记录不存在');
-      }
-      const projectCurrent = fromStored(projectBudget.currentAmount);
-      const allRecords = await tx.businessRecord.findMany({
-        where: { projectId: adj.projectId, isVoid: false },
-        select: { amount: true, status: true, isVoid: true },
-      });
-      const projectOcc = computeOccupancy({
-        records: allRecords.map((r) => ({ amount: r.amount, status: r.status, isVoid: r.isVoid })),
-      });
-      const adjustable = adjustableAmount(projectCurrent, projectOcc.totalOccupied);
-      if (ptDecrease.gt(adjustable)) {
-        throw new HTTPError(
-          422,
-          `项目总额可调额度不足:可调 ${adjustable.toFixed(2)},本次调减 ${ptDecrease.toFixed(2)}`,
-        );
-      }
-      // §7.4 V1 决策:PROJECT_TOTAL 不写叶节点锁(颗粒度在科目)。
-    }
-
-    // ③ ANNUAL DECREASE:年度当前预算 - 该年度业务占用 ≥ 调减额;否则 422。
-    for (const [year, decAmount] of annualDecreaseByYear.entries()) {
-      const annualBudget = await tx.annualBudget.findUnique({
-        where: { projectId_year: { projectId: adj.projectId, year } },
-      });
-      if (!annualBudget) {
-        throw new HTTPError(422, `${year} 年度预算不存在,无法调整`);
-      }
-      const annualCurrent = fromStored(annualBudget.currentAmount);
-      const yearRecords = await tx.businessRecord.findMany({
-        where: { projectId: adj.projectId, budgetYear: year, isVoid: false },
-        select: { amount: true, status: true, isVoid: true },
-      });
-      const yearOcc = computeOccupancy({
-        records: yearRecords.map((r) => ({ amount: r.amount, status: r.status, isVoid: r.isVoid })),
-      });
-      const adjustable = adjustableAmount(annualCurrent, yearOcc.totalOccupied);
-      if (decAmount.gt(adjustable)) {
-        throw new HTTPError(
-          422,
-          `${year} 年度可调额度不足:可调 ${adjustable.toFixed(2)},本次调减 ${decAmount.toFixed(2)}`,
-        );
-      }
-      // §7.4 V1 决策:ANNUAL 不写叶节点锁。
-    }
-
-    // ④ 状态 DRAFT→PENDING + 审计 submit。
-    const updated = await tx.budgetAdjustment.update({
+    const submitted = await tx.budgetAdjustment.update({
       where: { id: adjId },
       data: { status: ApprovalStatus.PENDING },
     });
+
     await recordAudit(tx, {
       projectId: adj.projectId,
       objectType: 'budget_adjustments',
@@ -628,17 +456,14 @@ export async function submitAdjustment(
       action: 'submit',
       operatorId: user.id,
       before: snapshotAdjustment(adj),
-      after: snapshotAdjustment(updated),
+      after: snapshotAdjustment(submitted),
     });
 
-    return updated;
+    return submitted;
   });
 }
 
-/**
- * §7.6 释放某调整单关联的全部 budget_locks(releasedAt=now)。
- * 用于 approve(已生效)、reject、withdraw。事务内执行。
- */
+/** 释放本单全部未释放锁。 */
 async function releaseLocks(tx: Prisma.TransactionClient, adjId: string, now: Date): Promise<void> {
   await tx.budgetLock.updateMany({
     where: { adjustmentId: adjId, releasedAt: null },
@@ -647,21 +472,14 @@ async function releaseLocks(tx: Prisma.TransactionClient, adjId: string, now: Da
 }
 
 /**
- * §7.6 审批生效事务(approveAdjustment):PENDING → APPROVED。
- *
- * 七步:
- * ① 复跑 §7.1/7.4 约束(由 lines 重建 amounts 平衡、amount>0)。
- * ② 重新校验每个 DECREASE 行的可调额度(提交后可能因新业务占用而不足 → 422 拒,
- *    §7.5 "因新增业务导致审批时可调额度不足的,调整不得审批通过")。
- * ③ (lines 已在 submit 时落库,这里不再写新明细)
- * ④ 应用 current_amount:PROJECT_TOTAL→ProjectBudget;ANNUAL→annual_budgets;
- *    SUBJECT/SUBJECT_TRANSFER→subject_budgets。INCREASE +amount,DECREASE -amount。
- * ⑤ 释放本单全部 budget_locks(releasedAt=now)。
- * ⑥ 汇总/结余/执行率通过 ledger 实时聚合,无需手动重算。
- * ⑦ 状态 PENDING→APPROVED,记 approverId/approvedAt/opinion,审计 approve。
- *
- * 安全再断言:生效后任何叶节点 currentAmount 不得低于该节点总占用(§7.4),否则 422。
- * 事务原子:任一步抛错 → 全部回滚,状态保持 PENDING、锁不释放。
+ * §7 审批通过(PENDING → APPROVED)。
+ * - 复跑平衡校验。
+ * - 重新校验每个年度调减叶节点的可调额度(§7.5:提交后可能新增业务占用导致不足)。
+ * - 应用双维度 delta:
+ *   · 年度维度:SubjectBudget.currentAmount += annualAdjustment(adjustmentAmount 同步累加)。
+ *   · 总预算维度:SubjectTotalBudget.currentAmount += totalAdjustment(adjustmentAmount 同步累加)。
+ * - 安全断言:生效后每个受影响叶节点的年度 current ≥ 占用。
+ * - 释放锁,置 APPROVED。
  */
 export async function approveAdjustment(
   adjId: string,
@@ -678,85 +496,31 @@ export async function approveAdjustment(
   await requirePermission(user, 'budget:approve', adj.projectId);
 
   if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不允许审批,仅 PENDING 可审批`);
+    throw new HTTPError(409, `当前状态 ${adj.status} 不可审批,仅 PENDING 可审批`);
   }
-
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
-    // ① 复跑约束:每行 amount>0 + SUBJECT_TRANSFER 平衡(从已落库 lines 重建)。
     const parsedLines = adj.lines.map((l) => ({
-      ...l,
-      amount: parsePositiveAmount(l.amount.toFixed(2)),
+      subjectId: l.subjectId,
+      total: fromStored(l.totalAdjustment),
+      annual: fromStored(l.annualAdjustment),
     }));
-    assertTransferBalanced(
-      adj.type,
-      parsedLines.map((l) => ({ direction: l.direction, amount: l.amount })),
-    );
+    assertBalanced(parsedLines);
 
-    // ② 重新校验每个 DECREASE 叶节点行的可调额度(current - occupancy)。
-    //    提交后可能新增业务记录占用 operable 额度 → 不足以审批通过(§7.5)。
-    const decreaseSubjectKeys = new Set<string>();
+    // 按科目合并年度调减合计,逐个重新校验可调额度(§7.5)。
+    const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
     for (const line of parsedLines) {
-      if (line.direction !== LineDirection.DECREASE) continue;
-      if (line.levelType !== LevelType.SUBJECT) continue;
-      if (line.year === null || line.year === undefined || !line.subjectId) {
-        throw new HTTPError(422, '科目级调减明细缺少 year/subjectId');
-      }
-      // SUBJECT_TRANSFER 多个 DECREASE 行可能落在同一叶节点;按 (year,subjectId) 合并校验。
-      const key = `${line.year}:${line.subjectId}`;
-      decreaseSubjectKeys.add(key);
-    }
-
-    // 收集每个 DECREASE 叶节点合计 + 重新校验可调额度。
-    const decreaseSubjectTotals = new Map<string, { year: number; subjectId: string; total: D }>();
-    for (const line of parsedLines) {
-      if (line.direction !== LineDirection.DECREASE || line.levelType !== LevelType.SUBJECT) {
-        continue;
-      }
-      const key = `${line.year}:${line.subjectId}`;
-      const prev = decreaseSubjectTotals.get(key);
-      const add = line.amount;
-      decreaseSubjectTotals.set(key, {
-        year: line.year!,
-        subjectId: line.subjectId!,
-        total: prev ? prev.total.plus(add) : add,
+      if (!line.annual.isNeg()) continue;
+      const key = `${adj.year}:${line.subjectId}`;
+      const prev = decreaseBySubject.get(key);
+      decreaseBySubject.set(key, {
+        year: adj.year,
+        subjectId: line.subjectId,
+        amount: prev ? prev.amount.plus(line.annual.abs()) : line.annual.abs(),
       });
     }
-
-    // ③ (lines 已存在;无新明细写入)
-
-    // ④ 应用 current_amount(先计算变更,稍后在锁校验后落地)。
-    // 按 (year, subjectId) 合并 SUBJECT 级变更(net = INCREASE - DECREASE)。
-    const subjectDeltas = new Map<string, { year: number; subjectId: string; delta: D }>();
-    const annualDeltas = new Map<number, D>();
-    let projectDelta = ZERO;
-
-    for (const line of parsedLines) {
-      const signed = line.direction === LineDirection.INCREASE ? line.amount : line.amount.neg();
-      if (line.levelType === LevelType.PROJECT) {
-        projectDelta = projectDelta.plus(signed);
-      } else if (line.levelType === LevelType.ANNUAL) {
-        if (line.year === null || line.year === undefined) {
-          throw new HTTPError(422, '年度调减明细缺少 year');
-        }
-        annualDeltas.set(line.year, (annualDeltas.get(line.year) ?? ZERO).plus(signed));
-      } else if (line.levelType === LevelType.SUBJECT) {
-        if (line.year === null || line.year === undefined || !line.subjectId) {
-          throw new HTTPError(422, '科目级明细缺少 year/subjectId');
-        }
-        const key = `${line.year}:${line.subjectId}`;
-        const prev = subjectDeltas.get(key);
-        subjectDeltas.set(key, {
-          year: line.year,
-          subjectId: line.subjectId,
-          delta: prev ? prev.delta.plus(signed) : signed,
-        });
-      }
-    }
-
-    // ②(续)对每个 DECREASE 叶节点重新校验可调额度,422 拒。
-    for (const [, info] of decreaseSubjectTotals.entries()) {
+    for (const [, info] of decreaseBySubject.entries()) {
       const [subjectBudget, records] = await Promise.all([
         tx.subjectBudget.findUnique({
           where: {
@@ -778,88 +542,89 @@ export async function approveAdjustment(
         }),
       ]);
       const currentBudget = subjectBudget ? fromStored(subjectBudget.currentAmount) : ZERO;
-      const occ = computeOccupancy({
-        records: records.map((r) => ({
-          amount: r.amount,
-          status: r.status,
-          isVoid: r.isVoid,
-        })),
-      });
-      // §7.5 可调额度 = current - occupancy(此处仍含本单锁定额,但锁定本身不影响 current,
-      // 仅占用会让 current-occupancy 收窄)。若调减额 > 可调额度 → 422。
+      const occ = computeOccupancy({ records });
       const adjustable = adjustableAmount(currentBudget, occ.totalOccupied);
-      if (info.total.gt(adjustable)) {
+      if (info.amount.gt(adjustable)) {
         throw new HTTPError(
           422,
-          `审批时额度不足:科目可调额度 ${adjustable.toFixed(2)},本次调减 ${info.total.toFixed(2)}(§7.5)`,
+          `审批时额度不足:科目可调额度 ${adjustable.toFixed(2)},年度调减 ${info.amount.toFixed(2)}(§7.5)`,
         );
       }
     }
 
-    // 落地 current_amount 变更。
-    // SUBJECT 级
-    for (const [, info] of subjectDeltas.entries()) {
-      if (info.delta.eq(ZERO)) continue;
+    // 应用年度维度 delta:SubjectBudget.currentAmount/adjustmentAmount。
+    const annualDeltaBySubject = new Map<string, D>();
+    for (const line of parsedLines) {
+      annualDeltaBySubject.set(
+        line.subjectId,
+        (annualDeltaBySubject.get(line.subjectId) ?? ZERO).plus(line.annual),
+      );
+    }
+    for (const [subjectId, delta] of annualDeltaBySubject.entries()) {
+      if (delta.eq(ZERO)) continue;
       const sb = await tx.subjectBudget.findUnique({
         where: {
-          projectId_year_subjectId: {
-            projectId: adj.projectId,
-            year: info.year,
-            subjectId: info.subjectId,
-          },
+          projectId_year_subjectId: { projectId: adj.projectId, year: adj.year, subjectId },
         },
       });
       if (!sb) {
-        throw new HTTPError(422, `科目 ${info.subjectId} ${info.year} 年度预算不存在`);
+        throw new HTTPError(422, `科目年度预算不存在(年度 ${adj.year})`);
       }
-      const next = fromStored(sb.currentAmount).plus(info.delta);
+      const next = fromStored(sb.currentAmount).plus(delta);
+      const nextAdj = fromStored(sb.adjustmentAmount).plus(delta);
       await tx.subjectBudget.update({
         where: { id: sb.id },
-        data: { currentAmount: toStored(next) },
-      });
-    }
-    // ANNUAL 级
-    for (const [year, delta] of annualDeltas.entries()) {
-      if (delta.eq(ZERO)) continue;
-      const ab = await tx.annualBudget.findUnique({
-        where: { projectId_year: { projectId: adj.projectId, year } },
-      });
-      if (!ab) {
-        throw new HTTPError(422, `${year} 年度预算不存在`);
-      }
-      const next = fromStored(ab.currentAmount).plus(delta);
-      await tx.annualBudget.update({
-        where: { id: ab.id },
-        data: { currentAmount: toStored(next) },
-      });
-    }
-    // PROJECT_TOTAL 级
-    if (!projectDelta.eq(ZERO)) {
-      const pb = await tx.projectBudget.findUnique({ where: { projectId: adj.projectId } });
-      if (!pb) {
-        throw new HTTPError(404, '项目预算记录不存在');
-      }
-      const next = fromStored(pb.currentAmount).plus(projectDelta);
-      await tx.projectBudget.update({
-        where: { projectId: adj.projectId },
-        data: { currentAmount: toStored(next) },
+        data: { currentAmount: toStored(next), adjustmentAmount: toStored(nextAdj) },
       });
     }
 
-    // 安全再断言(§7.4):生效后任何受影响叶节点 currentAmount 不得低于该节点总占用。
-    for (const key of decreaseSubjectKeys) {
-      const [yearStr, subjectId] = key.split(':');
-      const year = Number(yearStr);
+    // 应用总预算维度 delta:SubjectTotalBudget.currentAmount/adjustmentAmount。
+    const totalDeltaBySubject = new Map<string, D>();
+    for (const line of parsedLines) {
+      totalDeltaBySubject.set(
+        line.subjectId,
+        (totalDeltaBySubject.get(line.subjectId) ?? ZERO).plus(line.total),
+      );
+    }
+    for (const [subjectId, delta] of totalDeltaBySubject.entries()) {
+      if (delta.eq(ZERO)) continue;
+      const stb = await tx.subjectTotalBudget.findUnique({
+        where: { projectId_subjectId: { projectId: adj.projectId, subjectId } },
+      });
+      if (!stb) {
+        // 编制时未填总预算的科目:调整以 0 为基准 upsert 创建。
+        await tx.subjectTotalBudget.create({
+          data: {
+            id: uuidv7(),
+            projectId: adj.projectId,
+            subjectId,
+            initialAmount: toStored(ZERO),
+            adjustmentAmount: toStored(delta),
+            currentAmount: toStored(delta),
+          },
+        });
+      } else {
+        const next = fromStored(stb.currentAmount).plus(delta);
+        const nextAdj = fromStored(stb.adjustmentAmount).plus(delta);
+        await tx.subjectTotalBudget.update({
+          where: { id: stb.id },
+          data: { currentAmount: toStored(next), adjustmentAmount: toStored(nextAdj) },
+        });
+      }
+    }
+
+    // 安全再断言(§7.4):生效后每个年度维度受影响叶节点 current ≥ 占用。
+    for (const subjectId of annualDeltaBySubject.keys()) {
       const [sb, records] = await Promise.all([
         tx.subjectBudget.findUnique({
           where: {
-            projectId_year_subjectId: { projectId: adj.projectId, year, subjectId },
+            projectId_year_subjectId: { projectId: adj.projectId, year: adj.year, subjectId },
           },
         }),
         tx.businessRecord.findMany({
           where: {
             projectId: adj.projectId,
-            budgetYear: year,
+            budgetYear: adj.year,
             subjectId,
             isVoid: false,
           },
@@ -867,13 +632,7 @@ export async function approveAdjustment(
         }),
       ]);
       const current = sb ? fromStored(sb.currentAmount) : ZERO;
-      const occ = computeOccupancy({
-        records: records.map((r) => ({
-          amount: r.amount,
-          status: r.status,
-          isVoid: r.isVoid,
-        })),
-      });
+      const occ = computeOccupancy({ records });
       if (current.lt(occ.totalOccupied)) {
         throw new HTTPError(
           422,
@@ -882,11 +641,11 @@ export async function approveAdjustment(
       }
     }
 
-    // ⑤ 释放本单全部 budget_locks。
+    // 释放锁。
     await releaseLocks(tx, adjId, now);
 
-    // ⑦ 状态 PENDING→APPROVED + 审计。
-    const updated = await tx.budgetAdjustment.update({
+    // 置 APPROVED + 审计。
+    const approved = await tx.budgetAdjustment.update({
       where: { id: adjId },
       data: {
         status: ApprovalStatus.APPROVED,
@@ -895,7 +654,6 @@ export async function approveAdjustment(
       },
     });
 
-    const trimmedOpinion = opinion?.trim() ? opinion.trim() : null;
     await recordAudit(tx, {
       projectId: adj.projectId,
       objectType: 'budget_adjustments',
@@ -903,48 +661,38 @@ export async function approveAdjustment(
       action: 'approve',
       operatorId: user.id,
       before: snapshotAdjustment(adj),
-      after: { ...snapshotAdjustment(updated), opinion: trimmedOpinion },
+      after: { ...snapshotAdjustment(approved), opinion: opinion ?? null },
     });
 
-    return updated;
+    return approved;
   });
 }
 
-/**
- * §7.6 驳回(rejectAdjustment):PENDING → REJECTED。
- * 释放本单锁(releasedAt=now),不改变任何 current_amount,审计 reject。
- * 非 PENDING 抛 409;审批权按项目范围校验。
- */
+/** §7 驳回(PENDING → REJECTED):释放锁,不改 current。opinion 必填。 */
 export async function rejectAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
   opinion: string,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({
-    where: { id: adjId },
-    include: { lines: true },
-  });
+  const adj = await prisma.budgetAdjustment.findUnique({ where: { id: adjId } });
   if (!adj) {
     throw new HTTPError(404, '调整单不存在');
   }
   await requirePermission(user, 'budget:approve', adj.projectId);
 
   if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不允许驳回,仅 PENDING 可驳回`);
+    throw new HTTPError(409, `当前状态 ${adj.status} 不可驳回,仅 PENDING 可驳回`);
   }
-
-  const trimmedOpinion = opinion?.trim() ? opinion.trim() : null;
+  if (!opinion || !opinion.trim()) {
+    throw new HTTPError(422, '驳回需填写意见');
+  }
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
     await releaseLocks(tx, adjId, now);
-    const updated = await tx.budgetAdjustment.update({
+    const rejected = await tx.budgetAdjustment.update({
       where: { id: adjId },
-      data: {
-        status: ApprovalStatus.REJECTED,
-        approverId: user.id,
-        approvedAt: now,
-      },
+      data: { status: ApprovalStatus.REJECTED },
     });
     await recordAudit(tx, {
       projectId: adj.projectId,
@@ -953,40 +701,31 @@ export async function rejectAdjustment(
       action: 'reject',
       operatorId: user.id,
       before: snapshotAdjustment(adj),
-      after: { ...snapshotAdjustment(updated), opinion: trimmedOpinion },
+      after: { ...snapshotAdjustment(rejected), opinion: opinion.trim() },
     });
-    return updated;
+    return rejected;
   });
 }
 
-/**
- * §7 撤回(withdrawAdjustment):PENDING → DRAFT(回到草稿可继续修改)。
- * 申请人可撤回;释放本单锁(releasedAt=now),审计 withdraw。
- * 非 PENDING 抛 409。
- */
+/** §7 撤回(PENDING → DRAFT):释放锁,允许申请人继续编辑。 */
 export async function withdrawAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({
-    where: { id: adjId },
-    include: { lines: true },
-  });
+  const adj = await prisma.budgetAdjustment.findUnique({ where: { id: adjId } });
   if (!adj) {
     throw new HTTPError(404, '调整单不存在');
   }
-  // 申请人撤回:有项目调整权即可(与发起调整同一权限)。
   await requirePermission(user, 'budget:adjust', adj.projectId);
 
   if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不允许撤回,仅 PENDING 可撤回`);
+    throw new HTTPError(409, `当前状态 ${adj.status} 不可撤回,仅 PENDING 可撤回`);
   }
-
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
     await releaseLocks(tx, adjId, now);
-    const updated = await tx.budgetAdjustment.update({
+    const withdrawn = await tx.budgetAdjustment.update({
       where: { id: adjId },
       data: { status: ApprovalStatus.DRAFT },
     });
@@ -997,8 +736,8 @@ export async function withdrawAdjustment(
       action: 'withdraw',
       operatorId: user.id,
       before: snapshotAdjustment(adj),
-      after: snapshotAdjustment(updated),
+      after: snapshotAdjustment(withdrawn),
     });
-    return updated;
+    return withdrawn;
   });
 }

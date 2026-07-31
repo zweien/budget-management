@@ -64,7 +64,7 @@ export async function GET() {
     const adjustmentsWithApplicant = adjustments.map((a) => ({
       id: a.id,
       projectId: a.projectId,
-      type: a.type,
+      year: a.year,
       status: a.status,
       reason: a.reason,
       applicantId: a.applicantId,
