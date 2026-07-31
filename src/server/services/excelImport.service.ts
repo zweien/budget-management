@@ -32,6 +32,8 @@ export interface ParsedRowData {
   projectCode: string | null;
   budgetYear: string | null;
   subjectCode: string | null;
+  /** 科目编码解析出的科目名称(便于预览展示;编码无效时为 null)。 */
+  subjectName: string | null;
   amount: string | null;
   businessDate: string | null;
   handler: string | null;
@@ -253,6 +255,7 @@ export async function parseAndValidate(
       projectCode: get('projectCode'),
       budgetYear: get('budgetYear'),
       subjectCode: get('subjectCode'),
+      subjectName: null,
       amount: get('amount'),
       businessDate: get('businessDate'),
       handler: get('handler'),
@@ -301,6 +304,7 @@ export async function parseAndValidate(
         });
       } else {
         subjectId = subj.id;
+        data.subjectName = subj.name;
       }
     }
 

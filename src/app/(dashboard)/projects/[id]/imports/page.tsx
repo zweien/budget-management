@@ -36,6 +36,7 @@ interface PreviewRow {
     projectCode: string | null;
     budgetYear: string | null;
     subjectCode: string | null;
+    subjectName: string | null;
     amount: string | null;
     businessDate: string | null;
     handler: string | null;
@@ -153,9 +154,10 @@ function PreviewTable({
       render: (_: unknown, r: PreviewRow) => r.parsedData.budgetYear ?? '—',
     },
     {
-      title: '科目编码',
+      title: '科目',
       key: 'subj',
-      render: (_: unknown, r: PreviewRow) => r.parsedData.subjectCode ?? '—',
+      render: (_: unknown, r: PreviewRow) =>
+        r.parsedData.subjectName ?? r.parsedData.subjectCode ?? <Text type="secondary">—</Text>,
     },
     {
       title: '金额',

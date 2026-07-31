@@ -33,7 +33,6 @@ async function backfillProject(projectId: string) {
   const subjects = await prisma.budgetSubject.findMany({ where: { projectId } });
   if (subjects.length === 0) return 0;
 
-  const byId = new Map(subjects.map((s) => [s.id, s]));
   // parentId(null) → 根;否则父 id。
   const childrenOf = new Map<string | null, typeof subjects>();
   for (const s of subjects) {

@@ -435,12 +435,8 @@ export default function BusinessRecordsPage() {
       render: (subjectId: string) => {
         const s = subjectMap.get(subjectId);
         if (!s) return <Text type="secondary">{subjectId.slice(0, 8)}</Text>;
-        return (
-          <Space size={4}>
-            <Text style={{ color: '#8c8c8c', fontFamily: 'monospace' }}>{s.code}</Text>
-            <span>{s.name}</span>
-          </Space>
-        );
+        // 仅显示科目名称,不展示编码。
+        return <span>{s.name}</span>;
       },
     },
     {
@@ -544,7 +540,7 @@ export default function BusinessRecordsPage() {
   }
 
   const subjectOptions = leafSubjects.map((s) => ({
-    label: `${s.code} ${s.name}`,
+    label: s.name,
     value: s.subjectId,
   }));
   const statusOptions = BUSINESS_STATUSES.map((s) => ({
