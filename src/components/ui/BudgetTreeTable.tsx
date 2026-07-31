@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Space, Table } from 'antd';
+import { Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { MoneyText } from '@/components/ui/MoneyText';
 
@@ -86,12 +86,8 @@ export function BudgetTreeTable({ nodes }: Props) {
       dataIndex: 'name',
       key: 'subject',
       // 树形首列由 Table 的 rowExpandable + indent 自带缩进,无需额外样式。
-      render: (_, r) => (
-        <Space size={6}>
-          <span style={{ color: '#8c8c8c', fontFamily: 'monospace' }}>{r.code}</span>
-          <span>{r.name}</span>
-        </Space>
-      ),
+      // 仅显示科目名称,不展示编码。
+      render: (_, r) => <span>{r.name}</span>,
     },
     { title: '初始预算', dataIndex: 'initial', key: 'initial', render: rightMoney },
     { title: '预算调整', dataIndex: 'adjustment', key: 'adjustment', render: rightMoney },
