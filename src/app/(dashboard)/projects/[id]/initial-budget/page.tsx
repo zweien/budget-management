@@ -315,14 +315,16 @@ export default function InitialBudgetPage() {
 
   /**
    * 把扁平 subjectRows 组装成 AntD Table 树形 dataSource。
-   * 根 = parentCode 为空;子按 code 排序保证展示稳定(同 BudgetTreeTable)。
+   * 根 = parentCode 为空;子按 subjectRows 的原始顺序(模板定义/用户新增顺序)追加,
+   * 不按 code 字母序重排 —— 保证模板顺序与用户预期一致(如直接费在间接费之前)。
    */
   const subjectTree = useMemo<SubjectTreeNode[]>(() => {
     const byCode = new Map<string, SubjectTreeNode>();
     subjectRows.forEach((r) => byCode.set(r.code, { ...r, key: r.key }));
     const roots: SubjectTreeNode[] = [];
-    const sorted = [...byCode.values()].sort((a, b) => (a.code || '').localeCompare(b.code || ''));
-    sorted.forEach((node) => {
+    // 按 subjectRows 原始顺序遍历,保持插入顺序。
+    subjectRows.forEach((r) => {
+      const node = byCode.get(r.code)!;
       if (node.parentCode && byCode.has(node.parentCode)) {
         const parent = byCode.get(node.parentCode)!;
         parent.children = parent.children ?? [];
@@ -917,15 +919,20 @@ function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectTreeN
     {
       // 名称列即树形首列:AntD 会在该列按层级缩进并显示展开箭头
       // (childrenColumnName="children" + expandable)。
+      // 用 flex 行布局,让 AntD 注入的展开箭头与名称输入框在同一行(不换行)。
       title: '名称',
       dataIndex: 'name',
       render: (_: unknown, row: SubjectTreeNode) =>
         editable ? (
-          <Input
-            value={row.name}
-            onChange={(e) => updateSubjectRow(row.key, { name: e.target.value })}
-            placeholder="如 设备购置费"
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Input
+              value={row.name}
+              onChange={(e) => updateSubjectRow(row.key, { name: e.target.value })}
+              placeholder="如 设备购置费"
+              size="small"
+              style={{ flex: 1, minWidth: 120 }}
+            />
+          </div>
         ) : (
           row.name
         ),
