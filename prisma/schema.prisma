@@ -89,12 +89,13 @@ model Project {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  owner           User              @relation(fields: [ownerId], references: [id])
-  members         ProjectMember[]
-  subjects        BudgetSubject[]
-  annualBudgets   AnnualBudget[]
-  subjectBudgets  SubjectBudget[]
-  projectBudget   ProjectBudget?
+  owner                  User              @relation(fields: [ownerId], references: [id])
+  members                ProjectMember[]
+  subjects               BudgetSubject[]
+  annualBudgets          AnnualBudget[]
+  subjectBudgets         SubjectBudget[]
+  subjectTotalBudgets    SubjectTotalBudget[]
+  projectBudget          ProjectBudget?
   applications    InitialBudgetApplication[]
   subjectChanges  SubjectChangeApplication[]
   adjustments     BudgetAdjustment[]
@@ -131,11 +132,12 @@ model BudgetSubject {
   isLeaf      Boolean  @map("is_leaf")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  project        Project         @relation(fields: [projectId], references: [id])
-  parent         BudgetSubject?  @relation("SubjectTree", fields: [parentId], references: [id])
-  children       BudgetSubject[] @relation("SubjectTree")
-  subjectBudgets SubjectBudget[]
-  records        BusinessRecord[]
+  project             Project              @relation(fields: [projectId], references: [id])
+  parent              BudgetSubject?       @relation("SubjectTree", fields: [parentId], references: [id])
+  children            BudgetSubject[]      @relation("SubjectTree")
+  subjectBudgets      SubjectBudget[]
+  subjectTotalBudgets SubjectTotalBudget[]
+  records             BusinessRecord[]
 
   @@unique([projectId, code]) // §16.1 项目内唯一
   @@index([projectId])
@@ -182,6 +184,23 @@ model SubjectBudget {
   @@unique([projectId, year, subjectId]) // §16.1
   @@index([projectId, year])
   @@map("subject_budgets")
+}
+
+// §B model:每个叶科目的跨年度「总预算」。年度科目预算(subject_budgets)是其分配。
+// 仅初始编制阶段写入,审批通过前 currentAmount=0(§6.3 同其他三层预算)。
+model SubjectTotalBudget {
+  id               String   @id @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  subjectId        String   @map("subject_id") @db.Uuid
+  initialAmount    Decimal  @map("initial_amount") @db.Decimal(18, 2)
+  adjustmentAmount Decimal  @map("adjustment_amount") @default(0) @db.Decimal(18, 2)
+  currentAmount    Decimal  @map("current_amount") @db.Decimal(18, 2)
+
+  project Project       @relation(fields: [projectId], references: [id])
+  subject BudgetSubject @relation(fields: [subjectId], references: [id])
+
+  @@unique([projectId, subjectId])
+  @@map("subject_total_budgets")
 }
 
 model InitialBudgetApplication {

@@ -20,6 +20,7 @@ const cleanupProject = async (projectId: string) => {
     .deleteMany({ where: { businessRecord: { projectId } } })
     .catch(() => {});
   await prisma.businessRecord.deleteMany({ where: { projectId } }).catch(() => {});
+  await prisma.subjectTotalBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.annualBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
@@ -48,6 +49,10 @@ function twoYearPayload(opts?: { x2026?: string; x2027?: string }): InitialBudge
     subjectBudgets: [
       { year: 2026, subjectCode: 'X', amount: opts?.x2026 ?? '500.00' },
       { year: 2027, subjectCode: 'X', amount: opts?.x2027 ?? '500.00' },
+    ],
+    subjectTotalBudgets: [
+      // X 跨两年合计:默认 1000(留余严格等于分配;若有 opts 则两段相加)。
+      { subjectCode: 'X', amount: '1000.00' },
     ],
   };
 }

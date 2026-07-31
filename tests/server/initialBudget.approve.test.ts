@@ -17,6 +17,7 @@ import { createProject } from '@/server/services/project.service';
 // 三层预算(current 置位)+ 审计,需级联清理。
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
+  await prisma.subjectTotalBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.annualBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
@@ -27,7 +28,7 @@ const cleanupProject = async (projectId: string) => {
   await prisma.project.deleteMany({ where: { id: projectId } }).catch(() => {});
 };
 
-/** 构造合法 payload:1 根(非叶)+ 2 叶,1 年度。 */
+/** 构造合法 payload:1 根(非叶)+ 2 叶,1 年度。§B model 每叶带一份跨年度总预算。 */
 function validPayload(): InitialBudgetPayload {
   return {
     projectTotal: '1000.00',
@@ -40,6 +41,10 @@ function validPayload(): InitialBudgetPayload {
     subjectBudgets: [
       { year: 2026, subjectCode: 'A', amount: '600.00' },
       { year: 2026, subjectCode: 'B', amount: '400.00' },
+    ],
+    subjectTotalBudgets: [
+      { subjectCode: 'A', amount: '600.00' },
+      { subjectCode: 'B', amount: '400.00' },
     ],
   };
 }
@@ -113,6 +118,14 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
     });
     expect(sbABefore!.currentAmount.toFixed(2)).toBe('0.00');
 
+    // §B model:跨年度总预算审批前 current = 0。
+    const stABefore = await prisma.subjectTotalBudget.findUnique({
+      where: {
+        projectId_subjectId: { projectId: project.id, subjectId: leafA.id },
+      },
+    });
+    expect(stABefore!.currentAmount.toFixed(2)).toBe('0.00');
+
     // 审批生效。
     const result = await approveApplication(
       appId,
@@ -147,6 +160,15 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
     });
     expect(sbAAfter!.initialAmount.toFixed(2)).toBe('600.00');
     expect(sbAAfter!.currentAmount.toFixed(2)).toBe('600.00');
+
+    // §B model:跨年度总预算审批后 current ← initial(整体生效)。
+    const stAAfter = await prisma.subjectTotalBudget.findUnique({
+      where: {
+        projectId_subjectId: { projectId: project.id, subjectId: leafA.id },
+      },
+    });
+    expect(stAAfter!.initialAmount.toFixed(2)).toBe('600.00');
+    expect(stAAfter!.currentAmount.toFixed(2)).toBe('600.00');
 
     // application 状态。
     const app = await prisma.initialBudgetApplication.findUnique({ where: { id: appId } });

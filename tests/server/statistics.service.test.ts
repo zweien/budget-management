@@ -24,6 +24,7 @@ const cleanupProject = async (projectId: string) => {
     .deleteMany({ where: { businessRecord: { projectId } } })
     .catch(() => {});
   await prisma.businessRecord.deleteMany({ where: { projectId } }).catch(() => {});
+  await prisma.subjectTotalBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.annualBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
@@ -50,6 +51,10 @@ function validPayload(): InitialBudgetPayload {
     subjectBudgets: [
       { year: 2026, subjectCode: 'A', amount: '600.00' },
       { year: 2026, subjectCode: 'B', amount: '400.00' },
+    ],
+    subjectTotalBudgets: [
+      { subjectCode: 'A', amount: '600.00' },
+      { subjectCode: 'B', amount: '400.00' },
     ],
   };
 }

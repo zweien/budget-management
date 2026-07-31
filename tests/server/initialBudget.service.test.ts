@@ -16,6 +16,7 @@ import { createProject } from '@/server/services/project.service';
 // 年度预算 + 叶节点预算,需级联清理。
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
+  await prisma.subjectTotalBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.subjectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.annualBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
@@ -26,7 +27,8 @@ const cleanupProject = async (projectId: string) => {
   await prisma.project.deleteMany({ where: { id: projectId } }).catch(() => {});
 };
 
-/** 构造一份合法的 payload:1 个根科目(非叶)+ 2 个叶科目,1 个年度。 */
+/** 构造一份合法的 payload:1 个根科目(非叶)+ 2 个叶科目,1 个年度。
+ *  §B model:每个叶科目带一份跨年度总预算(A=600,B=400,合计=1000 ≤ projectTotal)。 */
 function validPayload(): InitialBudgetPayload {
   return {
     projectTotal: '1000.00',
@@ -39,6 +41,10 @@ function validPayload(): InitialBudgetPayload {
     subjectBudgets: [
       { year: 2026, subjectCode: 'A', amount: '600.00' },
       { year: 2026, subjectCode: 'B', amount: '400.00' },
+    ],
+    subjectTotalBudgets: [
+      { subjectCode: 'A', amount: '600.00' },
+      { subjectCode: 'B', amount: '400.00' },
     ],
   };
 }
@@ -122,6 +128,20 @@ describe('initialBudget.service (integration, real PG)', () => {
     expect(pb!.initialAmount.toFixed(2)).toBe('1000.00');
     expect(pb!.currentAmount.toFixed(2)).toBe('0.00');
 
+    // §B model 叶科目跨年度总预算:initial = 总预算,current = 0(§6.3 审批生效才置位)。
+    const stA = await prisma.subjectTotalBudget.findUnique({
+      where: {
+        projectId_subjectId: { projectId: project.id, subjectId: leafA.id },
+      },
+    });
+    expect(stA!.initialAmount.toFixed(2)).toBe('600.00');
+    expect(stA!.currentAmount.toFixed(2)).toBe('0.00');
+    expect(stA!.adjustmentAmount.toFixed(2)).toBe('0.00');
+    const stAll = await prisma.subjectTotalBudget.findMany({
+      where: { projectId: project.id },
+    });
+    expect(stAll).toHaveLength(2);
+
     // 审计同事务写入 create。
     const audit = await prisma.auditLog.findFirst({
       where: { objectId: appId, action: 'create' },
@@ -137,6 +157,8 @@ describe('initialBudget.service (integration, real PG)', () => {
     expect(draft.projectTotal).toBe('1000.00');
     expect(draft.subjects.find((s) => s.code === 'A')!.parentCode).toBe('ROOT');
     expect(draft.subjectBudgets.find((sb) => sb.subjectCode === 'A')!.amount).toBe('600.00');
+    expect(draft.subjectTotalBudgets.find((st) => st.subjectCode === 'A')!.amount).toBe('600.00');
+    expect(draft.subjectTotalBudgets).toHaveLength(2);
   });
 
   it('createDraft: §6.4 叶节点合计 > 年度 → HTTPError 422', async () => {
@@ -157,6 +179,88 @@ describe('initialBudget.service (integration, real PG)', () => {
       where: { projectId: project.id },
     });
     expect(apps).toHaveLength(0);
+  });
+
+  it('createDraft: §B 规则1 — 叶科目跨年度总预算合计 > 项目总预算 → HTTPError 422', async () => {
+    const code = `T3-ST1-${uuidv7().slice(0, 8)}`;
+    const project = await createProject({ code, name: 't3 st1' }, { id: adminId });
+    createdProjectIds.push(project.id);
+
+    const bad = validPayload();
+    // 总预算合计 600+400=1000,把项目总预算改成 900(年度合计仍是 1000 会先触发规则2,
+    // 所以同时压低年度分配,让规则2通过、只触发规则1)。
+    bad.projectTotal = '900.00';
+    bad.annualBudgets = [{ year: 2026, amount: '900.00' }];
+    bad.subjectBudgets = [
+      { year: 2026, subjectCode: 'A', amount: '500.00' },
+      { year: 2026, subjectCode: 'B', amount: '400.00' },
+    ];
+    // 总预算合计仍 1000 > 900 → 规则1 触发。每个科目分配 ≤ 自己总预算(规则3 通过)。
+
+    await expect(
+      createDraft(project.id, bad, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+    ).rejects.toMatchObject({ status: 422 });
+
+    const apps = await prisma.initialBudgetApplication.findMany({
+      where: { projectId: project.id },
+    });
+    expect(apps).toHaveLength(0);
+  });
+
+  it('createDraft: §B 规则3 — 单个叶科目跨年度分配合计 > 其总预算 → HTTPError 422', async () => {
+    const code = `T3-ST3-${uuidv7().slice(0, 8)}`;
+    const project = await createProject({ code, name: 't3 st3' }, { id: adminId });
+    createdProjectIds.push(project.id);
+
+    const bad = validPayload();
+    // 给 A 两年的分配:600 + 500 = 1100,但其总预算只有 600 → 规则3 触发。
+    bad.projectTotal = '2000.00';
+    bad.annualBudgets = [
+      { year: 2026, amount: '1100.00' },
+      { year: 2027, amount: '500.00' },
+    ];
+    bad.subjectBudgets = [
+      { year: 2026, subjectCode: 'A', amount: '600.00' },
+      { year: 2026, subjectCode: 'B', amount: '400.00' }, // 合计 1000 ≤ 1100(规则2 通过)
+      { year: 2027, subjectCode: 'A', amount: '500.00' }, // A 总分配 1100 > 600(规则3 触发)
+    ];
+    // 规则1:总预算合计 600+400=1000 ≤ 2000(通过)。
+
+    await expect(
+      createDraft(project.id, bad, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+    ).rejects.toMatchObject({ status: 422 });
+
+    const apps = await prisma.initialBudgetApplication.findMany({
+      where: { projectId: project.id },
+    });
+    expect(apps).toHaveLength(0);
+  });
+
+  it('createDraft: §B 留余额允许 — 分配合计 < 总预算(规则3 通过,不抛错)', async () => {
+    const code = `T3-STOK-${uuidv7().slice(0, 8)}`;
+    const project = await createProject({ code, name: 't3 stok' }, { id: adminId });
+    createdProjectIds.push(project.id);
+
+    const ok = validPayload();
+    // 总预算 A=1000 但只分配 600(留余额 400),合法。
+    ok.projectTotal = '1400.00';
+    ok.annualBudgets = [{ year: 2026, amount: '1000.00' }];
+    ok.subjectTotalBudgets = [
+      { subjectCode: 'A', amount: '1000.00' },
+      { subjectCode: 'B', amount: '400.00' },
+    ];
+    // subjectBudgets 保持 A=600,B=400(合计 1000 ≤ 1000 年度,且 ≤ 各自总预算)。
+
+    const { appId } = await createDraft(project.id, ok, {
+      id: adminId,
+      role: UserRole.BUDGET_ADMIN,
+    });
+    expect(appId).toBeDefined();
+
+    const stA = await prisma.subjectTotalBudget.findFirst({
+      where: { projectId: project.id, subject: { code: 'A' } },
+    });
+    expect(stA!.initialAmount.toFixed(2)).toBe('1000.00');
   });
 
   it('createDraft: 重复编制(同一项目再创建)→ HTTPError 409', async () => {
@@ -241,6 +345,10 @@ describe('initialBudget.service (integration, real PG)', () => {
       subjectBudgets: [
         { year: 2026, subjectCode: 'A', amount: '1000.00' },
         { year: 2026, subjectCode: 'C', amount: '1000.00' },
+      ],
+      subjectTotalBudgets: [
+        { subjectCode: 'A', amount: '1000.00' },
+        { subjectCode: 'C', amount: '1000.00' },
       ],
     };
     const res = await updateDraft(appId, updated, { id: adminId, role: UserRole.BUDGET_ADMIN });
