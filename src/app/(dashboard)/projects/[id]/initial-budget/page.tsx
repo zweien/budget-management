@@ -103,6 +103,39 @@ function genKey(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
+/**
+ * 预设预算科目模板(PRD 附录 A 默认预算科目示例)。
+ * code 用拼音/英文短码(项目内唯一),parentCode 引用同模板内其它 code;isLeaf 标叶节点。
+ * 套用后会替换当前科目树(用户可继续增删改)。
+ */
+interface TemplateSubject {
+  code: string;
+  name: string;
+  parentCode: string | null;
+  isLeaf: boolean;
+}
+
+const DEFAULT_SUBJECT_TEMPLATE: TemplateSubject[] = [
+  { code: 'ZJF', name: '直接费', parentCode: null, isLeaf: false },
+  { code: 'SBF', name: '设备费', parentCode: 'ZJF', isLeaf: false },
+  { code: 'SBGZF', name: '设备购置费', parentCode: 'SBF', isLeaf: true },
+  { code: 'QTSBF', name: '其他设备费', parentCode: 'SBF', isLeaf: true },
+  { code: 'CLF', name: '材料费', parentCode: 'ZJF', isLeaf: true },
+  { code: 'WBXZF', name: '外部协作费', parentCode: 'ZJF', isLeaf: true },
+  { code: 'RLDLF', name: '燃料动力费', parentCode: 'ZJF', isLeaf: true },
+  { code: 'HYCLF', name: '会议、差旅费、国际合作交流费', parentCode: 'ZJF', isLeaf: false },
+  { code: 'HYF', name: '会议费', parentCode: 'HYCLF', isLeaf: true },
+  { code: 'CLF2', name: '差旅费', parentCode: 'HYCLF', isLeaf: true },
+  { code: 'GJHZ', name: '国际合作交流费', parentCode: 'HYCLF', isLeaf: true },
+  { code: 'CBWX', name: '出版、文献、信息传播、知识产权事务费', parentCode: 'ZJF', isLeaf: true },
+  { code: 'LWF', name: '劳务费', parentCode: 'ZJF', isLeaf: true },
+  { code: 'ZJZX', name: '专家咨询费', parentCode: 'ZJF', isLeaf: true },
+  { code: 'QTZC', name: '其他支出', parentCode: 'ZJF', isLeaf: true },
+  { code: 'JJF', name: '间接费', parentCode: null, isLeaf: false },
+  { code: 'KYJX', name: '科研绩效', parentCode: 'JJF', isLeaf: true },
+  { code: 'GLF', name: '管理费', parentCode: 'JJF', isLeaf: true },
+];
+
 /** 把字符串金额解析为 number(失败/空 → 0);仅用于显示求和提示。 */
 function toDisplayNumber(s: string | undefined | null): number {
   if (!s) return 0;
@@ -213,6 +246,20 @@ export default function InitialBudgetPage() {
   const removeSubjectRow = (key: string) => setSubjectRows((rs) => rs.filter((r) => r.key !== key));
   const updateSubjectRow = (key: string, patch: Partial<SubjectRow>) =>
     setSubjectRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
+  /** 套用预设科目模板:替换当前科目树(用户可继续增删改)。 */
+  const applyDefaultTemplate = () => {
+    setSubjectRows(
+      DEFAULT_SUBJECT_TEMPLATE.map((t) => ({
+        key: genKey(),
+        code: t.code,
+        name: t.name,
+        parentCode: t.parentCode,
+        isLeaf: t.isLeaf,
+      })),
+    );
+    message.success(`已套用预设模板(${DEFAULT_SUBJECT_TEMPLATE.length} 个科目),可在其上继续编辑`);
+  };
 
   const subjectCodeOptions = useMemo(
     () =>
@@ -586,9 +633,26 @@ export default function InitialBudgetPage() {
       <Space size="large" style={{ marginBottom: 8 }}>
         <Text type="secondary">科目数:{subjectRows.length}</Text>
         {editable && (
-          <Button size="small" onClick={addSubjectRow}>
-            新增科目
-          </Button>
+          <>
+            <Button size="small" onClick={addSubjectRow}>
+              新增科目
+            </Button>
+            <Popconfirm
+              title="套用预设模板"
+              description={
+                subjectRows.length > 0
+                  ? '将替换当前已编辑的科目树,确认继续?'
+                  : '将填入默认预算科目结构(直接费/间接费等),可继续修改。'
+              }
+              okText="套用"
+              cancelText="取消"
+              onConfirm={applyDefaultTemplate}
+            >
+              <Button size="small" type="dashed">
+                套用预设模板
+              </Button>
+            </Popconfirm>
+          </>
         )}
       </Space>
       <Table<SubjectRow>
