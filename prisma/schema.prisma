@@ -130,6 +130,9 @@ model BudgetSubject {
   description String?
   level       Int
   isLeaf      Boolean  @map("is_leaf")
+  // 编制时的展示顺序(数组下标);台账/快照按此排序,保持与编制页一致。
+  // 旧数据默认 0;排序时 sortOrder 相同则按 code 兜底,保证稳定。
+  sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
 
   project             Project              @relation(fields: [projectId], references: [id])

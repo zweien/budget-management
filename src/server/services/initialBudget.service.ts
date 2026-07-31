@@ -336,7 +336,7 @@ export async function createDraft(
 
       // Pass 1:全部科目以 parentId=null 落库,记录 code → id。
       const codeToId = new Map<string, string>();
-      for (const s of payload.subjects) {
+      for (const [sortOrder, s] of payload.subjects.entries()) {
         const id = uuidv7();
         codeToId.set(s.code, id);
         await tx.budgetSubject.create({
@@ -349,6 +349,7 @@ export async function createDraft(
             description: s.description ?? null,
             level: levels.get(s.code) ?? 1,
             isLeaf: s.isLeaf,
+            sortOrder,
           },
         });
       }
@@ -524,7 +525,7 @@ export async function updateDraft(
 
     // 重建科目树(两遍:先建后接 parent)。
     const codeToId = new Map<string, string>();
-    for (const s of payload.subjects) {
+    for (const [sortOrder, s] of payload.subjects.entries()) {
       const id = uuidv7();
       codeToId.set(s.code, id);
       await tx.budgetSubject.create({
@@ -537,6 +538,7 @@ export async function updateDraft(
           description: s.description ?? null,
           level: 0,
           isLeaf: s.isLeaf,
+          sortOrder,
         },
       });
     }
@@ -647,7 +649,7 @@ export async function getDraft(
   const [subjects, annualBudgets, subjectBudgets, subjectTotalBudgets] = await Promise.all([
     prisma.budgetSubject.findMany({
       where: { projectId },
-      orderBy: { code: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
       include: { parent: { select: { code: true } } },
     }),
     prisma.annualBudget.findMany({ where: { projectId }, orderBy: { year: 'asc' } }),

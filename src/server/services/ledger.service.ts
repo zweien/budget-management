@@ -48,11 +48,11 @@ export async function getProjectLedger(
 ): Promise<ProjectLedger> {
   await requirePermission(user, 'project:view', projectId);
 
-  // 1) 科目树(全部,按 code 排序)+ 该年度 subject_budgets + 该年度非作废 business_records。
+  // 1) 科目树(全部,按编制顺序排序)+ 该年度 subject_budgets + 该年度非作废 business_records。
   const [subjects, subjectBudgets, records] = await Promise.all([
     prisma.budgetSubject.findMany({
       where: { projectId },
-      orderBy: { code: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
     }),
     prisma.subjectBudget.findMany({
       where: { projectId, year },

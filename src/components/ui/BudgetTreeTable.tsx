@@ -58,9 +58,8 @@ function buildTree(nodes: LedgerNode[]): TreeNode[] {
   const map = new Map<string, TreeNode>();
   nodes.forEach((n) => map.set(n.subjectId, { ...n, key: n.subjectId }));
   const roots: TreeNode[] = [];
-  // 按代码排序保证展示稳定。
-  const sorted = [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
-  sorted.forEach((node) => {
+  // 保持后端返回顺序(已按编制 sortOrder 排序),不在此重排。
+  map.forEach((node) => {
     if (node.parentId && map.has(node.parentId)) {
       const parent = map.get(node.parentId)!;
       parent.children = parent.children ?? [];

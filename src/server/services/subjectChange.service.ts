@@ -84,7 +84,7 @@ export async function buildSubjectSnapshot(
   const client = tx ?? prisma;
   const subjects = await client.budgetSubject.findMany({
     where: { projectId },
-    orderBy: { code: 'asc' },
+    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
   });
   const byId = new Map(subjects.map((s) => [s.id, s]));
   return subjects.map((s) => ({
