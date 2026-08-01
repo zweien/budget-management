@@ -21,6 +21,7 @@ import type { ColumnsType } from 'antd/es/table';
 
 import { apiFetch } from '@/lib/api/client';
 import { AmountInput } from '@/components/ui/AmountInput';
+import { BudgetTreeTable, type LedgerNode } from '@/components/ui/BudgetTreeTable';
 import { uuidv7 } from '@/lib/id';
 import { D } from '@/lib/decimal';
 
@@ -196,6 +197,9 @@ export default function InitialBudgetPage() {
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
+  // 已生效态复用台账数据(树形展示,与 ledger 页一致)。
+  const [ledgerNodes, setLedgerNodes] = useState<LedgerNode[]>([]);
+  const [ledgerYear, setLedgerYear] = useState<number>(() => new Date().getFullYear());
 
   /** 把 draft 回填到表单状态(DRAFT/REJECTED/WITHDRAWN 可再编辑)。 */
   const hydrateForm = useCallback((d: InitialBudgetDraftView) => {
@@ -277,6 +281,33 @@ export default function InitialBudgetPage() {
 
   // 可编辑态:无草稿、或草稿处于 DRAFT/REJECTED/WITHDRAWN。
   const editable = !draft || status === 'DRAFT' || status === 'REJECTED' || status === 'WITHDRAWN';
+
+  // 已生效(APPROVED)态:拉取台账数据,以树形表(与 ledger 页一致)展示,
+  // 不再用旧的扁平 ReadOnlyView。年度取编制的第一个年度。
+  const approvedYear = draft?.annualBudgets?.[0]?.year ?? new Date().getFullYear();
+  useEffect(() => {
+    if (status !== 'APPROVED') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ledger = await apiFetch<{ nodes: LedgerNode[] }>(
+          `/api/projects/${projectId}/ledger?year=${approvedYear}`,
+        );
+        if (!cancelled) {
+          setLedgerYear(approvedYear);
+          setLedgerNodes(ledger.nodes ?? []);
+        }
+      } catch (e) {
+        // 台账拉取失败不阻塞页面(仍可回退到只读摘要)。
+        if (!cancelled && e instanceof Error) {
+          console.warn('加载台账失败:', e.message);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, status, approvedYear]);
 
   // ====== 年度预算编辑 ======
   const addAnnualRow = () => {
@@ -589,7 +620,8 @@ export default function InitialBudgetPage() {
     );
   }
 
-  // 只读态:已生效。
+  // 只读态:已生效。复用台账树形表(与 ledger 页一致),不显示编码;
+  // 提供「修改预算」入口跳转预算调整流程。
   if (status === 'APPROVED') {
     return (
       <>
@@ -599,21 +631,29 @@ export default function InitialBudgetPage() {
         <Space style={{ marginBottom: 16 }}>
           <Button onClick={() => router.push(`/projects/${projectId}`)}>返回项目详情</Button>
           <Tag color={STATUS_META.APPROVED.color}>{STATUS_META.APPROVED.label}</Tag>
+          <Button type="primary" onClick={() => router.push(`/projects/${projectId}/adjustments`)}>
+            修改预算
+          </Button>
         </Space>
         <Alert
           type="success"
           showIcon
           message="该预算已生效"
-          description="如需变更预算,请通过「预算调整」流程进行,初始预算编制不可再修改。"
+          description="如需变更预算,请点击「修改预算」进入预算调整流程,初始预算编制不可再直接修改。"
           style={{ marginBottom: 16 }}
         />
-        <ReadOnlyView
-          projectTotal={draft?.projectTotal ?? ''}
-          annualBudgets={draft?.annualBudgets ?? []}
-          subjects={draft?.subjects ?? []}
-          subjectBudgets={draft?.subjectBudgets ?? []}
-          subjectTotalBudgets={draft?.subjectTotalBudgets}
-        />
+        <Title level={5}>{ledgerYear} 年度预算执行台账</Title>
+        {ledgerNodes.length > 0 ? (
+          <BudgetTreeTable nodes={ledgerNodes} />
+        ) : (
+          <ReadOnlyView
+            projectTotal={draft?.projectTotal ?? ''}
+            annualBudgets={draft?.annualBudgets ?? []}
+            subjects={draft?.subjects ?? []}
+            subjectBudgets={draft?.subjectBudgets ?? []}
+            subjectTotalBudgets={draft?.subjectTotalBudgets}
+          />
+        )}
       </>
     );
   }
