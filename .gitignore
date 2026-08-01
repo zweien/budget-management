@@ -48,3 +48,6 @@ Thumbs.db
 
 # ZCode 本地数据
 .zcode/
+
+# 浏览器验证截图(临时产物)
+*.png
