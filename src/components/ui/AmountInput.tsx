@@ -18,8 +18,8 @@ interface AmountInputProps extends Omit<
   onChange?: (value: string | undefined) => void;
   /** 是否允许负数(默认 false;预算调整场景需置 true,§6.4)。 */
   allowNegative?: boolean;
-  /** 密度:'sm' 用于表格内编辑;'small' 是 antd 兼容别名(adjustments 页重写后移除)。 */
-  size?: 'sm' | 'small' | 'default';
+  /** 密度:'sm' 用于表格内编辑。 */
+  size?: 'sm' | 'default';
 }
 
 /** 剥离非数字字符(负号视 allowNegative 决定是否保留),保留单个小数点。 */

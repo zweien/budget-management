@@ -1,11 +1,9 @@
-import '@ant-design/v5-patch-for-react-19'; // 过渡保留:antd 静态方法的 React-19 patch,随 antd 一起删除
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 
 import './globals.css';
 
 import { ThemeProvider } from '@/components/theme-provider';
-import { AntdBridge } from '@/components/antd-bridge';
 import { Toaster } from '@/components/ui/sonner';
 
 /* DESIGN.md 指定字体;中文字形经 globals.css --font-sans 回落系统字体 */
@@ -38,7 +36,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AntdBridge>{children}</AntdBridge>
+          {children}
           <Toaster />
         </ThemeProvider>
       </body>
