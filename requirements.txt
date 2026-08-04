@@ -1,0 +1,2 @@
+# 预算调整 docx 导出依赖(用项目级 venv 安装:python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
+python-docx>=1.0

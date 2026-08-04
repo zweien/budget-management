@@ -13,6 +13,8 @@ export interface CreateProjectInput {
   name: string;
   ownerId?: string;
   level?: string | null;
+  projectType?: string | null;
+  undertakingUnit?: string | null;
   startDate?: Date | null;
   endDate?: Date | null;
   remark?: string | null;
@@ -22,6 +24,8 @@ export interface CreateProjectInput {
 export interface UpdateProjectInput {
   name?: string;
   level?: string | null;
+  projectType?: string | null;
+  undertakingUnit?: string | null;
   startDate?: Date | null;
   endDate?: Date | null;
   remark?: string | null;
@@ -46,6 +50,8 @@ export async function createProject(
           code: input.code,
           name: input.name,
           level: input.level ?? null,
+          projectType: input.projectType ?? null,
+          undertakingUnit: input.undertakingUnit ?? null,
           startDate: input.startDate ?? null,
           endDate: input.endDate ?? null,
           ownerId,
@@ -138,6 +144,8 @@ export async function updateProject(
   const data: Prisma.ProjectUpdateInput = {};
   if (input.name !== undefined) data.name = input.name;
   if (input.level !== undefined) data.level = input.level;
+  if (input.projectType !== undefined) data.projectType = input.projectType;
+  if (input.undertakingUnit !== undefined) data.undertakingUnit = input.undertakingUnit;
   if (input.startDate !== undefined) data.startDate = input.startDate;
   if (input.endDate !== undefined) data.endDate = input.endDate;
   if (input.remark !== undefined) data.remark = input.remark;

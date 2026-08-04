@@ -63,6 +63,9 @@ model Project {
   code       String   @unique // §16.1 系统内唯一
   name       String
   level      String?
+  // 预算调整导出 docx 所需的项目元信息(新建项目时填写)。
+  projectType      String? @map("project_type")
+  undertakingUnit  String? @map("undertaking_unit")
   startDate  DateTime? @map("start_date") @db.Date
   endDate    DateTime? @map("end_date") @db.Date
   ownerId    String   @map("owner_id") @db.Uuid

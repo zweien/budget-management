@@ -24,6 +24,8 @@ interface CreateFormValues {
   code: string;
   name: string;
   level?: string;
+  projectType?: string;
+  undertakingUnit?: string;
   range?: [Dayjs, Dayjs];
   remark?: string;
 }
@@ -103,6 +105,8 @@ export default function ProjectsPage() {
         code: values.code,
         name: values.name,
         level: values.level ?? null,
+        projectType: values.projectType ?? null,
+        undertakingUnit: values.undertakingUnit ?? null,
         startDate: values.range?.[0]?.toISOString() ?? null,
         endDate: values.range?.[1]?.toISOString() ?? null,
         remark: values.remark ?? null,
@@ -175,6 +179,12 @@ export default function ProjectsPage() {
           </Form.Item>
           <Form.Item name="level" label="级别">
             <Input placeholder="如:国家级 / 省级" />
+          </Form.Item>
+          <Form.Item name="projectType" label="项目类型">
+            <Input placeholder="如:基础研究 / 应用研究" />
+          </Form.Item>
+          <Form.Item name="undertakingUnit" label="承担单位">
+            <Input placeholder="如:XX 研究所" />
           </Form.Item>
           <Form.Item name="range" label="起止时间">
             <DatePicker.RangePicker style={{ width: '100%' }} />

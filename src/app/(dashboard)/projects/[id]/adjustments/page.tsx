@@ -21,7 +21,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
-import { apiFetch } from '@/lib/api/client';
+import { apiFetch, downloadFile } from '@/lib/api/client';
 import { AmountInput } from '@/components/ui/AmountInput';
 import { MoneyText } from '@/components/ui/MoneyText';
 
@@ -414,6 +414,23 @@ export default function AdjustmentsPage() {
     });
   };
 
+  /** 导出该次调整为 docx(按模板填充)。dim=total 总预算维度 / annual 年度维度。 */
+  const [exporting, setExporting] = useState(false);
+  const exportDocx = async (row: AdjustmentRow, dim: 'total' | 'annual') => {
+    setExporting(true);
+    try {
+      await downloadFile(
+        `/api/projects/${projectId}/adjustments/${row.id}/export?dim=${dim}`,
+        dim === 'total' ? '总预算调整.docx' : '年度预算调整.docx',
+      );
+      message.success('已开始下载');
+    } catch (e) {
+      if (e instanceof Error) message.error(e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // ------------------------------------------------------------
   // 汇总(实时平衡校验)
   // ------------------------------------------------------------
@@ -706,7 +723,7 @@ export default function AdjustmentsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 220,
+      width: 340,
       fixed: 'right',
       render: (_: unknown, row) => (
         <Space size={4}>
@@ -726,6 +743,22 @@ export default function AdjustmentsPage() {
           {row.status === 'PENDING' && <Text type="secondary">审批中</Text>}
           <Button size="small" type="link" onClick={() => setDetailTarget(row)}>
             明细
+          </Button>
+          <Button
+            size="small"
+            type="link"
+            loading={exporting}
+            onClick={() => void exportDocx(row, 'total')}
+          >
+            导出总预算
+          </Button>
+          <Button
+            size="small"
+            type="link"
+            loading={exporting}
+            onClick={() => void exportDocx(row, 'annual')}
+          >
+            导出年度
           </Button>
         </Space>
       ),

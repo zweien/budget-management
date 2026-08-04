@@ -97,6 +97,12 @@ npm run db:seed            # 写入 3 个角色用户 + 默认数据
 npm run dev                   # http://localhost:3000
 ```
 
+### 6.（可选）预算调整导出 docx
+
+预算调整的「导出 docx」功能按模板生成 Word 文档，依赖 `jszip`（已随 `npm install` 安装，纯 Node 实现，无需 Python）。开箱即用，无需额外配置。
+
+> 仓库另附 `scripts/gen_adjustment_docx.py` 作为 Python（python-docx）实现的可选参考，默认未启用。
+
 > 默认账号（V1 mock 鉴权，可在顶部切换身份）：
 >
 > - **张管理**（预算管理员 BUDGET_ADMIN）
