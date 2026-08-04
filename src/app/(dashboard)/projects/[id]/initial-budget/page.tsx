@@ -3,29 +3,47 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  Alert,
-  Button,
-  Input,
-  InputNumber,
-  Popconfirm,
-  Result,
-  Skeleton,
-  Space,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-} from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+  flexRender,
+  getCoreRowModel,
+  getExpandedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type ExpandedState,
+} from '@tanstack/react-table';
+import { ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
+import { cn } from '@/lib/utils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { BudgetTreeTable, type LedgerNode } from '@/components/ui/BudgetTreeTable';
+import { EmptyState } from '@/components/layout/empty-state';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { uuidv7 } from '@/lib/id';
 import { D } from '@/lib/decimal';
-
-const { Title, Text } = Typography;
 
 /**
  * §6.2 审批状态(与 Prisma ApprovalStatus 同步;不直接引 @prisma/client 以避免在
@@ -33,12 +51,21 @@ const { Title, Text } = Typography;
  */
 type ApprovalStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 
-const STATUS_META: Record<ApprovalStatus, { label: string; color: string }> = {
-  DRAFT: { label: '草稿中', color: 'default' },
-  PENDING: { label: '待审批', color: 'processing' },
-  APPROVED: { label: '已生效', color: 'success' },
-  REJECTED: { label: '已驳回', color: 'error' },
-  WITHDRAWN: { label: '已撤回', color: 'warning' },
+const STATUS_LABEL: Record<ApprovalStatus, string> = {
+  DRAFT: '草稿中',
+  PENDING: '待审批',
+  APPROVED: '已生效',
+  REJECTED: '已驳回',
+  WITHDRAWN: '已撤回',
+};
+
+/** Badge 语义色遵循 DESIGN.md。 */
+const STATUS_BADGE: Record<ApprovalStatus, 'secondary' | 'warning' | 'success' | 'error'> = {
+  DRAFT: 'secondary',
+  PENDING: 'warning',
+  APPROVED: 'success',
+  REJECTED: 'error',
+  WITHDRAWN: 'warning',
 };
 
 interface ProjectDetail {
@@ -122,9 +149,8 @@ interface SubjectRow {
   description?: string;
 }
 
-/** AntD 树形 Table 的数据节点(在 SubjectRow 之上挂 children)。 */
+/** 树形 Table 的数据节点(在 SubjectRow 之上挂 children)。 */
 interface SubjectTreeNode extends SubjectRow {
-  key: string;
   children?: SubjectTreeNode[];
 }
 
@@ -173,6 +199,47 @@ function toDisplayNumber(s: string | undefined | null): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 数字小输入(数量/单价):仅过滤非数字字符,保留原始文本。 */
+function NumCellInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      className={cn(
+        'h-7 rounded-md border border-input bg-card px-2 text-right text-sm tabular-nums outline-none',
+        'placeholder:text-left placeholder:text-mute',
+        'focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30',
+        className,
+      )}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => {
+        const v = e.target.value.replace(/[^0-9.]/g, '');
+        // 保留首个小数点。
+        const dot = v.indexOf('.');
+        onChange(dot >= 0 ? v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '') : v);
+      }}
+    />
+  );
+}
+
+/** 通用确认对话框状态(替代 antd Popconfirm)。 */
+interface ConfirmState {
+  title: string;
+  description?: string;
+  action: () => void;
+}
+
 export default function InitialBudgetPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -193,13 +260,30 @@ export default function InitialBudgetPage() {
   const [subjectDetails, setSubjectDetails] = useState<Record<string, SubjectBudgetDetail>>({});
   // subjectTotalBudgets 以 "subjectCode" → 总预算 amount 的形式持有(叶节点跨年度总额)。
   const [subjectTotalAmounts, setSubjectTotalAmounts] = useState<Record<string, string>>({});
-  // §enhance1 受控展开行 key 集合:使新增子节点后父行可即时展开。
-  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+  // 树表展开态(TanStack ExpandedState;true = 全部展开)。
+  const [expanded, setExpanded] = useState<ExpandedState>(true);
+  // 脏状态(编辑器交互优化:离开时拦截)。
+  const [dirty, setDirty] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   // 已生效态复用台账数据(树形展示,与 ledger 页一致)。
   const [ledgerNodes, setLedgerNodes] = useState<LedgerNode[]>([]);
   const [ledgerYear, setLedgerYear] = useState<number>(() => new Date().getFullYear());
+  // 行内删除/套用模板的确认对话框。
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
+  /** 编辑动作统一入口:标脏 + 执行。 */
+  const markDirty = useCallback(() => setDirty(true), []);
+
+  // 脏状态离开拦截(浏览器关闭/刷新;SPA 内导航由按钮显式控制)。
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 
   /** 把 draft 回填到表单状态(DRAFT/REJECTED/WITHDRAWN 可再编辑)。 */
   const hydrateForm = useCallback((d: InitialBudgetDraftView) => {
@@ -214,8 +298,8 @@ export default function InitialBudgetPage() {
     }));
     setAnnualRows(d.annualBudgets.map((a) => ({ key: genKey(), year: a.year, amount: a.amount })));
     setSubjectRows(rows);
-    // §enhance1:回填时把所有科目行展开(沿用先前 defaultExpandAllRows 的首屏行为)。
-    setExpandedKeys(rows.map((r) => r.key));
+    // 回填时全部展开(沿用原 defaultExpandAllRows 首屏行为)。
+    setExpanded(true);
     const amounts: Record<string, string> = {};
     const details: Record<string, SubjectBudgetDetail> = {};
     for (const sb of d.subjectBudgets) {
@@ -235,6 +319,7 @@ export default function InitialBudgetPage() {
       totals[st.subjectCode] = st.amount;
     }
     setSubjectTotalAmounts(totals);
+    setDirty(false); // 回填是服务端状态,不算未保存修改。
   }, []);
 
   /** 加载项目头 + 编制草稿(仅一次)。 */
@@ -266,7 +351,7 @@ export default function InitialBudgetPage() {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : '加载编制信息失败';
           setFatal(msg);
-          if (e instanceof Error) message.error(msg);
+          if (e instanceof Error) toast.error(msg);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -282,8 +367,7 @@ export default function InitialBudgetPage() {
   // 可编辑态:无草稿、或草稿处于 DRAFT/REJECTED/WITHDRAWN。
   const editable = !draft || status === 'DRAFT' || status === 'REJECTED' || status === 'WITHDRAWN';
 
-  // 已生效(APPROVED)态:拉取台账数据,以树形表(与 ledger 页一致)展示,
-  // 不再用旧的扁平 ReadOnlyView。年度取编制的第一个年度。
+  // 已生效(APPROVED)态:拉取台账数据,以树形表(与 ledger 页一致)展示。
   const approvedYear = draft?.annualBudgets?.[0]?.year ?? new Date().getFullYear();
   useEffect(() => {
     if (status !== 'APPROVED') return;
@@ -311,33 +395,41 @@ export default function InitialBudgetPage() {
 
   // ====== 年度预算编辑 ======
   const addAnnualRow = () => {
+    markDirty();
     setAnnualRows((rs) => [...rs, { key: genKey(), year: new Date().getFullYear(), amount: '' }]);
   };
-  const removeAnnualRow = (key: string) => setAnnualRows((rs) => rs.filter((r) => r.key !== key));
-  const updateAnnualRow = (key: string, patch: Partial<AnnualRow>) =>
+  const removeAnnualRow = (key: string) => {
+    markDirty();
+    setAnnualRows((rs) => rs.filter((r) => r.key !== key));
+  };
+  const updateAnnualRow = (key: string, patch: Partial<AnnualRow>) => {
+    markDirty();
     setAnnualRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
 
   // ====== 科目编辑(树形) ======
   /** 新增根科目:code 用 UUIDv7 自动生成,父为空。 */
   const addRootSubject = () => {
+    markDirty();
     setSubjectRows((rs) => [...rs, { key: genKey(), code: uuidv7(), name: '', parentCode: null }]);
   };
-  /** 在指定行下新增子科目:code 用 UUIDv7,parentCode 指向父 code。
-   *  §enhance1:同时确保父行展开,使新增子节点立即可见。 */
+  /** 在指定行下新增子科目:code 用 UUIDv7,parentCode 指向父 code;同时确保父行展开。 */
   const addChildSubject = (parentKey: string) => {
+    markDirty();
     setSubjectRows((rs) => {
       const parent = rs.find((r) => r.key === parentKey);
       if (!parent) return rs;
       const childKey = genKey();
-      // 父行展开(若已展开则不变),使新子节点立即可见。
-      setExpandedKeys((prev) => (prev.includes(parentKey) ? prev : [...prev, parentKey]));
+      // 父行展开(TanStack ExpandedState;true 已全展开则无需变)。
+      if (expanded !== true) {
+        setExpanded((prev) => (prev === true ? prev : { ...prev, [parentKey]: true }));
+      }
       return [...rs, { key: childKey, code: uuidv7(), name: '', parentCode: parent.code }];
     });
   };
-  /**
-   * 删除科目:仅允许删除没有子节点的行(由调用方禁用按钮,此处再防御一次)。
-   */
-  const removeSubjectRow = (key: string) =>
+  /** 删除科目:仅允许删除没有子节点的行(由调用方禁用按钮,此处再防御一次)。 */
+  const removeSubjectRow = (key: string) => {
+    markDirty();
     setSubjectRows((rs) => {
       const target = rs.find((r) => r.key === key);
       if (!target) return rs;
@@ -345,13 +437,15 @@ export default function InitialBudgetPage() {
       if (hasChildren) return rs; // 有下级 → 不删(防御)。
       return rs.filter((r) => r.key !== key);
     });
-  const updateSubjectRow = (key: string, patch: Partial<SubjectRow>) =>
+  };
+  const updateSubjectRow = (key: string, patch: Partial<SubjectRow>) => {
+    markDirty();
     setSubjectRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
 
-  /** 套用预设科目模板:替换当前科目树(用户可继续增删改)。
-   *  模板自带稳定 code,沿用;isLeaf 不再持久化(提交时推导)。
-   *  §enhance1:套用后默认全部展开。 */
+  /** 套用预设科目模板:替换当前科目树(用户可继续增删改)。 */
   const applyDefaultTemplate = () => {
+    markDirty();
     const rows = DEFAULT_SUBJECT_TEMPLATE.map((t) => ({
       key: genKey(),
       code: t.code,
@@ -359,8 +453,8 @@ export default function InitialBudgetPage() {
       parentCode: t.parentCode,
     }));
     setSubjectRows(rows);
-    setExpandedKeys(rows.map((r) => r.key));
-    message.success(`已套用预设模板(${DEFAULT_SUBJECT_TEMPLATE.length} 个科目),可在其上继续编辑`);
+    setExpanded(true);
+    toast.success(`已套用预设模板(${DEFAULT_SUBJECT_TEMPLATE.length} 个科目),可在其上继续编辑`);
   };
 
   const declaredYears = useMemo(() => annualRows.map((r) => r.year), [annualRows]);
@@ -393,15 +487,13 @@ export default function InitialBudgetPage() {
   const isLeafRow = useCallback((row: SubjectRow) => leafCodes.has(row.code), [leafCodes]);
 
   /**
-   * 把扁平 subjectRows 组装成 AntD Table 树形 dataSource。
-   * 根 = parentCode 为空;子按 subjectRows 的原始顺序(模板定义/用户新增顺序)追加,
-   * 不按 code 字母序重排 —— 保证模板顺序与用户预期一致(如直接费在间接费之前)。
+   * 把扁平 subjectRows 组装成树形数据。
+   * 根 = parentCode 为空;子按 subjectRows 的原始顺序追加,不按 code 重排。
    */
   const subjectTree = useMemo<SubjectTreeNode[]>(() => {
     const byCode = new Map<string, SubjectTreeNode>();
-    subjectRows.forEach((r) => byCode.set(r.code, { ...r, key: r.key }));
+    subjectRows.forEach((r) => byCode.set(r.code, { ...r }));
     const roots: SubjectTreeNode[] = [];
-    // 按 subjectRows 原始顺序遍历,保持插入顺序。
     subjectRows.forEach((r) => {
       const node = byCode.get(r.code)!;
       if (node.parentCode && byCode.has(node.parentCode)) {
@@ -417,13 +509,9 @@ export default function InitialBudgetPage() {
 
   /**
    * §enhance2 父节点自动汇总:非叶行展示其所有叶后代之和(只读、计算得出)。
-   * - 总预算列(跨年度)= Σ 叶后代 subjectTotalAmounts[code]。
-   * - 各年度列 = Σ 叶后代 subjectAmounts[code|year]。
-   * 返回按 subject code 索引的 { total: string; byYear: Map<number,string> }。
    */
   const rollupByCode = useMemo(() => {
     const result = new Map<string, { total: number; byYear: Map<number, number> }>();
-    // 收集每个非叶 code 的全部叶后代。
     const collectLeaves = (node: SubjectTreeNode): SubjectTreeNode[] => {
       if (!node.children || node.children.length === 0) return [node];
       const acc: SubjectTreeNode[] = [];
@@ -436,12 +524,10 @@ export default function InitialBudgetPage() {
         if (!isLeaf) {
           const leaves = collectLeaves(n).filter((l) => leafCodes.has(l.code));
           const leafCodeSet = new Set(leaves.map((l) => l.code));
-          // 总预算汇总。
           let total = 0;
           for (const l of leaves) {
             total += toDisplayNumber(subjectTotalAmounts[l.code]);
           }
-          // 年度列汇总:遍历 amount map,只计入本节点叶后代科目。
           const byYear = new Map<number, number>();
           for (const [k, amt] of Object.entries(subjectAmounts)) {
             const [code, yearStr] = k.split('|');
@@ -530,15 +616,13 @@ export default function InitialBudgetPage() {
   /**
    * 提交流程(§6):
    * - 仅在无草稿(创建)场景下:POST create → 拿 appId → POST submit → 跳回项目详情。
-   * - 若草稿已存在(DRAFT/REJECTED/WITHDRAWN):后端目前没有 update 端点,
-   *   仅能对已有 appId 执行 submit(直接流转);此处对 DRAFT 草稿直接提交。
+   * - 若草稿已存在(DRAFT/REJECTED/WITHDRAWN):先 PATCH 保存(状态置回 DRAFT)再提交。
    */
   const handleSaveAndSubmit = async () => {
     setSubmitting(true);
     try {
       let appId: string;
       if (!draft) {
-        // 无草稿 → 创建。
         const payload = buildPayload();
         const created = await apiFetch<{ appId: string }>(
           `/api/projects/${projectId}/initial-budget`,
@@ -546,8 +630,6 @@ export default function InitialBudgetPage() {
         );
         appId = created.appId;
       } else {
-        // 已存在草稿(DRAFT/REJECTED/WITHDRAWAN):先 PATCH 保存最新编辑内容,
-        // 把状态置回 DRAFT(§6.2),再提交。
         appId = draft.id;
         const payload = buildPayload();
         await apiFetch<{ appId: string }>(`/api/projects/${projectId}/initial-budget/${appId}`, {
@@ -559,36 +641,34 @@ export default function InitialBudgetPage() {
         `/api/projects/${projectId}/initial-budget/${appId}/submit`,
         { method: 'POST' },
       );
-      message.success('已提交,等待审批');
+      toast.success('已提交,等待审批');
+      setDirty(false);
       router.push(`/projects/${projectId}`);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  /**
-   * 仅保存草稿(无草稿场景下先创建,不提交)。
-   */
+  /** 仅保存草稿(无草稿场景下先创建,不提交)。 */
   const handleSaveDraft = async () => {
     setSubmitting(true);
     try {
       const payload = buildPayload();
       if (draft) {
-        // 已存在草稿 → PATCH 保存最新编辑(状态置回 DRAFT)。
         await apiFetch<{ appId: string }>(`/api/projects/${projectId}/initial-budget/${draft.id}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
       } else {
-        // 无草稿 → 创建。
         await apiFetch<{ appId: string }>(`/api/projects/${projectId}/initial-budget`, {
           method: 'POST',
           body: JSON.stringify(payload),
         });
       }
-      message.success('草稿已保存');
+      toast.success('草稿已保存');
+      setDirty(false);
       // 刷新本页,进入"已有草稿(DRAFT)"的可再编辑态。
       const fresh = await apiFetch<InitialBudgetDraftView>(
         `/api/projects/${projectId}/initial-budget`,
@@ -596,53 +676,311 @@ export default function InitialBudgetPage() {
       setDraft(fresh);
       hydrateForm(fresh);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ====== 渲染 ======
-  if (loading) return <Skeleton active />;
-
-  if (fatal || !project) {
-    return (
-      <Result
-        status="warning"
-        title="无法访问该项目"
-        subTitle={fatal ?? '项目可能不存在或您没有访问权限。'}
-        extra={
-          <Button type="primary" onClick={() => router.push('/projects')}>
-            返回项目列表
-          </Button>
+  // ====== 科目树表列(TanStack ColumnDef) ======
+  const subjectColumns = useMemo<ColumnDef<SubjectTreeNode>[]>(() => {
+    /** §enhance3 单元格明细变更:重算推导金额并同步两个 map。 */
+    const applyDetailChange = (
+      key: string,
+      current: SubjectBudgetDetail,
+      patch: Partial<SubjectBudgetDetail>,
+    ) => {
+      markDirty();
+      const nextDetail: SubjectBudgetDetail = { ...current, ...patch };
+      // 推导金额:quantity × unitPrice(三项齐备时)。
+      let amount = '';
+      if (nextDetail.quantity !== '' && nextDetail.unitPrice !== '') {
+        try {
+          amount = new D(nextDetail.quantity).times(new D(nextDetail.unitPrice)).toFixed(2);
+        } catch {
+          amount = '';
         }
-      />
+      }
+      setSubjectDetails((map) => {
+        const next = { ...map };
+        if (
+          nextDetail.unit.trim() === '' &&
+          nextDetail.quantity === '' &&
+          nextDetail.unitPrice === ''
+        ) {
+          delete next[key];
+        } else {
+          next[key] = nextDetail;
+        }
+        return next;
+      });
+      setSubjectAmounts((map) => {
+        const next = { ...map };
+        if (amount === '') {
+          delete next[key];
+        } else {
+          next[key] = amount;
+        }
+        return next;
+      });
+    };
+
+    const dynamicYearCols: ColumnDef<SubjectTreeNode>[] = declaredYears.map((y) => ({
+      id: `year-${y}`,
+      header: () => <span className="tabular-nums">{y}</span>,
+      size: 340,
+      cell: ({ row }) => {
+        const node = row.original;
+        const key = `${node.code}|${y}`;
+        if (!editable) {
+          const a = subjectAmounts[key];
+          return a ? (
+            <span className="tabular-nums">{a}</span>
+          ) : (
+            <span className="text-mute">—</span>
+          );
+        }
+        // §enhance2 非叶行:显示叶后代汇总(只读、计算)。
+        if (!isLeafRow(node)) {
+          const rolled = rollupByCode.get(node.code)?.byYear.get(y);
+          if (rolled === undefined) return <span className="text-mute">—</span>;
+          return <span className="text-muted-foreground tabular-nums">{rolled.toFixed(2)}</span>;
+        }
+        // §enhance3 叶行:单位 × 数量 × 单价 → 金额(只读)。
+        const detail = subjectDetails[key] ?? { unit: '', quantity: '', unitPrice: '' };
+        const amt = subjectAmounts[key] ?? '';
+        return (
+          <div className="flex items-center gap-1.5 whitespace-nowrap">
+            <Input
+              value={detail.unit}
+              onChange={(e) => applyDetailChange(key, detail, { unit: e.target.value })}
+              placeholder="单位"
+              className="h-7 w-16"
+            />
+            <span className="text-mute">×</span>
+            <NumCellInput
+              value={detail.quantity}
+              onChange={(v) => applyDetailChange(key, detail, { quantity: v })}
+              placeholder="数量"
+              className="w-20"
+            />
+            <span className="text-mute">×</span>
+            <NumCellInput
+              value={detail.unitPrice}
+              onChange={(v) => applyDetailChange(key, detail, { unitPrice: v })}
+              placeholder="单价"
+              className="w-24"
+            />
+            <span className="text-mute">=</span>
+            <span
+              className={cn(
+                'inline-block min-w-20 text-right font-medium tabular-nums',
+                !amt && 'text-mute',
+              )}
+            >
+              {amt || '0.00'}
+            </span>
+          </div>
+        );
+      },
+    }));
+
+    const cols: ColumnDef<SubjectTreeNode>[] = [
+      {
+        id: 'name',
+        accessorKey: 'name',
+        header: () => '名称',
+        size: 260,
+        cell: ({ row }) => {
+          const node = row.original;
+          return (
+            <span
+              className="flex items-center gap-1"
+              style={{ paddingLeft: `${row.depth * 20}px` }}
+            >
+              {row.getCanExpand() ? (
+                <button
+                  type="button"
+                  aria-label={row.getIsExpanded() ? '收起' : '展开'}
+                  onClick={row.getToggleExpandedHandler()}
+                  className="shrink-0 rounded-sm text-mute transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                  <ChevronRight
+                    className={cn(
+                      'size-4 transition-transform',
+                      row.getIsExpanded() && 'rotate-90',
+                    )}
+                  />
+                </button>
+              ) : (
+                <span className="size-4 shrink-0" />
+              )}
+              {editable ? (
+                <Input
+                  value={node.name}
+                  onChange={(e) => updateSubjectRow(node.key, { name: e.target.value })}
+                  placeholder="如 设备购置费"
+                  className="h-7 min-w-28 flex-1"
+                />
+              ) : (
+                <span>{node.name}</span>
+              )}
+            </span>
+          );
+        },
+      },
+      {
+        // 科目总预算(跨年度):叶节点可填;非叶节点显示叶后代汇总(只读)。
+        id: 'subject-total',
+        header: () => <span className="block text-right">总预算</span>,
+        size: 160,
+        cell: ({ row }) => {
+          const node = row.original;
+          if (!editable) {
+            const t = subjectTotalAmounts[node.code];
+            return t ? (
+              <span className="block text-right tabular-nums">{t}</span>
+            ) : (
+              <span className="block text-right text-mute">—</span>
+            );
+          }
+          if (!isLeafRow(node)) {
+            const rolled = rollupByCode.get(node.code)?.total;
+            if (rolled === undefined || rolled === 0) {
+              return <span className="block text-right text-mute">—</span>;
+            }
+            return (
+              <span className="block text-right text-muted-foreground tabular-nums">
+                {rolled.toFixed(2)}
+              </span>
+            );
+          }
+          return (
+            <AmountInput
+              size="sm"
+              value={subjectTotalAmounts[node.code] || undefined}
+              onChange={(v) => {
+                markDirty();
+                setSubjectTotalAmounts((prev) => {
+                  const next = { ...prev };
+                  if (v === undefined || v === '') {
+                    delete next[node.code];
+                  } else {
+                    next[node.code] = v;
+                  }
+                  return next;
+                });
+              }}
+            />
+          );
+        },
+      },
+      ...dynamicYearCols,
+    ];
+
+    if (editable) {
+      cols.push({
+        id: 'op',
+        header: () => '',
+        size: 150,
+        cell: ({ row }) => {
+          const node = row.original;
+          const hasChildren = !!hasChildrenByCode.get(node.code);
+          return (
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-1.5 text-xs"
+                onClick={() => addChildSubject(node.key)}
+              >
+                <Plus className="size-3.5" />
+                子节点
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-1.5 text-xs text-error-deep hover:bg-error-soft"
+                disabled={hasChildren}
+                title={hasChildren ? '请先删除下级科目' : undefined}
+                onClick={() =>
+                  setConfirm({
+                    title: '删除该科目?',
+                    action: () => removeSubjectRow(node.key),
+                  })
+                }
+              >
+                删除
+              </Button>
+            </span>
+          );
+        },
+      });
+    }
+
+    return cols;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    editable,
+    declaredYears,
+    subjectAmounts,
+    subjectDetails,
+    subjectTotalAmounts,
+    rollupByCode,
+    hasChildrenByCode,
+    isLeafRow,
+  ]);
+
+  // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const subjectTable = useReactTable({
+    data: subjectTree,
+    columns: subjectColumns,
+    state: { expanded },
+    onExpandedChange: setExpanded,
+    getSubRows: (row) => row.children,
+    getRowId: (row) => row.key,
+    getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+  });
+
+  // ====== 渲染 ======
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
     );
   }
 
-  // 只读态:已生效。复用台账树形表(与 ledger 页一致),不显示编码;
+  if (fatal || !project) {
+    return (
+      <Alert variant="error">
+        <AlertTitle>无法访问该项目</AlertTitle>
+        <AlertDescription>{fatal ?? '项目可能不存在或您没有访问权限。'}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  // 只读态:已生效。复用台账树形表(与 ledger 页一致);
   // 提供「修改预算」入口跳转预算调整流程。
   if (status === 'APPROVED') {
     return (
-      <>
-        <Title level={3} style={{ marginTop: 0 }}>
-          初始预算编制 — {project.name}
-        </Title>
-        <Space style={{ marginBottom: 16 }}>
-          <Button onClick={() => router.push(`/projects/${projectId}`)}>返回项目详情</Button>
-          <Tag color={STATUS_META.APPROVED.color}>{STATUS_META.APPROVED.label}</Tag>
-          <Button type="primary" onClick={() => router.push(`/projects/${projectId}/adjustments`)}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Badge variant="success">已生效</Badge>
+          <Button onClick={() => router.push(`/projects/${projectId}/adjustments`)}>
             修改预算
           </Button>
-        </Space>
-        <Alert
-          type="success"
-          showIcon
-          message="该预算已生效"
-          description="如需变更预算,请点击「修改预算」进入预算调整流程,初始预算编制不可再直接修改。"
-          style={{ marginBottom: 16 }}
-        />
-        <Title level={5}>{ledgerYear} 年度预算执行台账</Title>
+        </div>
+        <Alert variant="success">
+          <AlertTitle>该预算已生效</AlertTitle>
+          <AlertDescription>
+            如需变更预算,请点击「修改预算」进入预算调整流程,初始预算编制不可再直接修改。
+          </AlertDescription>
+        </Alert>
+        <h2 className="text-base font-semibold tracking-[-0.3px]">{ledgerYear} 年度预算执行台账</h2>
         {ledgerNodes.length > 0 ? (
           <BudgetTreeTable nodes={ledgerNodes} />
         ) : (
@@ -654,28 +992,21 @@ export default function InitialBudgetPage() {
             subjectTotalBudgets={draft?.subjectTotalBudgets}
           />
         )}
-      </>
+      </div>
     );
   }
 
   // 只读态:待审批。
   if (status === 'PENDING') {
     return (
-      <>
-        <Title level={3} style={{ marginTop: 0 }}>
-          初始预算编制 — {project.name}
-        </Title>
-        <Space style={{ marginBottom: 16 }}>
-          <Button onClick={() => router.push(`/projects/${projectId}`)}>返回项目详情</Button>
-          <Tag color={STATUS_META.PENDING.color}>{STATUS_META.PENDING.label}</Tag>
-        </Space>
-        <Alert
-          type="info"
-          showIcon
-          message="已提交,等待审批"
-          description="该编制单已提交,正在等待审批。审批通过后将自动生效。"
-          style={{ marginBottom: 16 }}
-        />
+      <div className="space-y-4">
+        <div>
+          <Badge variant="warning">待审批</Badge>
+        </div>
+        <Alert variant="info">
+          <AlertTitle>已提交,等待审批</AlertTitle>
+          <AlertDescription>该编制单已提交,正在等待审批。审批通过后将自动生效。</AlertDescription>
+        </Alert>
         <ReadOnlyView
           projectTotal={draft?.projectTotal ?? ''}
           annualBudgets={draft?.annualBudgets ?? []}
@@ -683,236 +1014,284 @@ export default function InitialBudgetPage() {
           subjectBudgets={draft?.subjectBudgets ?? []}
           subjectTotalBudgets={draft?.subjectTotalBudgets}
         />
-      </>
+      </div>
     );
   }
 
   // 编辑态:无草稿 或 DRAFT/REJECTED/WITHDRAWN。
-  // 状态提示条(有草稿且处于被驳回/撤回态时给出说明)。
-  const headerTag =
-    status === 'REJECTED' || status === 'WITHDRAWN' ? (
-      <Tag color={STATUS_META[status].color}>{STATUS_META[status].label}</Tag>
-    ) : status === 'DRAFT' ? (
-      <Tag color={STATUS_META.DRAFT.color}>{STATUS_META.DRAFT.label}</Tag>
-    ) : null;
-
   return (
-    <>
-      <Title level={3} style={{ marginTop: 0 }}>
-        初始预算编制 — {project.name}
-      </Title>
-
-      <Space style={{ marginBottom: 16 }}>
-        <Button onClick={() => router.push(`/projects/${projectId}`)}>返回项目详情</Button>
-        {headerTag}
-      </Space>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
+        {status ? (
+          <Badge variant={STATUS_BADGE[status]}>{STATUS_LABEL[status]}</Badge>
+        ) : (
+          <Badge variant="outline">未保存</Badge>
+        )}
+        {dirty ? <span className="text-xs text-warning-deep">有未保存的修改</span> : null}
+      </div>
 
       {status === 'REJECTED' && (
-        <Alert
-          type="error"
-          showIcon
-          message="该编制单已被驳回,请修改后重新提交。"
-          style={{ marginBottom: 16 }}
-        />
+        <Alert variant="error">
+          <AlertDescription>该编制单已被驳回,请修改后重新提交。</AlertDescription>
+        </Alert>
       )}
       {status === 'WITHDRAWN' && (
-        <Alert
-          type="warning"
-          showIcon
-          message="该编制单已撤回,可继续编辑后重新提交。"
-          style={{ marginBottom: 16 }}
-        />
+        <Alert variant="warning">
+          <AlertDescription>该编制单已撤回,可继续编辑后重新提交。</AlertDescription>
+        </Alert>
       )}
 
       {/* §6.4 提示:年度合计超过总预算(仅展示,后端是真相源)。 */}
       {annualOverTotal && (
-        <Alert
-          type="error"
-          showIcon
-          message={`年度预算合计(${annualSum.toFixed(2)})超过项目总预算(${projectTotalNum.toFixed(
-            2,
-          )}),提交时后端将校验失败。`}
-          style={{ marginBottom: 16 }}
-        />
+        <Alert variant="error">
+          <AlertDescription>
+            年度预算合计({annualSum.toFixed(2)})超过项目总预算({projectTotalNum.toFixed(2)}
+            ),提交时后端将校验失败。
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* ====== 第一区:项目总预算 ====== */}
-      <Title level={5} style={{ marginTop: 0 }}>
-        项目总预算
-      </Title>
-      <Space style={{ marginBottom: 24 }} align="center">
-        <Text type="secondary">总预算金额:</Text>
-        <AmountInput
-          value={projectTotal || undefined}
-          onChange={(v) => setProjectTotal(v ?? '')}
-          style={{ width: 240 }}
-          disabled={!editable}
-          placeholder="0.00"
-        />
-      </Space>
+      <section className="space-y-2">
+        <h2 className="text-base font-semibold tracking-[-0.3px]">项目总预算</h2>
+        <div className="flex items-center gap-2">
+          <Label className="font-normal text-muted-foreground">总预算金额</Label>
+          <AmountInput
+            value={projectTotal || undefined}
+            onChange={(v) => {
+              markDirty();
+              setProjectTotal(v ?? '');
+            }}
+            className="w-60"
+            disabled={!editable}
+            placeholder="0.00"
+          />
+        </div>
+      </section>
 
       {/* ====== 第二区:年度预算 ====== */}
-      <Title level={5}>年度预算</Title>
-      <Space size="large" style={{ marginBottom: 8 }}>
-        <Text type="secondary">
-          年度合计:{annualSum.toFixed(2)}
-          {projectTotal !== '' && (
-            <span style={{ marginLeft: 8 }}>
-              / 总预算 {projectTotalNum.toFixed(2)}
-              {annualOverTotal ? (
-                <Text type="danger" style={{ marginLeft: 8 }}>
-                  (超支)
-                </Text>
-              ) : null}
+      <section className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold tracking-[-0.3px]">年度预算</h2>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground tabular-nums">
+              年度合计:{annualSum.toFixed(2)}
+              {projectTotal !== '' && (
+                <>
+                  {' / 总预算 '}
+                  {projectTotalNum.toFixed(2)}
+                  {annualOverTotal ? <span className="ml-1 text-error-deep">(超支)</span> : null}
+                </>
+              )}
             </span>
-          )}
-        </Text>
-        {editable && (
-          <Button size="small" onClick={addAnnualRow}>
-            新增年度
-          </Button>
-        )}
-      </Space>
-      <Table<AnnualRow>
-        rowKey="key"
-        size="small"
-        pagination={false}
-        dataSource={annualRows}
-        locale={{ emptyText: '暂无年度预算,点击「新增年度」' }}
-        style={{ marginBottom: 24 }}
-        columns={[
-          {
-            title: '年度',
-            dataIndex: 'year',
-            width: 200,
-            render: (_: unknown, row: AnnualRow) =>
-              editable ? (
-                <InputNumber
-                  min={1900}
-                  max={9999}
-                  value={row.year}
-                  onChange={(v) => updateAnnualRow(row.key, { year: Number(v ?? 0) })}
-                  style={{ width: '100%' }}
-                />
-              ) : (
-                `${row.year}`
-              ),
-          },
-          {
-            title: '金额',
-            dataIndex: 'amount',
-            render: (_: unknown, row: AnnualRow) =>
-              editable ? (
-                <AmountInput
-                  value={row.amount || undefined}
-                  onChange={(v) => updateAnnualRow(row.key, { amount: v ?? '' })}
-                  style={{ width: 240 }}
-                />
-              ) : (
-                <Text>{row.amount}</Text>
-              ),
-          },
-          {
-            title: '叶节点合计',
-            key: 'leafSum',
-            width: 140,
-            render: (_: unknown, row: AnnualRow) => {
-              const sum = leafSumByYear.get(row.year) ?? 0;
-              const annual = toDisplayNumber(row.amount);
-              const over = sum > annual + 1e-9;
-              return <Text type={over ? 'danger' : undefined}>{sum.toFixed(2)}</Text>;
-            },
-          },
-          ...(editable
-            ? [
-                {
-                  title: '操作',
-                  key: 'op',
-                  width: 80,
-                  render: (_: unknown, row: AnnualRow) => (
-                    <Popconfirm title="删除该年度?" onConfirm={() => removeAnnualRow(row.key)}>
-                      <Button size="small" type="link" danger>
-                        删除
-                      </Button>
-                    </Popconfirm>
-                  ),
-                },
-              ]
-            : []),
-        ]}
-      />
-
-      {/* ====== 第三区:科目树 + 叶节点预算(树形可编辑表) ====== */}
-      <Title level={5}>科目树与叶节点预算</Title>
-      <Space size="large" style={{ marginBottom: 8 }}>
-        <Text type="secondary">科目数:{subjectRows.length}</Text>
-        {editable && (
-          <>
-            <Button size="small" onClick={addRootSubject}>
-              新增根科目
-            </Button>
-            <Popconfirm
-              title="套用预设模板"
-              description={
-                subjectRows.length > 0
-                  ? '将替换当前已编辑的科目树,确认继续?'
-                  : '将填入默认预算科目结构(直接费/间接费等),可继续修改。'
-              }
-              okText="套用"
-              cancelText="取消"
-              onConfirm={applyDefaultTemplate}
-            >
-              <Button size="small" type="dashed">
-                套用预设模板
+            {editable && (
+              <Button variant="outline" size="sm" onClick={addAnnualRow}>
+                <Plus />
+                新增年度
               </Button>
-            </Popconfirm>
-          </>
-        )}
-      </Space>
-      <Table<SubjectTreeNode>
-        rowKey="key"
-        size="small"
-        pagination={false}
-        dataSource={subjectTree}
-        scroll={{ x: 'max-content' }}
-        locale={{ emptyText: '暂无科目,点击「新增根科目」' }}
-        style={{ marginBottom: 24 }}
-        expandable={{
-          expandedRowKeys: expandedKeys,
-          onExpandedRowsChange: (keys) => setExpandedKeys(keys as string[]),
-        }}
-        childrenColumnName="children"
-        columns={buildSubjectColumns({
-          editable,
-          declaredYears,
-          subjectAmounts,
-          setSubjectAmounts,
-          subjectDetails,
-          setSubjectDetails,
-          subjectTotalAmounts,
-          setSubjectTotalAmounts,
-          rollupByCode,
-          updateSubjectRow,
-          addChildSubject,
-          removeSubjectRow,
-          isLeafRow,
-          hasChildrenByCode,
-        })}
-      />
+            )}
+          </div>
+        </div>
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-44">年度</TableHead>
+                <TableHead className="w-64">金额</TableHead>
+                <TableHead className="w-36 text-right">叶节点合计</TableHead>
+                {editable ? <TableHead className="w-16" /> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {annualRows.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell
+                    colSpan={editable ? 4 : 3}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    暂无年度预算,点击「新增年度」
+                  </TableCell>
+                </TableRow>
+              ) : (
+                annualRows.map((row) => {
+                  const sum = leafSumByYear.get(row.year) ?? 0;
+                  const annual = toDisplayNumber(row.amount);
+                  const over = sum > annual + 1e-9;
+                  return (
+                    <TableRow key={row.key} className="hover:bg-transparent">
+                      <TableCell>
+                        {editable ? (
+                          <Input
+                            type="number"
+                            min={1900}
+                            max={9999}
+                            value={row.year}
+                            onChange={(e) =>
+                              updateAnnualRow(row.key, { year: Number(e.target.value ?? 0) })
+                            }
+                            className="h-7 w-28 tabular-nums"
+                          />
+                        ) : (
+                          <span className="tabular-nums">{row.year}</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {editable ? (
+                          <AmountInput
+                            size="sm"
+                            value={row.amount || undefined}
+                            onChange={(v) => updateAnnualRow(row.key, { amount: v ?? '' })}
+                            className="w-56"
+                          />
+                        ) : (
+                          <span className="tabular-nums">{row.amount}</span>
+                        )}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          'text-right tabular-nums',
+                          over && 'font-medium text-error-deep',
+                        )}
+                      >
+                        {sum.toFixed(2)}
+                      </TableCell>
+                      {editable ? (
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 text-mute hover:text-error-deep"
+                            aria-label="删除该年度"
+                            onClick={() =>
+                              setConfirm({
+                                title: '删除该年度?',
+                                action: () => removeAnnualRow(row.key),
+                              })
+                            }
+                          >
+                            <Trash2 />
+                          </Button>
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
+
+      {/* ====== 第三区:科目树 + 叶节点预算(树形可编辑表,TanStack Table) ====== */}
+      <section className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold tracking-[-0.3px]">科目树与叶节点预算</h2>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground tabular-nums">
+              科目数:{subjectRows.length}
+            </span>
+            {editable && (
+              <>
+                <Button variant="outline" size="sm" onClick={addRootSubject}>
+                  <Plus />
+                  新增根科目
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setConfirm({
+                      title: '套用预设模板',
+                      description:
+                        subjectRows.length > 0
+                          ? '将替换当前已编辑的科目树,确认继续?'
+                          : '将填入默认预算科目结构(直接费/间接费等),可继续修改。',
+                      action: applyDefaultTemplate,
+                    })
+                  }
+                >
+                  套用预设模板
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2">
+          {subjectRows.length === 0 ? (
+            <EmptyState title="暂无科目,点击「新增根科目」或「套用预设模板」" className="m-4" />
+          ) : (
+            <Table>
+              <TableHeader>
+                {subjectTable.getHeaderGroups().map((hg) => (
+                  <TableRow key={hg.id} className="hover:bg-transparent">
+                    {hg.headers.map((header) => (
+                      <TableHead
+                        key={header.id}
+                        style={{ width: header.getSize() }}
+                        className="whitespace-nowrap"
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(header.column.columnDef.header, header.getContext())}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {subjectTable.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id} className="hover:bg-transparent">
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id} className="py-1.5">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
+      </section>
 
       {/* ====== 操作按钮 ====== */}
-      <Space>
+      <div className="flex gap-2">
         {!draft && (
-          <Button onClick={handleSaveDraft} loading={submitting}>
+          <Button variant="outline" onClick={handleSaveDraft} disabled={submitting}>
             保存草稿
           </Button>
         )}
-        <Button type="primary" onClick={handleSaveAndSubmit} loading={submitting}>
-          {draft ? '提交' : '保存并提交'}
+        <Button onClick={handleSaveAndSubmit} disabled={submitting}>
+          {submitting ? '提交中…' : draft ? '提交' : '保存并提交'}
         </Button>
-        <Button onClick={() => router.push(`/projects/${projectId}`)}>取消</Button>
-      </Space>
-    </>
+        <Button variant="ghost" onClick={() => router.push(`/projects/${projectId}`)}>
+          取消
+        </Button>
+      </div>
+
+      {/* 通用确认对话框(替代 antd Popconfirm) */}
+      <AlertDialog open={!!confirm} onOpenChange={(open) => !open && setConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
+            {confirm?.description ? (
+              <AlertDialogDescription>{confirm.description}</AlertDialogDescription>
+            ) : null}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                confirm?.action();
+                setConfirm(null);
+              }}
+            >
+              确认
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }
 
@@ -947,362 +1326,93 @@ function ReadOnlyView({
     const hit = subjectBudgets.find((sb) => sb.subjectCode === code && sb.year === year);
     return hit ? hit.amount : '';
   };
-
-  const dynamicYearCols: ColumnsType<ReadOnlyProps['subjects'][number]> = years.map((y) => ({
-    title: `${y}`,
-    key: `year-${y}`,
-    width: 130,
-    align: 'right',
-    render: (_: unknown, row: ReadOnlyProps['subjects'][number]) => {
-      if (!row.isLeaf) {
-        return <Text type="secondary">非叶节点</Text>;
-      }
-      const a = amountFor(row.code, y);
-      return a ? <Text>{a}</Text> : <Text type="secondary">—</Text>;
-    },
-  }));
-
   const totalFor = (code: string): string => {
     const hit = subjectTotalBudgets?.find((st) => st.subjectCode === code);
     return hit ? hit.amount : '';
   };
 
-  const columns: ColumnsType<ReadOnlyProps['subjects'][number]> = [
-    { title: '编码', dataIndex: 'code', width: 120 },
-    { title: '名称', dataIndex: 'name' },
-    {
-      title: '父科目',
-      dataIndex: 'parentCode',
-      width: 140,
-      render: (p: string | null) => p ?? <Text type="secondary">(根)</Text>,
-    },
-    {
-      title: '叶节点',
-      dataIndex: 'isLeaf',
-      width: 90,
-      render: (v: boolean) => (v ? <Tag color="blue">叶</Tag> : <Tag>非叶</Tag>),
-    },
-    {
-      title: '总预算',
-      key: 'subject-total',
-      width: 130,
-      align: 'right',
-      render: (_: unknown, row: ReadOnlyProps['subjects'][number]) => {
-        if (!row.isLeaf) return <Text type="secondary">—</Text>;
-        const t = totalFor(row.code);
-        return t ? <Text>{t}</Text> : <Text type="secondary">—</Text>;
-      },
-    },
-    ...dynamicYearCols,
-  ];
-
   return (
-    <>
-      <Space size="large" style={{ marginBottom: 16 }}>
-        <Text type="secondary">项目总预算:</Text>
-        <Text strong>{projectTotal || '0.00'}</Text>
-      </Space>
-      <Title level={5}>年度预算</Title>
-      <Table
-        rowKey="year"
-        size="small"
-        pagination={false}
-        dataSource={annualBudgets}
-        style={{ marginBottom: 24 }}
-        columns={[
-          { title: '年度', dataIndex: 'year', width: 160 },
-          {
-            title: '金额',
-            dataIndex: 'amount',
-            align: 'right',
-            render: (a: string) => <Text>{a}</Text>,
-          },
-        ]}
-      />
-      <Title level={5}>科目树与叶节点预算</Title>
-      <Table
-        rowKey="id"
-        size="small"
-        pagination={false}
-        dataSource={subjects}
-        scroll={{ x: 'max-content' }}
-        columns={columns}
-      />
-    </>
-  );
-}
+    <div className="space-y-4">
+      <p className="text-sm">
+        <span className="text-muted-foreground">项目总预算:</span>
+        <span className="ml-1 font-semibold tabular-nums">{projectTotal || '0.00'}</span>
+      </p>
 
-// ============================================================
-// 子组件:可编辑科目表的列构造。
-// (抽到函数里以保持主组件 render 简洁;保留在同一文件内。)
-// ============================================================
-
-interface SubjectColumnsArgs {
-  editable: boolean;
-  declaredYears: number[];
-  subjectAmounts: Record<string, string>;
-  setSubjectAmounts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  /** §enhance3 单位/数量/单价明细(键同 subjectAmounts)。 */
-  subjectDetails: Record<string, SubjectBudgetDetail>;
-  setSubjectDetails: React.Dispatch<React.SetStateAction<Record<string, SubjectBudgetDetail>>>;
-  /** 叶节点跨年度总预算:subjectCode → amount。 */
-  subjectTotalAmounts: Record<string, string>;
-  setSubjectTotalAmounts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  /** §enhance2 父节点汇总:code → { total(总预算), byYear(年度→金额) }。 */
-  rollupByCode: Map<string, { total: number; byYear: Map<number, number> }>;
-  updateSubjectRow: (key: string, patch: Partial<SubjectRow>) => void;
-  /** 在指定 key 的行下新增子节点。 */
-  addChildSubject: (parentKey: string) => void;
-  removeSubjectRow: (key: string) => void;
-  /** 推导叶节点判定:code 不被任何行作为 parentCode。 */
-  isLeafRow: (row: SubjectRow) => boolean;
-  /** code → 是否存在子节点(用于禁用删除)。 */
-  hasChildrenByCode: Map<string, boolean>;
-}
-
-/**
- * §enhance3 单元格明细变更助手:基于当前明细计算下一份明细 + 推导金额,
- * 分别以 plain 对象调用两个 setter(避免在 updater 内嵌套触发另一 setter)。
- * 推导金额同步写回 subjectAmounts(用于汇总/校验提示;提交时以 buildPayload 重算)。
- */
-function applyDetailChange(
-  setSubjectDetails: React.Dispatch<React.SetStateAction<Record<string, SubjectBudgetDetail>>>,
-  setSubjectAmounts: React.Dispatch<React.SetStateAction<Record<string, string>>>,
-  current: SubjectBudgetDetail,
-  map: Record<string, SubjectBudgetDetail>,
-  amountMap: Record<string, string>,
-  key: string,
-  patch: Partial<SubjectBudgetDetail>,
-) {
-  const nextDetail: SubjectBudgetDetail = { ...current, ...patch };
-  // 推导金额:quantity × unitPrice(三项齐备时)。
-  let amount = '';
-  if (nextDetail.quantity !== '' && nextDetail.unitPrice !== '') {
-    try {
-      amount = new D(nextDetail.quantity).times(new D(nextDetail.unitPrice)).toFixed(2);
-    } catch {
-      amount = '';
-    }
-  }
-  const nextMap = { ...map };
-  if (nextDetail.unit.trim() === '' && nextDetail.quantity === '' && nextDetail.unitPrice === '') {
-    delete nextMap[key];
-  } else {
-    nextMap[key] = nextDetail;
-  }
-  setSubjectDetails(nextMap);
-  const nextAmountMap = { ...amountMap };
-  if (amount === '') {
-    delete nextAmountMap[key];
-  } else {
-    nextAmountMap[key] = amount;
-  }
-  setSubjectAmounts(nextAmountMap);
-}
-
-function buildSubjectColumns(args: SubjectColumnsArgs): ColumnsType<SubjectTreeNode> {
-  const {
-    editable,
-    declaredYears,
-    subjectAmounts,
-    setSubjectAmounts,
-    subjectDetails,
-    setSubjectDetails,
-    subjectTotalAmounts,
-    setSubjectTotalAmounts,
-    rollupByCode,
-    updateSubjectRow,
-    addChildSubject,
-    removeSubjectRow,
-    isLeafRow,
-    hasChildrenByCode,
-  } = args;
-
-  /** §enhance3 计算单元格展示金额 = 数量 × 单价(只读,空则空串)。 */
-  const cellAmount = (key: string): string => subjectAmounts[key] ?? '';
-
-  const dynamicYearCols: ColumnsType<SubjectTreeNode> = declaredYears.map((y) => ({
-    title: `${y}`,
-    key: `year-${y}`,
-    width: 360,
-    align: 'left',
-    render: (_: unknown, row: SubjectTreeNode) => {
-      const key = `${row.code}|${y}`;
-      if (!editable) {
-        const a = subjectAmounts[key];
-        return a ? <Text>{a}</Text> : <Text type="secondary">—</Text>;
-      }
-      // §enhance2 非叶行:显示叶后代汇总(只读、计算)。
-      if (!isLeafRow(row)) {
-        const rolled = rollupByCode.get(row.code)?.byYear.get(y);
-        if (rolled === undefined) return <Text type="secondary">—</Text>;
-        return <Text type="secondary">{rolled.toFixed(2)}</Text>;
-      }
-      // §enhance3 叶行:单位 × 数量 × 单价 → 金额(只读)。
-      const detail = subjectDetails[key] ?? { unit: '', quantity: '', unitPrice: '' };
-      const amt = cellAmount(key);
-      return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-          <Input
-            value={detail.unit}
-            onChange={(e) =>
-              applyDetailChange(
-                setSubjectDetails,
-                setSubjectAmounts,
-                detail,
-                subjectDetails,
-                subjectAmounts,
-                key,
-                { unit: e.target.value },
-              )
-            }
-            placeholder="单位"
-            size="small"
-            style={{ width: 70 }}
-          />
-          <span style={{ color: '#999' }}>×</span>
-          <InputNumber
-            value={detail.quantity === '' ? undefined : Number(detail.quantity)}
-            min={0}
-            onChange={(v) =>
-              applyDetailChange(
-                setSubjectDetails,
-                setSubjectAmounts,
-                detail,
-                subjectDetails,
-                subjectAmounts,
-                key,
-                { quantity: v == null ? '' : String(v) },
-              )
-            }
-            placeholder="数量"
-            size="small"
-            style={{ width: 80 }}
-          />
-          <span style={{ color: '#999' }}>×</span>
-          <InputNumber
-            value={detail.unitPrice === '' ? undefined : Number(detail.unitPrice)}
-            min={0}
-            onChange={(v) =>
-              applyDetailChange(
-                setSubjectDetails,
-                setSubjectAmounts,
-                detail,
-                subjectDetails,
-                subjectAmounts,
-                key,
-                { unitPrice: v == null ? '' : String(v) },
-              )
-            }
-            placeholder="单价"
-            size="small"
-            style={{ width: 90 }}
-          />
-          <span style={{ color: '#999' }}>=</span>
-          <Text
-            type={amt ? undefined : 'secondary'}
-            strong
-            style={{ minWidth: 70, textAlign: 'right', display: 'inline-block' }}
-          >
-            {amt ? amt : '0.00'}
-          </Text>
+      <section className="space-y-2">
+        <h2 className="text-base font-semibold tracking-[-0.3px]">年度预算</h2>
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-40">年度</TableHead>
+                <TableHead className="text-right">金额</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {annualBudgets.map((a) => (
+                <TableRow key={a.year}>
+                  <TableCell className="tabular-nums">{a.year}</TableCell>
+                  <TableCell className="text-right tabular-nums">{a.amount}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
-      );
-    },
-  }));
+      </section>
 
-  const base: ColumnsType<SubjectTreeNode> = [
-    {
-      // 名称列即树形首列:AntD 会在该列按层级缩进并显示展开箭头
-      // (childrenColumnName="children" + expandable)。
-      // 用 flex 行布局,让 AntD 注入的展开箭头与名称输入框在同一行(不换行)。
-      title: '名称',
-      dataIndex: 'name',
-      render: (_: unknown, row: SubjectTreeNode) =>
-        editable ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Input
-              value={row.name}
-              onChange={(e) => updateSubjectRow(row.key, { name: e.target.value })}
-              placeholder="如 设备购置费"
-              size="small"
-              style={{ flex: 1, minWidth: 120 }}
-            />
-          </div>
-        ) : (
-          row.name
-        ),
-    },
-    {
-      // 科目总预算(跨年度):叶节点可填;§enhance2 非叶节点显示叶后代汇总(只读)。
-      title: '总预算',
-      key: 'subject-total',
-      width: 150,
-      align: 'right',
-      render: (_: unknown, row: SubjectTreeNode) => {
-        if (!editable) {
-          const t = subjectTotalAmounts[row.code];
-          return t ? <Text>{t}</Text> : <Text type="secondary">—</Text>;
-        }
-        if (!isLeafRow(row)) {
-          const rolled = rollupByCode.get(row.code)?.total;
-          if (rolled === undefined || rolled === 0) {
-            return <Text type="secondary">—</Text>;
-          }
-          return <Text type="secondary">{rolled.toFixed(2)}</Text>;
-        }
-        return (
-          <AmountInput
-            value={subjectTotalAmounts[row.code] || undefined}
-            onChange={(v) =>
-              setSubjectTotalAmounts((prev) => {
-                const next = { ...prev };
-                if (v === undefined || v === '') {
-                  delete next[row.code];
-                } else {
-                  next[row.code] = v;
-                }
-                return next;
-              })
-            }
-            style={{ width: 140 }}
-          />
-        );
-      },
-    },
-    ...dynamicYearCols,
-  ];
-
-  if (editable) {
-    base.push({
-      title: '操作',
-      key: 'op',
-      width: 180,
-      fixed: 'right',
-      render: (_: unknown, row: SubjectTreeNode) => {
-        const hasChildren = !!hasChildrenByCode.get(row.code);
-        const deleteBtn = (
-          <Popconfirm
-            title="删除该科目?"
-            disabled={hasChildren}
-            onConfirm={() => removeSubjectRow(row.key)}
-          >
-            <Button size="small" type="link" danger disabled={hasChildren}>
-              删除
-            </Button>
-          </Popconfirm>
-        );
-        return (
-          <Space size="small">
-            <Button size="small" type="link" onClick={() => addChildSubject(row.key)}>
-              + 子节点
-            </Button>
-            {hasChildren ? <Tooltip title="请先删除下级科目">{deleteBtn}</Tooltip> : deleteBtn}
-          </Space>
-        );
-      },
-    });
-  }
-
-  return base;
+      <section className="space-y-2">
+        <h2 className="text-base font-semibold tracking-[-0.3px]">科目树与叶节点预算</h2>
+        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-28">编码</TableHead>
+                <TableHead>名称</TableHead>
+                <TableHead className="w-32">父科目</TableHead>
+                <TableHead className="w-20">叶节点</TableHead>
+                <TableHead className="w-32 text-right">总预算</TableHead>
+                {years.map((y) => (
+                  <TableHead key={y} className="w-32 text-right tabular-nums">
+                    {y}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {subjects.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell className="font-mono text-[13px]">{s.code}</TableCell>
+                  <TableCell>{s.name}</TableCell>
+                  <TableCell>{s.parentCode ?? <span className="text-mute">(根)</span>}</TableCell>
+                  <TableCell>
+                    {s.isLeaf ? (
+                      <Badge variant="success">叶</Badge>
+                    ) : (
+                      <Badge variant="secondary">非叶</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {s.isLeaf ? (
+                      totalFor(s.code) || <span className="text-mute">—</span>
+                    ) : (
+                      <span className="text-mute">—</span>
+                    )}
+                  </TableCell>
+                  {years.map((y) => (
+                    <TableCell key={y} className="text-right tabular-nums">
+                      {s.isLeaf ? (
+                        amountFor(s.code, y) || <span className="text-mute">—</span>
+                      ) : (
+                        <span className="text-mute">非叶节点</span>
+                      )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
+    </div>
+  );
 }
