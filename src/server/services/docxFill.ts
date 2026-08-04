@@ -37,7 +37,7 @@ function cellText(tc: string): string {
  *      删除该 <w:r> 之后的所有 run,删除其它 <w:p>。
  * 若单元格无 run(空段),在第一个 <w:p> 内追加一个 <w:r><w:t>newText</w:t></w:r>。
  */
-function setCellText(tc: string, newText: string): string {
+function setCellText(tc: string, newText: string, align?: 'left' | 'right' | 'center'): string {
   const text = newText ?? '';
   // 转义 XML 特殊字符。
   const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -49,9 +49,20 @@ function setCellText(tc: string, newText: string): string {
     return tc;
   }
   const para = pMatch[0];
-  // 提取并清理段落属性 pPr:剔除 <w:numPr>(自动编号),避免与填入的序号文本重复显示。
+  // 提取并清理段落属性 pPr:
+  //  - 剔除 <w:numPr>(自动编号),避免与填入的序号文本重复显示;
+  //  - 若指定 align,覆盖 <w:jc>(对齐)。
   const pprRawMatch = para.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
-  const ppr = pprRawMatch ? pprRawMatch[0].replace(/<w:numPr>[\s\S]*?<\/w:numPr>/, '') : '';
+  let ppr = pprRawMatch ? pprRawMatch[0].replace(/<w:numPr>[\s\S]*?<\/w:numPr>/, '') : '';
+  if (align) {
+    if (/<w:jc w:val="[^"]*"\/>/.test(ppr)) {
+      ppr = ppr.replace(/<w:jc w:val="[^"]*"\/>/, `<w:jc w:val="${align}"/>`);
+    } else if (ppr) {
+      ppr = ppr.replace(/<\/w:pPr>$/, `<w:jc w:val="${align}"/></w:pPr>`);
+    } else {
+      ppr = `<w:pPr><w:jc w:val="${align}"/></w:pPr>`;
+    }
+  }
   // 找段落内第一个 <w:r ...>...</w:r>。
   const rMatch = para.match(/<w:r\b[\s>][\s\S]*?<\/w:r>/);
   let newRun: string;
@@ -169,11 +180,17 @@ export async function fillAdjustmentTemplate(input: DocxFillInput): Promise<Buff
   /**
    * 把 tr 中"逻辑列 logicalCol"对应的物理单元格替换为 newText 填充版,返回新 tr。
    * (合并单元格在物理上是一个 tc,直接替换它即可。)
+   * align 可选,覆盖单元格段落对齐。
    */
-  const setLogicalCell = (tr: string, logicalCol: number, newText: string): string => {
+  const setLogicalCell = (
+    tr: string,
+    logicalCol: number,
+    newText: string,
+    align?: 'left' | 'right' | 'center',
+  ): string => {
     const info = logicalCell(tr, logicalCol);
     if (!info) return tr;
-    const newTc = setCellText(info.tc, newText);
+    const newTc = setCellText(info.tc, newText, align);
     return tr.replace(info.tc, newTc);
   };
 
@@ -205,7 +222,7 @@ export async function fillAdjustmentTemplate(input: DocxFillInput): Promise<Buff
   // 填充每行数据。
   input.rows.forEach((r, i) => {
     let tr = dataRows[i];
-    tr = setLogicalCell(tr, 0, String(i + 1));
+    tr = setLogicalCell(tr, 0, String(i + 1), 'left'); // 序号列左对齐
     tr = setLogicalCell(tr, 1, r.subjectTitle);
     tr = setLogicalCell(tr, 2, r.productName);
     tr = setLogicalCell(tr, 4, r.originWan);
