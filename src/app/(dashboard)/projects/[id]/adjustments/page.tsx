@@ -80,7 +80,8 @@ interface AdjustmentRow {
   id: string;
   year: number;
   status: string;
-  reason: string | null;
+  totalReason: string | null;
+  annualReason: string | null;
   applicantId: string;
   createdAt: string;
   lines: AdjustmentLine[];
@@ -136,7 +137,8 @@ export default function AdjustmentsPage() {
   // 表单状态。
   const [formYear, setFormYear] = useState<number>(() => new Date().getFullYear());
   const [baseline, setBaseline] = useState<SubjectBaseline[]>([]);
-  const [formReason, setFormReason] = useState('');
+  const [formTotalReason, setFormTotalReason] = useState('');
+  const [formAnnualReason, setFormAnnualReason] = useState('');
   const [formLines, setFormLines] = useState<EditLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [baselineLoading, setBaselineLoading] = useState(false);
@@ -234,7 +236,8 @@ export default function AdjustmentsPage() {
     setEditingId(null);
     const y = new Date().getFullYear();
     setFormYear(y);
-    setFormReason('');
+    setFormTotalReason('');
+    setFormAnnualReason('');
     await loadBaseline(y);
     setFormLines([{ key: genKey(), subjectId: null, totalAdjustment: '', annualAdjustment: '' }]);
     setMode('form');
@@ -243,7 +246,8 @@ export default function AdjustmentsPage() {
   const openEdit = async (row: AdjustmentRow) => {
     setEditingId(row.id);
     setFormYear(row.year);
-    setFormReason(row.reason ?? '');
+    setFormTotalReason(row.totalReason ?? '');
+    setFormAnnualReason(row.annualReason ?? '');
     await loadBaseline(row.year);
     setFormLines(
       row.lines.map((l) => ({
@@ -320,7 +324,12 @@ export default function AdjustmentsPage() {
     }));
     return {
       ok: true,
-      payload: { year: formYear, reason: formReason.trim() || null, lines },
+      payload: {
+        year: formYear,
+        totalReason: formTotalReason.trim() || null,
+        annualReason: formAnnualReason.trim() || null,
+        lines,
+      },
     };
   };
 
@@ -429,6 +438,57 @@ export default function AdjustmentsPage() {
     } finally {
       setExporting(false);
     }
+  };
+
+  // ------------------------------------------------------------
+  // 自动生成调整原因说明
+  // ------------------------------------------------------------
+  /** 元字符串 → 万元去尾零(0.5、5、1.2),用于原因文本的自然语言金额。 */
+  function yuanToWanTrim(yuanStr: string): string {
+    const n = Number(yuanStr) / 10000;
+    if (!Number.isFinite(n) || n === 0) return '0';
+    // 去尾零:toFixed(2) 后剥末尾 0 和多余小数点。
+    return Number(n.toFixed(2)).toString();
+  }
+
+  /**
+   * 按维度生成调整原因说明。
+   * 规则:逐品名(明细行)描述,原预算为0的调增用"新增",否则用"调增/调减";
+   * 金额用万元去尾零;该维度无任何调整(全0或无行)→ 返回空串。
+   */
+  const generateReason = (dim: 'total' | 'annual'): string => {
+    const field = dim === 'total' ? 'totalAdjustment' : 'annualAdjustment';
+    const parts: string[] = [];
+    for (const l of formLines) {
+      if (!l.subjectId) continue;
+      const amt = Number(l[field]) || 0;
+      if (amt === 0) continue; // 该维度此行无调整
+      const base = baselineMap.get(l.subjectId);
+      const productName = base?.name ?? '';
+      // 万元去尾零:l[field] 是元字符串(用户输入),直接转。
+      const wan = yuanToWanTrim(l[field]);
+      // "新增":该维度的原预算为 0(总维度看 totalCurrent,年度维度看 annualCurrent)。
+      const originCurrent =
+        dim === 'total' ? Number(base?.totalCurrent ?? 0) : Number(base?.annualCurrent ?? 0);
+      if (amt > 0 && originCurrent === 0) {
+        parts.push(`新增${productName}预算${wan}万元`);
+      } else if (amt > 0) {
+        parts.push(`${productName}预算调增${wan}万元`);
+      } else {
+        parts.push(`${productName}预算调减${Math.abs(Number(wan))}万元`);
+      }
+    }
+    if (parts.length === 0) return '';
+    return `根据项目研究需要，对经费预算进行调整。${parts.join('，')}。`;
+  };
+
+  /** 一键生成两个维度原因(覆盖现有内容)。 */
+  const handleAutoGenerate = () => {
+    const t = generateReason('total');
+    const a = generateReason('annual');
+    setFormTotalReason(t);
+    setFormAnnualReason(a);
+    message.success(t || a ? '已生成调整原因说明,可继续编辑' : '当前调整无变动,未生成说明');
   };
 
   // ------------------------------------------------------------
@@ -612,17 +672,42 @@ export default function AdjustmentsPage() {
             />
           </Descriptions.Item>
           <Descriptions.Item label="调整原因">
-            <input
-              style={{
-                width: 480,
-                padding: '4px 11px',
-                border: '1px solid #d9d9d9',
-                borderRadius: 6,
-              }}
-              placeholder="简要说明调整原因(选填)"
-              value={formReason}
-              onChange={(e) => setFormReason(e.target.value)}
-            />
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Space>
+                <Button size="small" type="dashed" onClick={handleAutoGenerate}>
+                  自动生成原因说明
+                </Button>
+                <Text type="secondary">根据当前调整明细自动生成,生成后可手动编辑</Text>
+              </Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                总预算调整原因:
+              </Text>
+              <input
+                style={{
+                  width: 480,
+                  padding: '4px 11px',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                }}
+                placeholder="总预算调整原因说明(导出总预算调整文档用)"
+                value={formTotalReason}
+                onChange={(e) => setFormTotalReason(e.target.value)}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                年度预算调整原因:
+              </Text>
+              <input
+                style={{
+                  width: 480,
+                  padding: '4px 11px',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                }}
+                placeholder="年度预算调整原因说明(导出年度预算调整文档用)"
+                value={formAnnualReason}
+                onChange={(e) => setFormAnnualReason(e.target.value)}
+              />
+            </Space>
           </Descriptions.Item>
         </Descriptions>
 
@@ -710,9 +795,14 @@ export default function AdjustmentsPage() {
     },
     {
       title: '原因',
-      dataIndex: 'reason',
+      key: 'reason',
       ellipsis: true,
-      render: (r: string | null) => r ?? <Text type="secondary">—</Text>,
+      render: (_: unknown, row) => {
+        const parts: string[] = [];
+        if (row.totalReason) parts.push(`总:${row.totalReason}`);
+        if (row.annualReason) parts.push(`年:${row.annualReason}`);
+        return parts.length ? <span>{parts.join(' / ')}</span> : <Text type="secondary">—</Text>;
+      },
     },
     {
       title: '创建时间',
@@ -817,8 +907,11 @@ export default function AdjustmentsPage() {
                   {STATUS_META[detailTarget.status]?.label ?? detailTarget.status}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="原因">
-                {detailTarget.reason ?? <Text type="secondary">—</Text>}
+              <Descriptions.Item label="总预算调整原因">
+                {detailTarget.totalReason ?? <Text type="secondary">—</Text>}
+              </Descriptions.Item>
+              <Descriptions.Item label="年度预算调整原因">
+                {detailTarget.annualReason ?? <Text type="secondary">—</Text>}
               </Descriptions.Item>
               <Descriptions.Item label="创建时间">
                 {formatDateTime(detailTarget.createdAt)}

@@ -161,7 +161,7 @@ export async function exportAdjustmentDocx(
           ? yuanStrToWan(annualBudgetRow.currentAmount.toString())
           : '0.00',
       },
-      reason: adj.reason ?? '',
+      reason: (dimension === 'total' ? adj.totalReason : adj.annualReason) ?? '',
       rows,
       totalOriginWan,
       totalAdjustedWan,

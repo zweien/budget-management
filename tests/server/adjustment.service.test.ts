@@ -139,7 +139,8 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       project.id,
       {
         year: 2026,
-        reason: '调剂',
+        totalReason: '调剂',
+        annualReason: '年度调剂',
         lines: [
           { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
           { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '100.00' },
@@ -372,7 +373,8 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       adj.id,
       {
         year: 2026,
-        reason: '改了',
+        totalReason: '改了',
+        annualReason: '年度改了',
         lines: [
           { subjectId: leafA.id, totalAdjustment: '-200.00', annualAdjustment: '-200.00' },
           { subjectId: leafB.id, totalAdjustment: '200.00', annualAdjustment: '200.00' },
@@ -380,7 +382,8 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       },
       adminUser(),
     );
-    expect(updated.reason).toBe('改了');
+    expect(updated.totalReason).toBe('改了');
+    expect(updated.annualReason).toBe('年度改了');
 
     const lines = await prisma.budgetAdjustmentLine.findMany({ where: { adjustmentId: adj.id } });
     expect(fromStored(lines[0].totalAdjustment).toFixed(2)).toBe('-200.00');

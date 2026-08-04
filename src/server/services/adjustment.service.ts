@@ -31,7 +31,9 @@ export interface AdjustmentLineInput {
 /** 创建/编辑调整单 payload。 */
 export interface AdjustmentPayload {
   year: number;
-  reason?: string | null;
+  // 调整原因按维度分开(对应总预算/年度预算两份导出文档)。
+  totalReason?: string | null;
+  annualReason?: string | null;
   lines: AdjustmentLineInput[];
 }
 
@@ -47,7 +49,8 @@ function snapshotAdjustment(row: BudgetAdjustment): Record<string, unknown> {
     projectId: row.projectId,
     year: row.year,
     status: row.status,
-    reason: row.reason,
+    totalReason: row.totalReason,
+    annualReason: row.annualReason,
     applicantId: row.applicantId,
     approverId: row.approverId,
   });
@@ -162,7 +165,8 @@ export async function createAdjustment(
   }
 
   const id = uuidv7();
-  const reason = payload.reason?.trim() ? payload.reason.trim() : null;
+  const totalReason = payload.totalReason?.trim() ? payload.totalReason.trim() : null;
+  const annualReason = payload.annualReason?.trim() ? payload.annualReason.trim() : null;
   const year = payload.year;
 
   return prisma.$transaction(async (tx) => {
@@ -172,7 +176,8 @@ export async function createAdjustment(
         projectId,
         year,
         status: ApprovalStatus.DRAFT,
-        reason,
+        totalReason,
+        annualReason,
         applicantId: user.id,
       },
     });
@@ -236,10 +241,11 @@ export async function updateDraftAdjustment(
       await requireLeafSubject(tx, projectId, line.subjectId);
     }
 
-    const reason = payload.reason?.trim() ? payload.reason.trim() : null;
+    const totalReason = payload.totalReason?.trim() ? payload.totalReason.trim() : null;
+    const annualReason = payload.annualReason?.trim() ? payload.annualReason.trim() : null;
     const updated = await tx.budgetAdjustment.update({
       where: { id: adjId },
-      data: { year: payload.year, reason },
+      data: { year: payload.year, totalReason, annualReason },
     });
 
     // 重建明细行(先删后建)。
