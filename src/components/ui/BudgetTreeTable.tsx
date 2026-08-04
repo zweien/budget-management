@@ -1,10 +1,30 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Button, Checkbox, Popover, Table } from 'antd';
-import { SettingOutlined } from '@ant-design/icons';
-import type { ColumnsType } from 'antd/es/table';
+import {
+  flexRender,
+  getCoreRowModel,
+  getExpandedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type ExpandedState,
+  type VisibilityState,
+} from '@tanstack/react-table';
+import { ChevronRight, Settings2 } from 'lucide-react';
+
+import { cn } from '@/lib/utils';
 import { MoneyText } from '@/components/ui/MoneyText';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 /** 与 T5 ledger.service 输出一致的扁平节点(§11.1 台账单元)。 */
 export interface LedgerNode {
@@ -28,7 +48,6 @@ export interface LedgerNode {
 }
 
 interface TreeNode extends LedgerNode {
-  key: string;
   children?: TreeNode[];
 }
 
@@ -52,12 +71,11 @@ function formatRate(rate: number | null): string {
   return `${(rate * 100).toFixed(2)}%`;
 }
 
-/** 把扁平 nodes(parentId 链接)组装为 AntD Table 树形结构。 */
+/** 把扁平 nodes(parentId 链接)组装为树形结构(保持后端 sortOrder 顺序)。 */
 function buildTree(nodes: LedgerNode[]): TreeNode[] {
   const map = new Map<string, TreeNode>();
-  nodes.forEach((n) => map.set(n.subjectId, { ...n, key: n.subjectId }));
+  nodes.forEach((n) => map.set(n.subjectId, { ...n }));
   const roots: TreeNode[] = [];
-  // 保持后端返回顺序(已按编制 sortOrder 排序),不在此重排。
   map.forEach((node) => {
     if (node.parentId && map.has(node.parentId)) {
       const parent = map.get(node.parentId)!;
@@ -70,206 +88,187 @@ function buildTree(nodes: LedgerNode[]): TreeNode[] {
   return roots;
 }
 
-/**
- * §11.1 预算执行台账树形表。
- * 列顺序:科目 / [总预算:原始/调整/当前] / [年度:原始/调整/当前] / 已支出 / 应付未付 /
- *        总占用 / 结余 / 执行率。金额列右对齐两位小数;结余负数走 MoneyText 风险色。
- * 顶部「列设置」可勾选控制各金额列的显示/隐藏(科目列固定显示)。
- */
-
-/** 可控显示的金额列定义(key 须与 LedgerNode 字段一致)。 */
-interface ColumnDef {
-  key: string;
-  label: string;
-  group: '总预算' | '年度' | '执行';
-}
-
-const TOGGLE_COLUMNS: ColumnDef[] = [
-  { key: 'totalInitial', label: '总预算·原始', group: '总预算' },
-  { key: 'totalAdjustment', label: '总预算·调整', group: '总预算' },
-  { key: 'totalCurrent', label: '总预算·当前', group: '总预算' },
-  { key: 'initial', label: '年度·原始', group: '年度' },
-  { key: 'adjustment', label: '年度·调整', group: '年度' },
-  { key: 'current', label: '年度·当前', group: '年度' },
-  { key: 'paid', label: '已支出', group: '执行' },
-  { key: 'payable', label: '应付未付', group: '执行' },
-  { key: 'totalOccupied', label: '总占用', group: '执行' },
-  { key: 'balance', label: '结余', group: '执行' },
-  { key: 'executionRate', label: '执行率', group: '执行' },
+/** 可控显示的金额列定义(id 须与 LedgerNode 字段一致)。 */
+const TOGGLE_COLUMNS: { id: string; label: string; group: '总预算' | '年度' | '执行' }[] = [
+  { id: 'totalInitial', label: '总预算·原始', group: '总预算' },
+  { id: 'totalAdjustment', label: '总预算·调整', group: '总预算' },
+  { id: 'totalCurrent', label: '总预算·当前', group: '总预算' },
+  { id: 'initial', label: '年度·原始', group: '年度' },
+  { id: 'adjustment', label: '年度·调整', group: '年度' },
+  { id: 'current', label: '年度·当前', group: '年度' },
+  { id: 'paid', label: '已支出', group: '执行' },
+  { id: 'payable', label: '应付未付', group: '执行' },
+  { id: 'totalOccupied', label: '总占用', group: '执行' },
+  { id: 'balance', label: '结余', group: '执行' },
+  { id: 'executionRate', label: '执行率', group: '执行' },
 ];
 
+/**
+ * §11.1 预算执行台账树形表(TanStack Table 重写)。
+ * 列顺序:科目 / [总预算:原始/调整/当前] / [年度:原始/调整/当前] / 已支出 / 应付未付 /
+ *        总占用 / 结余 / 执行率。金额列右对齐两位小数;结余负数走 MoneyText 风险色。
+ * 顶部「列设置」控制各金额列显隐(科目列固定)。
+ */
 export function BudgetTreeTable({ nodes }: Props) {
   const treeData = useMemo(() => buildTree(nodes), [nodes]);
 
-  // 列显示状态(默认全部显示)。科目列固定不参与隐藏。
-  const [visible, setVisible] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(TOGGLE_COLUMNS.map((c) => [c.key, true])),
-  );
+  // 列显隐(TanStack columnVisibility);科目列固定不参与。
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  // 默认全部展开(对齐原 defaultExpandAllRows)。
+  const [expanded, setExpanded] = useState<ExpandedState>(true);
 
-  // 金额列 render:右对齐纯文本(无风险色)。具名以满足 react/display-name。
-  const moneyRender = (key: keyof TreeNode) =>
-    function MoneyCell(_: unknown, r: TreeNode) {
-      return <span>{plainMoney(String(r[key]))}</span>;
-    };
+  const columns = useMemo<ColumnDef<TreeNode>[]>(() => {
+    const moneyCol = (id: keyof TreeNode & string, label: string): ColumnDef<TreeNode> => ({
+      id,
+      accessorKey: id,
+      header: () => <span className="block text-right">{label}</span>,
+      cell: ({ row }) => (
+        <span className="block text-right tabular-nums">
+          {plainMoney(String(row.original[id]))}
+        </span>
+      ),
+    });
 
-  const allColumns: ColumnsType<TreeNode> = [
-    {
-      title: '预算科目',
-      dataIndex: 'name',
-      key: 'subject',
-      width: 160,
-      // 树形首列由 Table 的 rowExpandable + indent 自带缩进,无需额外样式。
-      // 仅显示科目名称,不展示编码。
-      render: (_, r) => <span>{r.name}</span>,
-    },
-    // 总预算维度(跨年度,SubjectTotalBudget)。
-    {
-      title: '总预算·原始',
-      dataIndex: 'totalInitial',
-      key: 'totalInitial',
-      width: 120,
-      align: 'right',
-      render: moneyRender('totalInitial'),
-    },
-    {
-      title: '总预算·调整',
-      dataIndex: 'totalAdjustment',
-      key: 'totalAdjustment',
-      width: 120,
-      align: 'right',
-      render: moneyRender('totalAdjustment'),
-    },
-    {
-      title: '总预算·当前',
-      dataIndex: 'totalCurrent',
-      key: 'totalCurrent',
-      width: 120,
-      align: 'right',
-      render: moneyRender('totalCurrent'),
-    },
-    // 年度预算维度(SubjectBudget)。
-    {
-      title: '年度·原始',
-      dataIndex: 'initial',
-      key: 'initial',
-      width: 110,
-      align: 'right',
-      render: moneyRender('initial'),
-    },
-    {
-      title: '年度·调整',
-      dataIndex: 'adjustment',
-      key: 'adjustment',
-      width: 110,
-      align: 'right',
-      render: moneyRender('adjustment'),
-    },
-    {
-      title: '年度·当前',
-      dataIndex: 'current',
-      key: 'current',
-      width: 110,
-      align: 'right',
-      render: moneyRender('current'),
-    },
-    // 执行情况。
-    {
-      title: '已支出',
-      dataIndex: 'paid',
-      key: 'paid',
-      width: 110,
-      align: 'right',
-      render: moneyRender('paid'),
-    },
-    {
-      title: '应付未付',
-      dataIndex: 'payable',
-      key: 'payable',
-      width: 110,
-      align: 'right',
-      render: moneyRender('payable'),
-    },
-    {
-      title: '总占用',
-      dataIndex: 'totalOccupied',
-      key: 'totalOccupied',
-      width: 110,
-      align: 'right',
-      render: moneyRender('totalOccupied'),
-    },
-    {
-      title: '结余',
-      dataIndex: 'balance',
-      key: 'balance',
-      width: 110,
-      align: 'right',
-      // 负结余 → MoneyText 风险色 + "超预算"(§12.2)。
-      render: (_, r) => <MoneyText value={r.balance} riskOnNegative />,
-    },
-    {
-      title: '执行率',
-      dataIndex: 'executionRate',
-      key: 'executionRate',
-      width: 90,
-      align: 'right',
-      render: (_, r) => <span>{formatRate(r.executionRate)}</span>,
-    },
-  ];
-
-  const columns = useMemo(
-    () => allColumns.filter((col) => col.key === 'subject' || visible[col.key as string]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visible, nodes],
-  );
-
-  // 列设置弹出层。
-  const groups: ColumnDef['group'][] = ['总预算', '年度', '执行'];
-  const columnSettings = (
-    <div style={{ maxWidth: 220 }}>
-      {groups.map((g) => (
-        <div key={g} style={{ marginBottom: 8 }}>
-          <div style={{ fontWeight: 600, fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>
-            {g}
-          </div>
-          {TOGGLE_COLUMNS.filter((c) => c.group === g).map((c) => (
-            <div key={c.key}>
-              <Checkbox
-                checked={visible[c.key]}
-                onChange={(e) => setVisible((prev) => ({ ...prev, [c.key]: e.target.checked }))}
+    return [
+      {
+        id: 'subject',
+        accessorKey: 'name',
+        header: () => '预算科目',
+        cell: ({ row }) => (
+          <span
+            className="flex items-center gap-1 whitespace-nowrap"
+            style={{ paddingLeft: `${row.depth * 20}px` }}
+          >
+            {row.getCanExpand() ? (
+              <button
+                type="button"
+                aria-label={row.getIsExpanded() ? '收起' : '展开'}
+                onClick={row.getToggleExpandedHandler()}
+                className="rounded-sm text-mute transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                {c.label}
-              </Checkbox>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
+                <ChevronRight
+                  className={cn('size-4 transition-transform', row.getIsExpanded() && 'rotate-90')}
+                />
+              </button>
+            ) : (
+              <span className="size-4" />
+            )}
+            {/* 仅显示科目名称,不展示编码(对齐原实现)。 */}
+            <span className={cn(row.original.isLeaf ? undefined : 'font-medium')}>
+              {row.original.name}
+            </span>
+          </span>
+        ),
+      },
+      moneyCol('totalInitial', '总预算·原始'),
+      moneyCol('totalAdjustment', '总预算·调整'),
+      moneyCol('totalCurrent', '总预算·当前'),
+      moneyCol('initial', '年度·原始'),
+      moneyCol('adjustment', '年度·调整'),
+      moneyCol('current', '年度·当前'),
+      moneyCol('paid', '已支出'),
+      moneyCol('payable', '应付未付'),
+      moneyCol('totalOccupied', '总占用'),
+      {
+        id: 'balance',
+        accessorKey: 'balance',
+        header: () => <span className="block text-right">结余</span>,
+        // 负结余 → MoneyText 风险色 + "超预算"(§12.2)。
+        cell: ({ row }) => <MoneyText value={row.original.balance} riskOnNegative />,
+      },
+      {
+        id: 'executionRate',
+        accessorKey: 'executionRate',
+        header: () => <span className="block text-right">执行率</span>,
+        cell: ({ row }) => (
+          <span className="block text-right tabular-nums">
+            {formatRate(row.original.executionRate)}
+          </span>
+        ),
+      },
+    ];
+  }, []);
+
+  // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    data: treeData,
+    columns,
+    state: { expanded, columnVisibility },
+    onExpandedChange: setExpanded,
+    onColumnVisibilityChange: setColumnVisibility,
+    getSubRows: (row) => row.children,
+    getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+  });
+
+  const groups: ('总预算' | '年度' | '执行')[] = ['总预算', '年度', '执行'];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <Popover
-          content={columnSettings}
-          title="显示列设置"
-          trigger="click"
-          placement="bottomRight"
-        >
-          <Button size="small" icon={<SettingOutlined />}>
-            列设置
-          </Button>
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Settings2 />
+              列设置
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-56">
+            <p className="caption-mono mb-2">显示列设置</p>
+            {groups.map((g) => (
+              <div key={g} className="mb-2 last:mb-0">
+                <p className="mb-1 text-xs font-medium text-muted-foreground">{g}</p>
+                {TOGGLE_COLUMNS.filter((c) => c.group === g).map((c) => {
+                  const column = table.getColumn(c.id);
+                  if (!column) return null;
+                  return (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-1 text-sm hover:bg-accent"
+                    >
+                      <Checkbox
+                        checked={column.getIsVisible()}
+                        onCheckedChange={(checked) => column.toggleVisibility(checked === true)}
+                      />
+                      {c.label}
+                    </label>
+                  );
+                })}
+              </div>
+            ))}
+          </PopoverContent>
         </Popover>
       </div>
-      <Table<TreeNode>
-        rowKey="key"
-        columns={columns}
-        dataSource={treeData}
-        pagination={false}
-        expandable={{ defaultExpandAllRows: true }}
-        // 启用树形数据:children 字段自动展开/缩进。
-        scroll={{ x: 'max-content' }}
-        style={{ width: '100%' }}
-      />
+
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+        <Table>
+          <TableHeader>
+            {table.getHeaderGroups().map((hg) => (
+              <TableRow key={hg.id} className="hover:bg-transparent">
+                {hg.headers.map((header) => (
+                  <TableHead key={header.id} className="whitespace-nowrap">
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {table.getRowModel().rows.map((row) => (
+              <TableRow key={row.id}>
+                {row.getVisibleCells().map((cell) => (
+                  <TableCell key={cell.id} className="py-2">
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
