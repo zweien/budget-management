@@ -1,49 +1,222 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * DESIGN.md (Vercel 设计语言) token 主题。
+ * 只取 token 体系:canvas 表面 / hairline / 负字距排版 / stacked shadow,
+ * 不引入营销组件(mesh 渐变、100px 药丸 CTA)。
+ * 暗色 token 为按 Vercel 暗色惯例的推导值(DESIGN.md 未采集暗色)。
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── 表面 ─────────────────────────────── */
+  --background: #fafafa; /* canvas-soft 页面体 */
+  --foreground: #171717; /* ink */
+  --card: #ffffff; /* canvas 卡片/对话框 */
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+
+  /* ── 语义 ─────────────────────────────── */
+  --primary: #171717; /* ink 主 CTA */
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f5; /* canvas-soft-2 */
+  --secondary-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #4d4d4d; /* body 次要正文 */
+  --accent: #f5f5f5; /* hover 底 */
+  --accent-foreground: #171717;
+  --destructive: #ee0000; /* error */
+  --destructive-foreground: #ffffff;
+  --border: #ebebeb; /* hairline */
+  --input: #ebebeb;
+  --ring: #0070f3; /* link 蓝聚焦环 */
+
+  /* ── DESIGN.md 扩展 token ─────────────── */
+  --mute: #888888; /* 占位/辅助文字 */
+  --hairline-strong: #a1a1a1;
+  --link: #0070f3;
+  --link-deep: #0761d1;
+  --success: #0070f3; /* DESIGN.md: success 即 link 蓝 */
+  --success-soft: #d3e5ff;
+  --warning: #f5a623;
+  --warning-soft: #ffefcf;
+  --warning-deep: #ab570a;
+  --error-soft: #f7d4d6;
+  --error-deep: #c50000;
+
+  /* ── 圆角:--radius 基准 8px → sm 4 / md 6 / lg 8 / xl 12 ── */
+  --radius: 0.5rem;
+
+  /* ── 层级阴影:stacked 小 offset + inset hairline,禁止单重投影 ── */
+  --shadow-l1: 0 0 0 1px rgb(0 0 0 / 0.08);
+  --shadow-l2:
+    0 1px 1px rgb(0 0 0 / 0.02), 0 2px 2px rgb(0 0 0 / 0.04), inset 0 0 0 1px rgb(0 0 0 / 0.05);
+  --shadow-l3:
+    0 2px 2px rgb(0 0 0 / 0.04), 0 8px 8px -8px rgb(0 0 0 / 0.04), inset 0 0 0 1px rgb(0 0 0 / 0.05);
+  --shadow-l4:
+    0 2px 2px rgb(0 0 0 / 0.04), 0 8px 16px -4px rgb(0 0 0 / 0.04),
+    inset 0 0 0 1px rgb(0 0 0 / 0.05);
+  --shadow-l5:
+    0 1px 1px rgb(0 0 0 / 0.02), 0 8px 16px -4px rgb(0 0 0 / 0.04),
+    0 24px 32px -8px rgb(0 0 0 / 0.06), inset 0 0 0 1px rgb(0 0 0 / 0.05);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+.dark {
+  --background: #000000;
+  --foreground: #ededed; /* 极性翻转 */
+  --card: #0a0a0a;
+  --card-foreground: #ededed;
+  --popover: #0a0a0a;
+  --popover-foreground: #ededed;
+
+  --primary: #ededed; /* 极性翻转:白 CTA */
+  --primary-foreground: #171717;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #ededed;
+  --muted: #1a1a1a;
+  --muted-foreground: #a1a1a1;
+  --accent: #1f1f1f;
+  --accent-foreground: #ededed;
+  --destructive: #ff4d4d;
+  --destructive-foreground: #ffffff;
+  --border: #262626;
+  --input: #2e2e2e;
+  --ring: #3291ff;
+
+  --mute: #8f8f8f;
+  --hairline-strong: #5c5c5c;
+  --link: #3291ff;
+  --link-deep: #70b0ff;
+  --success: #3291ff;
+  --success-soft: #12233d;
+  --warning: #f5a623;
+  --warning-soft: #33260e;
+  --warning-deep: #f0bd5c;
+  --error-soft: #3d1f21;
+  --error-deep: #ff6369;
+
+  --shadow-l1: 0 0 0 1px rgb(255 255 255 / 0.1);
+  --shadow-l2:
+    0 1px 1px rgb(0 0 0 / 0.4), 0 2px 2px rgb(0 0 0 / 0.4), inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-l3:
+    0 2px 2px rgb(0 0 0 / 0.4), 0 8px 8px -8px rgb(0 0 0 / 0.4),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-l4:
+    0 2px 2px rgb(0 0 0 / 0.4), 0 8px 16px -4px rgb(0 0 0 / 0.4),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-l5:
+    0 1px 1px rgb(0 0 0 / 0.4), 0 8px 16px -4px rgb(0 0 0 / 0.4), 0 24px 32px -8px rgb(0 0 0 / 0.5),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+@theme inline {
+  /* ── 颜色:语义变量 → utilities ────────── */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-mute: var(--mute);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-link: var(--link);
+  --color-link-deep: var(--link-deep);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-deep: var(--warning-deep);
+  --color-error-soft: var(--error-soft);
+  --color-error-deep: var(--error-deep);
+
+  /* ── 字体:Geist → 系统中文回落 ────────── */
+  --font-sans:
+    var(--font-geist-sans), 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans CJK SC', system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+
+  /* ── 圆角(DESIGN.md rounded 比例尺)────── */
+  --radius-sm: calc(var(--radius) - 4px); /* 4px */
+  --radius-md: calc(var(--radius) - 2px); /* 6px in-app 基准 */
+  --radius-lg: var(--radius); /* 8px 卡片 */
+  --radius-xl: calc(var(--radius) + 4px); /* 12px 大卡片 */
+
+  /* ── 阴影层级(引用上方 :root / .dark 变量)── */
+  --shadow-l1: var(--shadow-l1);
+  --shadow-l2: var(--shadow-l2);
+  --shadow-l3: var(--shadow-l3);
+  --shadow-l4: var(--shadow-l4);
+  --shadow-l5: var(--shadow-l5);
+
+  /* ── 排版(DESIGN.md typography,负字距是品牌声部,不可省)── */
+  --text-display-xl: 3rem; /* 48px hero */
+  --text-display-xl--line-height: 3rem;
+  --text-display-xl--letter-spacing: -2.4px;
+  --text-display-xl--font-weight: 600;
+  --text-display-lg: 2rem; /* 32px 区块标题 */
+  --text-display-lg--line-height: 2.5rem;
+  --text-display-lg--letter-spacing: -1.28px;
+  --text-display-lg--font-weight: 600;
+  --text-display-md: 1.5rem; /* 24px 页标题 */
+  --text-display-md--line-height: 2rem;
+  --text-display-md--letter-spacing: -0.96px;
+  --text-display-md--font-weight: 600;
+  --text-display-sm: 1.25rem; /* 20px 微标题 */
+  --text-display-sm--line-height: 1.75rem;
+  --text-display-sm--letter-spacing: -0.6px;
+  --text-display-sm--font-weight: 600;
+  --text-body-sm: 0.875rem; /* 14px 界面正文基准 */
+  --text-body-sm--line-height: 1.25rem;
+  --text-body-sm--letter-spacing: -0.28px;
+  --text-caption: 0.75rem; /* 12px 标签/表头 */
+  --text-caption--line-height: 1rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-html {
-  height: 100%;
-}
-
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-@media (prefers-color-scheme: dark) {
   html {
-    color-scheme: dark;
+    height: 100%;
   }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    min-height: 100%;
+    font-size: 0.875rem; /* body-sm 14px 为界面基准 */
+    line-height: 1.25rem;
+    letter-spacing: -0.28px;
+  }
+  /* DESIGN.md selection:ink 底浅灰字 */
+  ::selection {
+    background: #171717;
+    color: #f2f2f2;
+  }
+  .dark ::selection {
+    background: #ededed;
+    color: #171717;
+  }
+}
+
+/* DESIGN.md caption-mono:表头/眉题/技术标签专用 */
+@utility caption-mono {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--mute);
 }
