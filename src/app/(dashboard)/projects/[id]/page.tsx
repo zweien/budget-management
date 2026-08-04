@@ -1,26 +1,28 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import {
-  Alert,
-  Button,
-  Descriptions,
-  Form,
-  InputNumber,
-  Modal,
-  Result,
-  Skeleton,
-  Space,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import dayjs from 'dayjs';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { format } from 'date-fns';
+import { FolderSearch } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
-
-const { Title } = Typography;
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { EmptyState } from '@/components/layout/empty-state';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface ProjectDetail {
   id: string;
@@ -34,7 +36,7 @@ interface ProjectDetail {
   createdAt: string;
 }
 
-/** 初始预算编制单状态(Task 3 之后才有真实数据;此处仅做状态展示)。 */
+/** 初始预算编制单状态。 */
 interface InitialBudgetState {
   id?: string;
   status?: string;
@@ -53,25 +55,45 @@ interface CarryOverResult {
   warnings: CarryoverWarning[];
 }
 
-/** 跨年结转表单值。 */
-interface CarryoverFormValues {
-  fromYear: number;
-  toYear: number;
-}
-
-const STATUS_LABEL: Record<string, { text: string; color: string }> = {
-  DRAFT: { text: '草稿中', color: 'default' },
-  PENDING: { text: '待审批', color: 'processing' },
-  APPROVED: { text: '已生效', color: 'success' },
-  REJECTED: { text: '已驳回', color: 'error' },
-  WITHDRAWN: { text: '已撤回', color: 'warning' },
+const STATUS_LABEL: Record<string, string> = {
+  DRAFT: '草稿中',
+  PENDING: '待审批',
+  APPROVED: '已生效',
+  REJECTED: '已驳回',
+  WITHDRAWN: '已撤回',
 };
 
-const formatDate = (d: string | null) => (d ? dayjs(d).format('YYYY-MM-DD') : '—');
+/** Badge 语义色遵循 DESIGN.md:蓝=success/link、琥珀=warning、红=error。 */
+const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'error' | 'outline'> = {
+  DRAFT: 'secondary',
+  PENDING: 'warning',
+  APPROVED: 'success',
+  REJECTED: 'error',
+  WITHDRAWN: 'outline',
+};
+
+const formatDate = (d: string | null) => (d ? format(new Date(d), 'yyyy-MM-dd') : '—');
+
+/** 描述网格单元:hairline 网格(gap-px 透出底边框色)。 */
+function DescCell({
+  label,
+  children,
+  span2,
+}: {
+  label: string;
+  children: React.ReactNode;
+  span2?: boolean;
+}) {
+  return (
+    <div className={span2 ? 'bg-card p-3 sm:col-span-2' : 'bg-card p-3'}>
+      <dt className="text-xs text-mute">{label}</dt>
+      <dd className="mt-1 text-sm">{children}</dd>
+    </div>
+  );
+}
 
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const projectId = params.id;
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
@@ -79,11 +101,14 @@ export default function ProjectDetailPage() {
   // 初始即为 true,避免 mount effect 内同步 setState(react-hooks/set-state-in-effect)。
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  // §8.7 跨年结转 Modal。
+
+  // §8.7 跨年结转 Dialog。
   const [carryoverOpen, setCarryoverOpen] = useState(false);
   const [carryoverSubmitting, setCarryoverSubmitting] = useState(false);
   const [carryoverResult, setCarryoverResult] = useState<CarryOverResult | null>(null);
-  const [carryoverForm] = Form.useForm<CarryoverFormValues>();
+  const [fromYear, setFromYear] = useState(String(new Date().getFullYear()));
+  const [toYear, setToYear] = useState(String(new Date().getFullYear() + 1));
+  const [carryoverError, setCarryoverError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,7 +124,7 @@ export default function ProjectDetailPage() {
         } else {
           // 403/404 等:详情拿不到就显示错误态。
           setNotFound(true);
-          if (p.reason instanceof Error) message.error(p.reason.message);
+          if (p.reason instanceof Error) toast.error(p.reason.message);
         }
         if (b.status === 'fulfilled' && b.value) {
           setBudget(b.value);
@@ -114,197 +139,193 @@ export default function ProjectDetailPage() {
     };
   }, [projectId]);
 
-  if (loading) return <Skeleton active />;
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
   if (notFound || !project) {
     return (
-      <Result
-        status="warning"
+      <EmptyState
+        icon={<FolderSearch />}
         title="无法访问该项目"
-        subTitle="项目可能不存在或您没有访问权限。"
-        extra={
-          <Button type="primary" onClick={() => router.push('/projects')}>
-            返回项目列表
-          </Button>
+        description="项目可能不存在或您没有访问权限。"
+        action={
+          <Link href="/projects">
+            <Button>返回项目列表</Button>
+          </Link>
         }
       />
     );
   }
 
-  const statusInfo = budget?.status ? STATUS_LABEL[budget.status] : undefined;
   const isEffective = budget?.status === 'APPROVED';
 
   /** §8.7 跨年结转。 */
   const handleCarryover = async () => {
-    let values: CarryoverFormValues;
-    try {
-      values = await carryoverForm.validateFields();
-    } catch {
+    const from = Number(fromYear);
+    const to = Number(toYear);
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1900 || to > 9999) {
+      setCarryoverError('请输入有效年度(1900-9999)');
       return;
     }
-    if (values.toYear <= values.fromYear) {
-      message.error('目标年度必须大于源年度');
+    if (to <= from) {
+      setCarryoverError('目标年度必须大于源年度');
       return;
     }
+    setCarryoverError(null);
     setCarryoverSubmitting(true);
     try {
       const result = await apiFetch<CarryOverResult>(`/api/projects/${projectId}/carryover`, {
         method: 'POST',
-        body: JSON.stringify(values),
+        body: JSON.stringify({ fromYear: from, toYear: to }),
       });
       setCarryoverResult(result);
-      message.success(`已结转 ${result.carriedCount} 条记录`);
+      toast.success(`已结转 ${result.carriedCount} 条记录`);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      toast.error((e as Error).message);
     } finally {
       setCarryoverSubmitting(false);
     }
   };
 
-  /** 关闭结转 Modal,清空表单与结果。 */
+  /** 关闭结转 Dialog,清空结果与错误。 */
   const closeCarryover = () => {
     setCarryoverOpen(false);
     setCarryoverResult(null);
-    carryoverForm.resetFields();
+    setCarryoverError(null);
   };
 
   return (
-    <>
-      <Title level={3} style={{ marginTop: 0 }}>
-        {project.name}
-      </Title>
-
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Button onClick={() => router.push('/projects')}>返回列表</Button>
-        <Button type="primary" onClick={() => router.push(`/projects/${projectId}/initial-budget`)}>
-          编制预算
-        </Button>
-        <Button onClick={() => router.push(`/projects/${projectId}/ledger`)}>预算执行台账</Button>
-        <Button onClick={() => router.push(`/projects/${projectId}/adjustments`)}>预算调整</Button>
-        <Button type="primary" onClick={() => router.push(`/projects/${projectId}/records`)}>
-          业务记录
-        </Button>
-        <Button onClick={() => router.push(`/projects/${projectId}/receipts`)}>到账流水</Button>
-        <Button onClick={() => router.push(`/projects/${projectId}/imports`)}>Excel 导入</Button>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold tracking-[-0.3px]">项目信息</h2>
         <Button
+          variant="outline"
           onClick={() => {
             setCarryoverResult(null);
-            carryoverForm.resetFields();
+            setCarryoverError(null);
             setCarryoverOpen(true);
           }}
         >
           跨年结转
         </Button>
-      </Space>
+      </div>
 
-      <Descriptions bordered column={2} size="small">
-        <Descriptions.Item label="项目编号">{project.code}</Descriptions.Item>
-        <Descriptions.Item label="项目名称">{project.name}</Descriptions.Item>
-        <Descriptions.Item label="级别">{project.level ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="起止时间">
-          {formatDate(project.startDate)} ~ {formatDate(project.endDate)}
-        </Descriptions.Item>
-        <Descriptions.Item label="创建时间">
-          {dayjs(project.createdAt).format('YYYY-MM-DD HH:mm')}
-        </Descriptions.Item>
-        <Descriptions.Item label="预算状态">
-          {statusInfo ? <Tag color={statusInfo.color}>{statusInfo.text}</Tag> : '未编制'}
-        </Descriptions.Item>
-        <Descriptions.Item label="备注" span={2}>
+      {/* 描述网格:hairline 网格线,替代 antd Descriptions bordered */}
+      <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border shadow-l2 sm:grid-cols-2">
+        <DescCell label="项目编号">
+          <span className="font-mono text-[13px]">{project.code}</span>
+        </DescCell>
+        <DescCell label="项目名称">{project.name}</DescCell>
+        <DescCell label="级别">{project.level ?? '—'}</DescCell>
+        <DescCell label="起止时间">
+          <span className="tabular-nums">
+            {formatDate(project.startDate)} ~ {formatDate(project.endDate)}
+          </span>
+        </DescCell>
+        <DescCell label="创建时间">
+          <span className="tabular-nums">
+            {format(new Date(project.createdAt), 'yyyy-MM-dd HH:mm')}
+          </span>
+        </DescCell>
+        <DescCell label="预算状态">
+          {budget?.status ? (
+            <Badge variant={STATUS_BADGE[budget.status] ?? 'secondary'}>
+              {STATUS_LABEL[budget.status] ?? budget.status}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">未编制</span>
+          )}
+        </DescCell>
+        <DescCell label="备注" span2>
           {project.remark ?? '—'}
-        </Descriptions.Item>
-      </Descriptions>
+        </DescCell>
+      </dl>
 
       {isEffective ? (
-        <div style={{ marginTop: 24, padding: 16, background: '#f6ffed', borderRadius: 8 }}>
-          <Typography.Text strong>初始预算已生效</Typography.Text>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 8 }}>
-            可前往「预算执行台账」查看各科目当前预算与占用情况。
-          </Typography.Paragraph>
-        </div>
+        <Alert variant="success">
+          <AlertTitle>初始预算已生效</AlertTitle>
+          <AlertDescription>可前往「执行台账」查看各科目当前预算与占用情况。</AlertDescription>
+        </Alert>
       ) : null}
 
-      <Modal
-        title="跨年结转"
-        open={carryoverOpen}
-        onCancel={closeCarryover}
-        footer={
-          carryoverResult
-            ? [
-                <Button key="close" type="primary" onClick={closeCarryover}>
-                  关闭
-                </Button>,
-              ]
-            : [
-                <Button key="cancel" onClick={closeCarryover}>
-                  取消
-                </Button>,
-                <Button
-                  key="ok"
-                  type="primary"
-                  loading={carryoverSubmitting}
-                  onClick={handleCarryover}
-                >
-                  执行结转
-                </Button>,
-              ]
-        }
-        destroyOnHidden
-      >
-        {carryoverResult ? (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Alert
-              type="success"
-              showIcon
-              message={`已结转 ${carryoverResult.carriedCount} 条业务记录`}
-            />
-            {carryoverResult.warnings.length > 0 && (
-              <Alert
-                type="warning"
-                showIcon
-                message="以下记录需人工确认(§8.7)"
-                description={
-                  <ul style={{ marginBottom: 0, paddingLeft: 18 }}>
-                    {carryoverResult.warnings.map((w) => (
-                      <li key={w.originalRecordId}>
-                        {w.subjectCode}:{w.reason}
-                      </li>
-                    ))}
-                  </ul>
-                }
-              />
-            )}
-          </Space>
-        ) : (
-          <>
-            <Typography.Paragraph type="secondary">
+      {/* §8.7 跨年结转 */}
+      <Dialog open={carryoverOpen} onOpenChange={(open) => (open ? null : closeCarryover())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>跨年结转</DialogTitle>
+            <DialogDescription>
               将源年度中尚未支出(非 PAID)的业务记录结转到目标年度,生成可追溯记录。
-            </Typography.Paragraph>
-            <Form<CarryoverFormValues>
-              form={carryoverForm}
-              layout="vertical"
-              initialValues={{
-                fromYear: new Date().getFullYear(),
-                toYear: new Date().getFullYear() + 1,
-              }}
-            >
-              <Form.Item
-                name="fromYear"
-                label="源年度"
-                rules={[{ required: true, message: '请输入源年度' }]}
-              >
-                <InputNumber min={1900} max={9999} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item
-                name="toYear"
-                label="目标年度"
-                rules={[{ required: true, message: '请输入目标年度' }]}
-              >
-                <InputNumber min={1900} max={9999} style={{ width: '100%' }} />
-              </Form.Item>
-            </Form>
-          </>
-        )}
-      </Modal>
-    </>
+            </DialogDescription>
+          </DialogHeader>
+
+          {carryoverResult ? (
+            <div className="space-y-3">
+              <Alert variant="success">
+                <AlertTitle>已结转 {carryoverResult.carriedCount} 条业务记录</AlertTitle>
+              </Alert>
+              {carryoverResult.warnings.length > 0 && (
+                <Alert variant="warning">
+                  <AlertTitle>以下记录需人工确认(§8.7)</AlertTitle>
+                  <AlertDescription>
+                    <ul className="list-disc pl-4">
+                      {carryoverResult.warnings.map((w) => (
+                        <li key={w.originalRecordId}>
+                          {w.subjectCode}:{w.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </AlertDescription>
+                </Alert>
+              )}
+              <DialogFooter>
+                <Button onClick={closeCarryover}>关闭</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="from-year">源年度</Label>
+                  <Input
+                    id="from-year"
+                    type="number"
+                    min={1900}
+                    max={9999}
+                    value={fromYear}
+                    onChange={(e) => setFromYear(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="to-year">目标年度</Label>
+                  <Input
+                    id="to-year"
+                    type="number"
+                    min={1900}
+                    max={9999}
+                    value={toYear}
+                    onChange={(e) => setToYear(e.target.value)}
+                  />
+                </div>
+              </div>
+              {carryoverError ? <p className="text-xs text-destructive">{carryoverError}</p> : null}
+              <DialogFooter>
+                <Button variant="outline" onClick={closeCarryover} disabled={carryoverSubmitting}>
+                  取消
+                </Button>
+                <Button onClick={handleCarryover} disabled={carryoverSubmitting}>
+                  {carryoverSubmitting ? '结转中…' : '执行结转'}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
