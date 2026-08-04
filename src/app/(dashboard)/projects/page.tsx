@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { CalendarDays, FolderKanban, Plus, Search, X } from 'lucide-react';
+import { FolderKanban, Plus, Search, X } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -11,9 +11,8 @@ import { z } from 'zod';
 import type { DateRange } from 'react-day-picker';
 
 import { apiFetch } from '@/lib/api/client';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Calendar } from '@/components/ui/calendar';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import {
   Dialog,
   DialogContent,
@@ -31,7 +30,6 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -339,32 +337,11 @@ export default function ProjectsPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>起止时间</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            'w-full justify-start font-normal',
-                            !field.value?.from && 'text-mute',
-                          )}
-                        >
-                          <CalendarDays />
-                          {field.value?.from
-                            ? field.value.to
-                              ? `${format(field.value.from, 'yyyy-MM-dd')} — ${format(field.value.to, 'yyyy-MM-dd')}`
-                              : format(field.value.from, 'yyyy-MM-dd')
-                            : '选择起止时间'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="range"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          numberOfMonths={1}
-                        />
-                      </PopoverContent>
-                    </Popover>
+                    <DateRangePicker
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="选择起止时间"
+                    />
                     <FormMessage />
                   </FormItem>
                 )}
