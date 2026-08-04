@@ -23,7 +23,11 @@ import { snapshotRow } from '@/server/audit/snapshot';
 
 /** 单行入参(来自 payload)。 */
 export interface AdjustmentLineInput {
-  subjectId: string;
+  // 引用现有科目;新增科目时省略(填 newSubjectName/newSubjectParentId)。
+  subjectId?: string | null;
+  // 新增科目(仅 subjectId 为空时):名称 + 父节点(非叶科目 id)。
+  newSubjectName?: string | null;
+  newSubjectParentId?: string | null;
   totalAdjustment: string; // decimal 字符串,可正可负
   annualAdjustment: string; // decimal 字符串,可正可负
 }
@@ -96,9 +100,36 @@ async function requireLeafSubject(
   return subject;
 }
 
-/** 单行校验 + 解析金额,返回 { total, annual }。subjectId 叶校验由调用方在事务内完成。 */
+/** 校验新增科目:父节点存在且为非叶;名称项目内不重名。 */
+async function validateNewSubject(
+  tx: Prisma.TransactionClient | typeof prisma,
+  projectId: string,
+  name: string,
+  parentId: string,
+): Promise<void> {
+  const parent = await tx.budgetSubject.findUnique({ where: { id: parentId } });
+  if (!parent || parent.projectId !== projectId) {
+    throw new HTTPError(422, `新增科目的父节点 ${parentId} 不属于该项目`);
+  }
+  if (parent.isLeaf) {
+    throw new HTTPError(422, `新增科目必须挂在非叶节点下,${parent.name} 是叶节点`);
+  }
+  const dup = await tx.budgetSubject.findFirst({
+    where: { projectId, name },
+    select: { id: true },
+  });
+  if (dup) {
+    throw new HTTPError(422, `新增科目名称"${name}"在项目内已存在`);
+  }
+}
+
+/** 单行校验 + 解析金额。
+ *  现有科目:subjectId 有值。新增科目:subjectId 空,newSubjectName/newSubjectParentId 有值。
+ *  科目存在性/叶校验由调用方在事务内完成。 */
 interface ParsedLine {
-  subjectId: string;
+  subjectId: string | null;
+  newSubjectName: string | null;
+  newSubjectParentId: string | null;
   total: D;
   annual: D;
 }
@@ -107,11 +138,27 @@ function validateAndParseLines(payload: AdjustmentPayload): ParsedLine[] {
   if (!payload || !Array.isArray(payload.lines) || payload.lines.length === 0) {
     throw new HTTPError(422, '调整明细不能为空');
   }
-  return payload.lines.map((line, i) => ({
-    subjectId: line.subjectId,
-    total: parseSignedAmount(line.totalAdjustment, `第 ${i + 1} 行总预算调整额`),
-    annual: parseSignedAmount(line.annualAdjustment, `第 ${i + 1} 行年度调整额`),
-  }));
+  return payload.lines.map((line, i) => {
+    const subjectId = line.subjectId?.trim() || null;
+    const newName = line.newSubjectName?.trim() || null;
+    const newParentId = line.newSubjectParentId?.trim() || null;
+    // 二选一:要么引用现有科目,要么新增科目(name+parentId 齐备)。
+    const isExisting = !!subjectId;
+    const isNew = !!newName && !!newParentId;
+    if (!isExisting && !isNew) {
+      throw new HTTPError(422, `第 ${i + 1} 行需选择现有科目,或填写新增科目名称与父节点`);
+    }
+    if (isExisting && isNew) {
+      throw new HTTPError(422, `第 ${i + 1} 行不能同时指定现有科目和新增科目`);
+    }
+    return {
+      subjectId,
+      newSubjectName: newName,
+      newSubjectParentId: newParentId,
+      total: parseSignedAmount(line.totalAdjustment, `第 ${i + 1} 行总预算调整额`),
+      annual: parseSignedAmount(line.annualAdjustment, `第 ${i + 1} 行年度调整额`),
+    };
+  });
 }
 
 /**
@@ -161,7 +208,12 @@ export async function createAdjustment(
   }
 
   for (const line of parsedLines) {
-    await requireLeafSubject(prisma, projectId, line.subjectId);
+    if (line.subjectId) {
+      await requireLeafSubject(prisma, projectId, line.subjectId);
+    } else {
+      // 新增科目:校验父节点(非叶)+ 名称项目内不重名。
+      await validateNewSubject(prisma, projectId, line.newSubjectName!, line.newSubjectParentId!);
+    }
   }
 
   const id = uuidv7();
@@ -191,6 +243,8 @@ export async function createAdjustment(
           subjectId: line.subjectId,
           totalAdjustment: toStored(line.total),
           annualAdjustment: toStored(line.annual),
+          newSubjectName: line.newSubjectName,
+          newSubjectParentId: line.newSubjectParentId,
         },
       });
     }
@@ -238,7 +292,11 @@ export async function updateDraftAdjustment(
     const projectId = existing.projectId;
 
     for (const line of parsedLines) {
-      await requireLeafSubject(tx, projectId, line.subjectId);
+      if (line.subjectId) {
+        await requireLeafSubject(tx, projectId, line.subjectId);
+      } else {
+        await validateNewSubject(tx, projectId, line.newSubjectName!, line.newSubjectParentId!);
+      }
     }
 
     const totalReason = payload.totalReason?.trim() ? payload.totalReason.trim() : null;
@@ -259,6 +317,8 @@ export async function updateDraftAdjustment(
           subjectId: line.subjectId,
           totalAdjustment: toStored(line.total),
           annualAdjustment: toStored(line.annual),
+          newSubjectName: line.newSubjectName,
+          newSubjectParentId: line.newSubjectParentId,
         },
       });
     }
@@ -378,22 +438,32 @@ export async function submitAdjustment(
 
   const parsedLines = adj.lines.map((l) => ({
     subjectId: l.subjectId,
+    newSubjectName: l.newSubjectName,
+    newSubjectParentId: l.newSubjectParentId,
     total: fromStored(l.totalAdjustment),
     annual: fromStored(l.annualAdjustment),
   }));
   assertBalanced(parsedLines);
+  // 新增科目行原预算为 0,调减无意义(应只调增)。
+  for (const line of parsedLines) {
+    if (!line.subjectId && (line.total.isNeg() || line.annual.isNeg())) {
+      throw new HTTPError(422, `新增科目"${line.newSubjectName}"原预算为 0,不可调减`);
+    }
+  }
 
   return prisma.$transaction(async (tx) => {
     // 按科目合并年度调减合计(同一科目多行可能分别调减)。
     const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
     for (const line of parsedLines) {
-      if (!line.annual.isNeg()) continue; // 仅年度维度调减
-      const key = `${adj.year}:${line.subjectId}`;
+      if (!line.annual.isNeg()) continue; // 仅年度维度调减(新增科目已被上方拦截不可调减)
+      // 能到这里的都是现有科目行(subjectId 非空)。
+      const sid = line.subjectId!;
+      const key = `${adj.year}:${sid}`;
       const prev = decreaseBySubject.get(key);
       const decAmount = line.annual.abs();
       decreaseBySubject.set(key, {
         year: adj.year,
-        subjectId: line.subjectId,
+        subjectId: sid,
         amount: prev ? prev.amount.plus(decAmount) : decAmount,
       });
     }
@@ -508,21 +578,79 @@ export async function approveAdjustment(
 
   return prisma.$transaction(async (tx) => {
     const parsedLines = adj.lines.map((l) => ({
-      subjectId: l.subjectId,
+      subjectId: l.subjectId as string | null,
+      newSubjectName: l.newSubjectName,
+      newSubjectParentId: l.newSubjectParentId,
       total: fromStored(l.totalAdjustment),
       annual: fromStored(l.annualAdjustment),
     }));
     assertBalanced(parsedLines);
 
+    // 先落库新增科目(subjectId 为空的行):建 BudgetSubject(叶)+ 该年度
+    // SubjectBudget(0) + SubjectTotalBudget(0),回填 subjectId 到 parsedLines。
+    // 必须在应用 delta 之前完成,否则 SubjectBudget 缺失会 422。
+    const maxSortOrder = await tx.budgetSubject.aggregate({
+      where: { projectId: adj.projectId },
+      _max: { sortOrder: true },
+    });
+    let nextSort = (maxSortOrder._max.sortOrder ?? -1) + 1;
+    for (const line of parsedLines) {
+      if (line.subjectId) continue;
+      // 校验父节点(非叶)+ 重名(草稿后可能已被改)。
+      await validateNewSubject(tx, adj.projectId, line.newSubjectName!, line.newSubjectParentId!);
+      const parent = await tx.budgetSubject.findUnique({
+        where: { id: line.newSubjectParentId! },
+        select: { level: true },
+      });
+      const newSubjectId = uuidv7();
+      await tx.budgetSubject.create({
+        data: {
+          id: newSubjectId,
+          projectId: adj.projectId,
+          parentId: line.newSubjectParentId,
+          code: uuidv7(), // 项目内唯一(用 uuid 兜底)
+          name: line.newSubjectName!,
+          level: (parent?.level ?? 1) + 1,
+          isLeaf: true,
+          sortOrder: nextSort++,
+        },
+      });
+      // 初始化该年度 SubjectBudget(initial=0,current=0)。
+      await tx.subjectBudget.create({
+        data: {
+          id: uuidv7(),
+          projectId: adj.projectId,
+          year: adj.year,
+          subjectId: newSubjectId,
+          initialAmount: toStored(ZERO),
+          adjustmentAmount: toStored(ZERO),
+          currentAmount: toStored(ZERO),
+        },
+      });
+      // 初始化 SubjectTotalBudget(initial=0,current=0)。
+      await tx.subjectTotalBudget.create({
+        data: {
+          id: uuidv7(),
+          projectId: adj.projectId,
+          subjectId: newSubjectId,
+          initialAmount: toStored(ZERO),
+          adjustmentAmount: toStored(ZERO),
+          currentAmount: toStored(ZERO),
+        },
+      });
+      line.subjectId = newSubjectId;
+    }
+
     // 按科目合并年度调减合计,逐个重新校验可调额度(§7.5)。
     const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
     for (const line of parsedLines) {
       if (!line.annual.isNeg()) continue;
-      const key = `${adj.year}:${line.subjectId}`;
+      const sid = line.subjectId!; // 新增科目已在上方落库回填,必非空。
+      const key = `${adj.year}:${sid}`;
       const prev = decreaseBySubject.get(key);
       decreaseBySubject.set(key, {
         year: adj.year,
-        subjectId: line.subjectId,
+        subjectId: sid,
         amount: prev ? prev.amount.plus(line.annual.abs()) : line.annual.abs(),
       });
     }
@@ -561,10 +689,9 @@ export async function approveAdjustment(
     // 应用年度维度 delta:SubjectBudget.currentAmount/adjustmentAmount。
     const annualDeltaBySubject = new Map<string, D>();
     for (const line of parsedLines) {
-      annualDeltaBySubject.set(
-        line.subjectId,
-        (annualDeltaBySubject.get(line.subjectId) ?? ZERO).plus(line.annual),
-      );
+      // 新增科目已在上方落库并回填 subjectId,此处必非空。
+      const sid = line.subjectId!;
+      annualDeltaBySubject.set(sid, (annualDeltaBySubject.get(sid) ?? ZERO).plus(line.annual));
     }
     for (const [subjectId, delta] of annualDeltaBySubject.entries()) {
       if (delta.eq(ZERO)) continue;
@@ -587,10 +714,8 @@ export async function approveAdjustment(
     // 应用总预算维度 delta:SubjectTotalBudget.currentAmount/adjustmentAmount。
     const totalDeltaBySubject = new Map<string, D>();
     for (const line of parsedLines) {
-      totalDeltaBySubject.set(
-        line.subjectId,
-        (totalDeltaBySubject.get(line.subjectId) ?? ZERO).plus(line.total),
-      );
+      const sid = line.subjectId!;
+      totalDeltaBySubject.set(sid, (totalDeltaBySubject.get(sid) ?? ZERO).plus(line.total));
     }
     for (const [subjectId, delta] of totalDeltaBySubject.entries()) {
       if (delta.eq(ZERO)) continue;

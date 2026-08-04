@@ -126,7 +126,6 @@ model BudgetSubject {
   subjectBudgets      SubjectBudget[]
   subjectTotalBudgets SubjectTotalBudget[]
   records             BusinessRecord[]
-  adjustmentLines     BudgetAdjustmentLine[]
 
   @@unique([projectId, code]) // §16.1 项目内唯一
   @@index([projectId])
@@ -243,14 +242,17 @@ model BudgetAdjustmentLine {
   id               String   @id @db.Uuid
   adjustmentId     String   @map("adjustment_id") @db.Uuid
   year             Int
-  subjectId        String   @map("subject_id") @db.Uuid
+  // 引用现有科目;新增科目时为空(此时填 newSubjectName/newSubjectParentId)。
+  subjectId        String?  @map("subject_id") @db.Uuid
   // 总预算维度调整额(对应 SubjectTotalBudget;可正可负,正=增 负=减)。
   totalAdjustment  Decimal  @map("total_adjustment") @db.Decimal(18, 2)
   // 年度预算维度调整额(对应 SubjectBudget;可正可负)。
   annualAdjustment Decimal  @map("annual_adjustment") @db.Decimal(18, 2)
+  // 新增科目:name + 父节点(非叶);仅当 subjectId 为空时使用,审批通过后落库。
+  newSubjectName      String? @map("new_subject_name")
+  newSubjectParentId  String? @map("new_subject_parent_id") @db.Uuid
 
   adjustment BudgetAdjustment @relation(fields: [adjustmentId], references: [id])
-  subject    BudgetSubject    @relation(fields: [subjectId], references: [id])
 
   @@map("budget_adjustment_lines")
 }

@@ -106,6 +106,22 @@ export async function exportAdjustmentDocx(
     subjects.some((s) => s.parentId === subjectId);
 
   const rows = adj.lines.map((line) => {
+    // 新增科目行(subjectId 为空):标题=父节点名,品名=新科目名,原预算=0。
+    if (!line.subjectId) {
+      const parent = subjectById.get(line.newSubjectParentId ?? '');
+      const adjustYuan =
+        dimension === 'total'
+          ? fromStored(line.totalAdjustment)
+          : fromStored(line.annualAdjustment);
+      const adjustWan = toWan(adjustYuan);
+      return {
+        subjectTitle: parent?.name ?? '',
+        productName: line.newSubjectName ?? '',
+        originWan: '0.00',
+        adjustedWan: adjustWan,
+        adjustWan,
+      };
+    }
     const leaf = subjectById.get(line.subjectId);
     const title = findSecondLevelTitle(line.subjectId);
     const titleHasChildren = title ? hasChildren(title.id) : false;

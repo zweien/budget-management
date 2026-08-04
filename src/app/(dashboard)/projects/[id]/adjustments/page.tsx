@@ -8,6 +8,7 @@ import {
   Descriptions,
   Drawer,
   Empty,
+  Input,
   Modal,
   Result,
   Select,
@@ -70,9 +71,11 @@ interface BaselineResponse {
 interface AdjustmentLine {
   id: string;
   year: number;
-  subjectId: string;
+  subjectId: string | null;
   totalAdjustment: string;
   annualAdjustment: string;
+  newSubjectName?: string | null;
+  newSubjectParentId?: string | null;
 }
 
 /** 调整单。 */
@@ -95,8 +98,21 @@ interface ListResponse {
 interface EditLine {
   key: string;
   subjectId: string | null;
+  // 新增科目模式(isNew=true 时):name + 父节点。
+  isNew: boolean;
+  newName: string;
+  newParentId: string | null;
   totalAdjustment: string;
   annualAdjustment: string;
+}
+
+/** 科目树节点(用于父节点下拉)。 */
+interface SubjectNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  level: number;
+  isLeaf: boolean;
 }
 
 let keySeq = 0;
@@ -143,6 +159,8 @@ export default function AdjustmentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [baselineLoading, setBaselineLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 科目全树(用于新增科目的父节点下拉,只取非叶)。
+  const [subjectTree, setSubjectTree] = useState<SubjectNode[]>([]);
 
   // 只读明细 Drawer。
   const [detailTarget, setDetailTarget] = useState<AdjustmentRow | null>(null);
@@ -229,6 +247,27 @@ export default function AdjustmentsPage() {
     }
   };
 
+  // 拉取科目全树(用于新增科目的父节点下拉)。
+  const loadSubjectTree = async () => {
+    try {
+      const { subjects } = await apiFetch<{ subjects: SubjectNode[] }>(
+        `/api/projects/${projectId}/subjects`,
+      );
+      setSubjectTree(subjects);
+    } catch (e) {
+      if (e instanceof Error) message.error(e.message);
+    }
+  };
+
+  /** 父节点候选:非叶科目,带层级缩进显示。 */
+  const parentOptions = useMemo(
+    () =>
+      subjectTree
+        .filter((s) => !s.isLeaf)
+        .map((s) => ({ value: s.id, label: `${'　'.repeat(s.level - 1)}${s.name}` })),
+    [subjectTree],
+  );
+
   // ------------------------------------------------------------
   // 表单操作
   // ------------------------------------------------------------
@@ -238,8 +277,18 @@ export default function AdjustmentsPage() {
     setFormYear(y);
     setFormTotalReason('');
     setFormAnnualReason('');
-    await loadBaseline(y);
-    setFormLines([{ key: genKey(), subjectId: null, totalAdjustment: '', annualAdjustment: '' }]);
+    await Promise.all([loadBaseline(y), loadSubjectTree()]);
+    setFormLines([
+      {
+        key: genKey(),
+        subjectId: null,
+        isNew: false,
+        newName: '',
+        newParentId: null,
+        totalAdjustment: '',
+        annualAdjustment: '',
+      },
+    ]);
     setMode('form');
   };
 
@@ -248,11 +297,14 @@ export default function AdjustmentsPage() {
     setFormYear(row.year);
     setFormTotalReason(row.totalReason ?? '');
     setFormAnnualReason(row.annualReason ?? '');
-    await loadBaseline(row.year);
+    await Promise.all([loadBaseline(row.year), loadSubjectTree()]);
     setFormLines(
       row.lines.map((l) => ({
         key: genKey(),
         subjectId: l.subjectId,
+        isNew: !l.subjectId,
+        newName: l.newSubjectName ?? '',
+        newParentId: l.newSubjectParentId ?? null,
         totalAdjustment: l.totalAdjustment,
         annualAdjustment: l.annualAdjustment,
       })),
@@ -272,7 +324,15 @@ export default function AdjustmentsPage() {
   const addLine = () => {
     setFormLines((prev) => [
       ...prev,
-      { key: genKey(), subjectId: null, totalAdjustment: '', annualAdjustment: '' },
+      {
+        key: genKey(),
+        subjectId: null,
+        isNew: false,
+        newName: '',
+        newParentId: null,
+        totalAdjustment: '',
+        annualAdjustment: '',
+      },
     ]);
   };
 
@@ -294,9 +354,12 @@ export default function AdjustmentsPage() {
   const buildPayload = (
     requireBalance: boolean,
   ): { ok: boolean; payload?: unknown; error?: string } => {
-    const valid = formLines.filter((l) => l.subjectId);
+    // 有效行:现有科目(subjectId)或新增科目(isNew 且 newName+newParentId 齐备)。
+    const valid = formLines.filter(
+      (l) => l.subjectId || (l.isNew && l.newName.trim() && l.newParentId),
+    );
     if (valid.length === 0) {
-      return { ok: false, error: '请至少选择一个科目' };
+      return { ok: false, error: '请至少选择一个科目或新增科目' };
     }
     const sumField = (sel: 'totalAdjustment' | 'annualAdjustment') =>
       valid.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
@@ -316,12 +379,22 @@ export default function AdjustmentsPage() {
         return { ok: false, error: `年度预算维度调整不平衡:合计 ${annualSum.toFixed(2)} ≠ 0` };
       }
     }
-    const lines = valid.map((l) => ({
-      subjectId: l.subjectId,
-      // 草稿允许留空,按 0 落库;提交时已保证非空。
-      totalAdjustment: l.totalAdjustment === '' ? '0' : Number(l.totalAdjustment).toFixed(2),
-      annualAdjustment: l.annualAdjustment === '' ? '0' : Number(l.annualAdjustment).toFixed(2),
-    }));
+    const lines = valid.map((l) => {
+      const base = {
+        // 草稿允许留空,按 0 落库;提交时已保证非空。
+        totalAdjustment: l.totalAdjustment === '' ? '0' : Number(l.totalAdjustment).toFixed(2),
+        annualAdjustment: l.annualAdjustment === '' ? '0' : Number(l.annualAdjustment).toFixed(2),
+      };
+      if (l.isNew) {
+        return {
+          ...base,
+          subjectId: null,
+          newSubjectName: l.newName.trim(),
+          newSubjectParentId: l.newParentId,
+        };
+      }
+      return { ...base, subjectId: l.subjectId };
+    });
     return {
       ok: true,
       payload: {
@@ -460,14 +533,22 @@ export default function AdjustmentsPage() {
     const field = dim === 'total' ? 'totalAdjustment' : 'annualAdjustment';
     const parts: string[] = [];
     for (const l of formLines) {
-      if (!l.subjectId) continue;
       const amt = Number(l[field]) || 0;
       if (amt === 0) continue; // 该维度此行无调整
+      const wan = yuanToWanTrim(l[field]);
+      // 新增科目行:原预算必为 0,调增即"新增"。
+      if (l.isNew) {
+        const name = l.newName.trim() || '新科目';
+        if (amt > 0) {
+          parts.push(`新增${name}预算${wan}万元`);
+        } else {
+          parts.push(`${name}预算调减${Math.abs(Number(wan))}万元`);
+        }
+        continue;
+      }
+      if (!l.subjectId) continue;
       const base = baselineMap.get(l.subjectId);
       const productName = base?.name ?? '';
-      // 万元去尾零:l[field] 是元字符串(用户输入),直接转。
-      const wan = yuanToWanTrim(l[field]);
-      // "新增":该维度的原预算为 0(总维度看 totalCurrent,年度维度看 annualCurrent)。
       const originCurrent =
         dim === 'total' ? Number(base?.totalCurrent ?? 0) : Number(base?.annualCurrent ?? 0);
       if (amt > 0 && originCurrent === 0) {
@@ -558,19 +639,55 @@ export default function AdjustmentsPage() {
       {
         title: '科目',
         dataIndex: 'subjectId',
-        width: 160,
-        render: (_: unknown, r) => (
-          <Select
-            size="small"
-            style={{ width: '100%' }}
-            placeholder="选择科目"
-            showSearch
-            optionFilterProp="label"
-            value={r.subjectId}
-            onChange={(v) => updateLine(r.key, { subjectId: v })}
-            options={baseline.map((s) => ({ value: s.subjectId, label: s.name }))}
-          />
-        ),
+        width: 200,
+        render: (_: unknown, r) =>
+          r.isNew ? (
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space size={4}>
+                <Tag color="orange">新</Tag>
+                <input
+                  style={{
+                    flex: 1,
+                    padding: '2px 8px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: 4,
+                    minWidth: 90,
+                  }}
+                  placeholder="新科目名称"
+                  value={r.newName}
+                  onChange={(e) => updateLine(r.key, { newName: e.target.value })}
+                />
+              </Space>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                placeholder="选择父节点(非叶)"
+                value={r.newParentId}
+                onChange={(v) => updateLine(r.key, { newParentId: v })}
+                options={parentOptions}
+              />
+            </Space>
+          ) : (
+            <Select
+              size="small"
+              style={{ width: '100%' }}
+              placeholder="选择科目"
+              showSearch
+              optionFilterProp="label"
+              value={r.subjectId}
+              onChange={(v) => {
+                if (v === '__NEW__') {
+                  updateLine(r.key, { isNew: true, subjectId: null });
+                } else {
+                  updateLine(r.key, { subjectId: v });
+                }
+              }}
+              options={[
+                ...baseline.map((s) => ({ value: s.subjectId, label: s.name })),
+                { value: '__NEW__', label: '➕ 新增科目...' },
+              ]}
+            />
+          ),
       },
       {
         title: '原总预算',
@@ -579,7 +696,11 @@ export default function AdjustmentsPage() {
         align: 'right',
         render: (_: unknown, r) => (
           <Text type="secondary">
-            {r.subjectId ? (baselineMap.get(r.subjectId)?.totalCurrent ?? '0.00') : '—'}
+            {r.isNew
+              ? '0.00'
+              : r.subjectId
+                ? (baselineMap.get(r.subjectId)?.totalCurrent ?? '0.00')
+                : '—'}
           </Text>
         ),
       },
@@ -601,7 +722,15 @@ export default function AdjustmentsPage() {
         key: 'afterTotal',
         width: 120,
         align: 'right',
-        render: (_: unknown, r) => <Text strong>{r.subjectId ? afterTotal(r) : '—'}</Text>,
+        render: (_: unknown, r) => (
+          <Text strong>
+            {r.isNew
+              ? (Number(r.totalAdjustment) || 0).toFixed(2)
+              : r.subjectId
+                ? afterTotal(r)
+                : '—'}
+          </Text>
+        ),
       },
       {
         title: '原年度预算',
@@ -610,7 +739,11 @@ export default function AdjustmentsPage() {
         align: 'right',
         render: (_: unknown, r) => (
           <Text type="secondary">
-            {r.subjectId ? (baselineMap.get(r.subjectId)?.annualCurrent ?? '0.00') : '—'}
+            {r.isNew
+              ? '0.00'
+              : r.subjectId
+                ? (baselineMap.get(r.subjectId)?.annualCurrent ?? '0.00')
+                : '—'}
           </Text>
         ),
       },
@@ -632,7 +765,15 @@ export default function AdjustmentsPage() {
         key: 'afterAnnual',
         width: 130,
         align: 'right',
-        render: (_: unknown, r) => <Text strong>{r.subjectId ? afterAnnual(r) : '—'}</Text>,
+        render: (_: unknown, r) => (
+          <Text strong>
+            {r.isNew
+              ? (Number(r.annualAdjustment) || 0).toFixed(2)
+              : r.subjectId
+                ? afterAnnual(r)
+                : '—'}
+          </Text>
+        ),
       },
       {
         title: '',
@@ -682,13 +823,9 @@ export default function AdjustmentsPage() {
               <Text type="secondary" style={{ fontSize: 12 }}>
                 总预算调整原因:
               </Text>
-              <input
-                style={{
-                  width: 480,
-                  padding: '4px 11px',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: 6,
-                }}
+              <Input.TextArea
+                style={{ width: 480 }}
+                autoSize={{ minRows: 2 }}
                 placeholder="总预算调整原因说明(导出总预算调整文档用)"
                 value={formTotalReason}
                 onChange={(e) => setFormTotalReason(e.target.value)}
@@ -696,13 +833,9 @@ export default function AdjustmentsPage() {
               <Text type="secondary" style={{ fontSize: 12 }}>
                 年度预算调整原因:
               </Text>
-              <input
-                style={{
-                  width: 480,
-                  padding: '4px 11px',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: 6,
-                }}
+              <Input.TextArea
+                style={{ width: 480 }}
+                autoSize={{ minRows: 2 }}
                 placeholder="年度预算调整原因说明(导出年度预算调整文档用)"
                 value={formAnnualReason}
                 onChange={(e) => setFormAnnualReason(e.target.value)}
@@ -726,6 +859,56 @@ export default function AdjustmentsPage() {
           scroll={{ x: 'max-content' }}
           locale={{ emptyText: '请点击「新增科目行」' }}
           style={{ marginBottom: 16 }}
+          summary={() => {
+            const sum = (sel: 'totalAdjustment' | 'annualAdjustment') =>
+              formLines.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
+            const sumOrigTotal = formLines.reduce(
+              (a, l) =>
+                a + (l.isNew ? 0 : Number(baselineMap.get(l.subjectId ?? '')?.totalCurrent ?? 0)),
+              0,
+            );
+            const sumOrigAnnual = formLines.reduce(
+              (a, l) =>
+                a + (l.isNew ? 0 : Number(baselineMap.get(l.subjectId ?? '')?.annualCurrent ?? 0)),
+              0,
+            );
+            const totalAdj = sum('totalAdjustment');
+            const annualAdj = sum('annualAdjustment');
+            const money = (n: number) => n.toFixed(2);
+            const red = { color: '#cf1322' };
+            return (
+              <Table.Summary fixed>
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0}>
+                    <Text strong>合计</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="right">
+                    <Text strong>{money(sumOrigTotal)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={2} align="right">
+                    <Text strong style={Math.abs(totalAdj) > 0.001 ? red : undefined}>
+                      {money(totalAdj)}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <Text strong>{money(sumOrigTotal + totalAdj)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right">
+                    <Text strong>{money(sumOrigAnnual)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right">
+                    <Text strong style={Math.abs(annualAdj) > 0.001 ? red : undefined}>
+                      {money(annualAdj)}
+                    </Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} align="right">
+                    <Text strong>{money(sumOrigAnnual + annualAdj)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={7} />
+                </Table.Summary.Row>
+              </Table.Summary>
+            );
+          }}
         />
 
         <Alert

@@ -124,6 +124,7 @@ describe('adjustment.approve (integration, real PG) — 双维度生效', () => 
     const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
     return {
       project,
+      root: subjects.find((s) => s.code === 'ROOT')!,
       leafA: subjects.find((s) => s.code === 'A')!,
       leafB: subjects.find((s) => s.code === 'B')!,
     };
@@ -357,5 +358,99 @@ describe('adjustment.approve (integration, real PG) — 双维度生效', () => 
       where: { adjustmentId: adj.id, releasedAt: null },
     });
     expect(locks).toHaveLength(0);
+  });
+
+  it('新增科目:审批通过后创建科目 + 初始化预算 + 应用调整额', async () => {
+    const { project, root, leafA } = await seedApprovedProject('NEWSUB');
+    // 新增科目"新叶X"挂在 ROOT 下,总预算/年度各调增 100;同时 leafA 调减 100 平衡。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          {
+            newSubjectName: '新叶X',
+            newSubjectParentId: root.id,
+            totalAdjustment: '100.00',
+            annualAdjustment: '100.00',
+          },
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    const approved = await approveAdjustment(adj.id, adminUser(), '同意');
+    expect(approved.status).toBe(ApprovalStatus.APPROVED);
+
+    // 新科目已创建(叶,isLeaf=true,挂在 root 下)。
+    const newSubj = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, name: '新叶X' },
+    });
+    expect(newSubj).not.toBeNull();
+    expect(newSubj!.isLeaf).toBe(true);
+    expect(newSubj!.parentId).toBe(root.id);
+
+    // 该年度 SubjectBudget 已初始化并应用调整额(0 + 100 = 100)。
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: newSubj!.id },
+      },
+    });
+    expect(fromStored(sb!.currentAmount).toFixed(2)).toBe('100.00');
+
+    // SubjectTotalBudget 同样(0 + 100 = 100)。
+    const stb = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: newSubj!.id } },
+    });
+    expect(fromStored(stb!.currentAmount).toFixed(2)).toBe('100.00');
+  });
+
+  it('新增科目:父节点为叶 → 422', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('NEWBADPARENT');
+    await expectHTTP(
+      () =>
+        createAdjustment(
+          project.id,
+          {
+            year: 2026,
+            lines: [
+              {
+                newSubjectName: '坏叶',
+                newSubjectParentId: leafA.id,
+                totalAdjustment: '100.00',
+                annualAdjustment: '100.00',
+              },
+              { subjectId: leafB.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+            ],
+          },
+          adminUser(),
+        ),
+      422,
+    );
+  });
+
+  it('新增科目:重名 → 422', async () => {
+    const { project, root, leafA } = await seedApprovedProject('NEWDUP');
+    await expectHTTP(
+      () =>
+        createAdjustment(
+          project.id,
+          {
+            year: 2026,
+            lines: [
+              {
+                newSubjectName: '叶A',
+                newSubjectParentId: root.id,
+                totalAdjustment: '100.00',
+                annualAdjustment: '100.00',
+              },
+              { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '-100.00' },
+            ],
+          },
+          adminUser(),
+        ),
+      422,
+    );
   });
 });
