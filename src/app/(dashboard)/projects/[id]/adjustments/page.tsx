@@ -8,7 +8,6 @@ import {
   Descriptions,
   Drawer,
   Empty,
-  Input,
   Modal,
   Result,
   Select,
@@ -159,25 +158,19 @@ export default function AdjustmentsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   // 科目全树(用于新增科目的父节点下拉,只取非叶)。
   const [subjectTree, setSubjectTree] = useState<SubjectNode[]>([]);
-  // 调整原因 TextArea 用非受控 + ref,避免 React 受控值在中文输入法组合输入时打断拼音。
+  // 调整原因用原生 textarea(非受控 + ref):AntD Input.TextArea 与中文输入法冲突,
+  // 原生元素无此问题。
   const totalReasonRef = useRef<string>('');
   const annualReasonRef = useRef<string>('');
-  const totalReasonInputRef = useRef<{
-    resizableTextArea: { textArea: HTMLTextAreaElement };
-  } | null>(null);
-  const annualReasonInputRef = useRef<{
-    resizableTextArea: { textArea: HTMLTextAreaElement };
-  } | null>(null);
+  const totalReasonInputEl = useRef<HTMLTextAreaElement | null>(null);
+  const annualReasonInputEl = useRef<HTMLTextAreaElement | null>(null);
 
-  /** 设置两个原因值(同步 ref + textarea DOM,因 TextArea 非受控)。 */
+  /** 设置两个原因值(同步 ref + textarea DOM)。 */
   const setReasonValues = (total: string, annual: string) => {
     totalReasonRef.current = total;
     annualReasonRef.current = annual;
-    // 同步到 DOM(非受控组件 defaultValue 只在挂载时生效,切换/编辑/生成时需手动写)。
-    const tEl = totalReasonInputRef.current?.resizableTextArea?.textArea;
-    const aEl = annualReasonInputRef.current?.resizableTextArea?.textArea;
-    if (tEl) tEl.value = total;
-    if (aEl) aEl.value = annual;
+    if (totalReasonInputEl.current) totalReasonInputEl.current.value = total;
+    if (annualReasonInputEl.current) annualReasonInputEl.current.value = annual;
   };
 
   /** 事件中写 ref(lint react-hooks/refs 要求通过函数写,不在 JSX 内联直接赋值)。 */
@@ -846,27 +839,39 @@ export default function AdjustmentsPage() {
               <Text type="secondary" style={{ fontSize: 12 }}>
                 总预算调整原因:
               </Text>
-              {/* 非受控 TextArea + ref:避免中文输入法组合输入被打断。
-                  react-hooks/refs 规则对 ref 用法较严,此处为正当的非受控读写,允许。 */}
-              <Input.TextArea
-                style={{ width: 480 }}
-                autoSize={{ minRows: 2 }}
+              {/* 原生 textarea(非受控 + ref):AntD Input.TextArea 与中文输入法有冲突,
+                  原生元素无此问题;min-height 保证可展开。 */}
+              <textarea
+                style={{
+                  width: 480,
+                  minHeight: 60,
+                  padding: '4px 11px',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                  resize: 'vertical',
+                }}
                 placeholder="总预算调整原因说明(导出总预算调整文档用)"
                 // eslint-disable-next-line react-hooks/refs
                 defaultValue={totalReasonRef.current}
-                ref={totalReasonInputRef as never}
+                ref={totalReasonInputEl}
                 onChange={(e) => onTotalReasonChange(e.target.value)}
               />
               <Text type="secondary" style={{ fontSize: 12 }}>
                 年度预算调整原因:
               </Text>
-              <Input.TextArea
-                style={{ width: 480 }}
-                autoSize={{ minRows: 2 }}
+              <textarea
+                style={{
+                  width: 480,
+                  minHeight: 60,
+                  padding: '4px 11px',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                  resize: 'vertical',
+                }}
                 placeholder="年度预算调整原因说明(导出年度预算调整文档用)"
                 // eslint-disable-next-line react-hooks/refs
                 defaultValue={annualReasonRef.current}
-                ref={annualReasonInputRef as never}
+                ref={annualReasonInputEl}
                 onChange={(e) => onAnnualReasonChange(e.target.value)}
               />
             </Space>
