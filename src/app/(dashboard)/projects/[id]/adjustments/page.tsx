@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Alert,
@@ -153,14 +153,40 @@ export default function AdjustmentsPage() {
   // 表单状态。
   const [formYear, setFormYear] = useState<number>(() => new Date().getFullYear());
   const [baseline, setBaseline] = useState<SubjectBaseline[]>([]);
-  const [formTotalReason, setFormTotalReason] = useState('');
-  const [formAnnualReason, setFormAnnualReason] = useState('');
   const [formLines, setFormLines] = useState<EditLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [baselineLoading, setBaselineLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   // 科目全树(用于新增科目的父节点下拉,只取非叶)。
   const [subjectTree, setSubjectTree] = useState<SubjectNode[]>([]);
+  // 调整原因 TextArea 用非受控 + ref,避免 React 受控值在中文输入法组合输入时打断拼音。
+  const totalReasonRef = useRef<string>('');
+  const annualReasonRef = useRef<string>('');
+  const totalReasonInputRef = useRef<{
+    resizableTextArea: { textArea: HTMLTextAreaElement };
+  } | null>(null);
+  const annualReasonInputRef = useRef<{
+    resizableTextArea: { textArea: HTMLTextAreaElement };
+  } | null>(null);
+
+  /** 设置两个原因值(同步 ref + textarea DOM,因 TextArea 非受控)。 */
+  const setReasonValues = (total: string, annual: string) => {
+    totalReasonRef.current = total;
+    annualReasonRef.current = annual;
+    // 同步到 DOM(非受控组件 defaultValue 只在挂载时生效,切换/编辑/生成时需手动写)。
+    const tEl = totalReasonInputRef.current?.resizableTextArea?.textArea;
+    const aEl = annualReasonInputRef.current?.resizableTextArea?.textArea;
+    if (tEl) tEl.value = total;
+    if (aEl) aEl.value = annual;
+  };
+
+  /** 事件中写 ref(lint react-hooks/refs 要求通过函数写,不在 JSX 内联直接赋值)。 */
+  const onTotalReasonChange = (v: string) => {
+    totalReasonRef.current = v;
+  };
+  const onAnnualReasonChange = (v: string) => {
+    annualReasonRef.current = v;
+  };
 
   // 只读明细 Drawer。
   const [detailTarget, setDetailTarget] = useState<AdjustmentRow | null>(null);
@@ -275,8 +301,7 @@ export default function AdjustmentsPage() {
     setEditingId(null);
     const y = new Date().getFullYear();
     setFormYear(y);
-    setFormTotalReason('');
-    setFormAnnualReason('');
+    setReasonValues('', '');
     await Promise.all([loadBaseline(y), loadSubjectTree()]);
     setFormLines([
       {
@@ -295,8 +320,7 @@ export default function AdjustmentsPage() {
   const openEdit = async (row: AdjustmentRow) => {
     setEditingId(row.id);
     setFormYear(row.year);
-    setFormTotalReason(row.totalReason ?? '');
-    setFormAnnualReason(row.annualReason ?? '');
+    setReasonValues(row.totalReason ?? '', row.annualReason ?? '');
     await Promise.all([loadBaseline(row.year), loadSubjectTree()]);
     setFormLines(
       row.lines.map((l) => ({
@@ -399,8 +423,8 @@ export default function AdjustmentsPage() {
       ok: true,
       payload: {
         year: formYear,
-        totalReason: formTotalReason.trim() || null,
-        annualReason: formAnnualReason.trim() || null,
+        totalReason: totalReasonRef.current.trim() || null,
+        annualReason: annualReasonRef.current.trim() || null,
         lines,
       },
     };
@@ -567,8 +591,7 @@ export default function AdjustmentsPage() {
   const handleAutoGenerate = () => {
     const t = generateReason('total');
     const a = generateReason('annual');
-    setFormTotalReason(t);
-    setFormAnnualReason(a);
+    setReasonValues(t, a);
     message.success(t || a ? '已生成调整原因说明,可继续编辑' : '当前调整无变动,未生成说明');
   };
 
@@ -823,12 +846,16 @@ export default function AdjustmentsPage() {
               <Text type="secondary" style={{ fontSize: 12 }}>
                 总预算调整原因:
               </Text>
+              {/* 非受控 TextArea + ref:避免中文输入法组合输入被打断。
+                  react-hooks/refs 规则对 ref 用法较严,此处为正当的非受控读写,允许。 */}
               <Input.TextArea
                 style={{ width: 480 }}
                 autoSize={{ minRows: 2 }}
                 placeholder="总预算调整原因说明(导出总预算调整文档用)"
-                value={formTotalReason}
-                onChange={(e) => setFormTotalReason(e.target.value)}
+                // eslint-disable-next-line react-hooks/refs
+                defaultValue={totalReasonRef.current}
+                ref={totalReasonInputRef as never}
+                onChange={(e) => onTotalReasonChange(e.target.value)}
               />
               <Text type="secondary" style={{ fontSize: 12 }}>
                 年度预算调整原因:
@@ -837,8 +864,10 @@ export default function AdjustmentsPage() {
                 style={{ width: 480 }}
                 autoSize={{ minRows: 2 }}
                 placeholder="年度预算调整原因说明(导出年度预算调整文档用)"
-                value={formAnnualReason}
-                onChange={(e) => setFormAnnualReason(e.target.value)}
+                // eslint-disable-next-line react-hooks/refs
+                defaultValue={annualReasonRef.current}
+                ref={annualReasonInputRef as never}
+                onChange={(e) => onAnnualReasonChange(e.target.value)}
               />
             </Space>
           </Descriptions.Item>
