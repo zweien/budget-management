@@ -224,9 +224,9 @@ export async function fillAdjustmentTemplate(input: DocxFillInput): Promise<Buff
     let tr = dataRows[i];
     tr = setLogicalCell(tr, 0, String(i + 1), 'left'); // 序号列左对齐
     tr = setLogicalCell(tr, 1, r.subjectTitle);
-    tr = setLogicalCell(tr, 2, r.productName);
+    tr = setLogicalCell(tr, 2, r.productName, 'center'); // 品名列居中
     tr = setLogicalCell(tr, 4, r.originWan);
-    tr = setLogicalCell(tr, 5, r.productName); // 调后品名同原品名
+    tr = setLogicalCell(tr, 5, r.productName, 'center'); // 调后品名列居中
     tr = setLogicalCell(tr, 8, r.adjustedWan);
     tr = setLogicalCell(tr, 9, r.adjustWan);
     dataRows[i] = tr;
