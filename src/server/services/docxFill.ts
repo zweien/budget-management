@@ -49,6 +49,9 @@ function setCellText(tc: string, newText: string): string {
     return tc;
   }
   const para = pMatch[0];
+  // 提取并清理段落属性 pPr:剔除 <w:numPr>(自动编号),避免与填入的序号文本重复显示。
+  const pprRawMatch = para.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
+  const ppr = pprRawMatch ? pprRawMatch[0].replace(/<w:numPr>[\s\S]*?<\/w:numPr>/, '') : '';
   // 找段落内第一个 <w:r ...>...</w:r>。
   const rMatch = para.match(/<w:r\b[\s>][\s\S]*?<\/w:r>/);
   let newRun: string;
@@ -59,17 +62,10 @@ function setCellText(tc: string, newText: string): string {
     const rpr = rprMatch ? rprMatch[0] : '';
     newRun = `<w:r>${rpr}<w:t xml:space="preserve">${esc}</w:t></w:r>`;
   } else {
-    // 段落无 run,取段落 pPr(若有)保留。
-    const pprMatch = para.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
-    const ppr = pprMatch ? pprMatch[0] : '';
+    // 段落无 run,新建。
     newRun = `<w:r><w:t xml:space="preserve">${esc}</w:t></w:r>`;
-    // 重建段落:<w:p> + pPr + newRun + </w:p>。
-    const newPara = `<w:p>${ppr}${newRun}</w:p>`;
-    return tc.replace(para, newPara);
   }
-  // 重建段落:保留 pPr,只放 newRun。
-  const pprMatch = para.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
-  const ppr = pprMatch ? pprMatch[0] : '';
+  // 重建段落:用清理后的 pPr + newRun。
   const newPara = `<w:p>${ppr}${newRun}</w:p>`;
   return tc.replace(para, newPara);
 }
@@ -96,6 +92,9 @@ export interface DocxFillInput {
     adjustedWan: string;
     adjustWan: string;
   }>;
+  /** 合计行各金额列(万元):原预算、调整后、调整金额。 */
+  totalOriginWan: string;
+  totalAdjustedWan: string;
   totalAdjustWan: string;
 }
 
@@ -216,12 +215,16 @@ export async function fillAdjustmentTemplate(input: DocxFillInput): Promise<Buff
     dataRows[i] = tr;
   });
 
-  // ---- 合计行:原行20,标签"合计金额",填 log9 = totalAdjustWan ----
-  // rows 数组里:行0-6 是表头,行7-19 是13空行(将被 dataRows 替换),行20 是合计。
+  // ---- 合计行:原行20,标签"合计金额"。
+  // 合计行布局(log0-1=标签, log2-4=原预算区合并, log5-8=调整后区合并, log9=调整金额)。
+  // 故原预算合计填 log2,调整后合计填 log5,调整金额填 log9。
   const HEADER_COUNT = 7; // 行0-6
   const totalRowIndex = HEADER_COUNT + BLANK_ROWS; // 原 20
-  const totalRowXml = row(totalRowIndex);
-  rows[totalRowIndex] = setLogicalCell(totalRowXml, 9, input.totalAdjustWan);
+  let totalRowXml = row(totalRowIndex);
+  totalRowXml = setLogicalCell(totalRowXml, 2, input.totalOriginWan); // 原预算金额(合并区)
+  totalRowXml = setLogicalCell(totalRowXml, 5, input.totalAdjustedWan); // 调整后金额(合并区)
+  totalRowXml = setLogicalCell(totalRowXml, 9, input.totalAdjustWan); // 调整金额
+  rows[totalRowIndex] = totalRowXml;
 
   // ---- 调整原因:定位"XX。"占位单元格替换 ----
   for (let i = totalRowIndex + 1; i < rows.length; i++) {

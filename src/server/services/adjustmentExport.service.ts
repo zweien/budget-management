@@ -133,9 +133,12 @@ export async function exportAdjustmentDocx(
     };
   });
 
-  const totalAdjustWan = toWan(
-    rows.reduce((acc, r) => acc.plus(fromStored(r.adjustWan)), fromStored('0')),
-  );
+  // 合计行:各行金额已是万元字符串,直接累加(不要再 toWan,否则会再除一次 10000)。
+  const sumWan = (sel: 'originWan' | 'adjustedWan' | 'adjustWan') =>
+    rows.reduce((acc, r) => acc.plus(fromStored(r[sel])), fromStored('0')).toFixed(2);
+  const totalOriginWan = sumWan('originWan');
+  const totalAdjustedWan = sumWan('adjustedWan');
+  const totalAdjustWan = sumWan('adjustWan');
 
   const researchPeriod =
     project.startDate && project.endDate
@@ -160,6 +163,8 @@ export async function exportAdjustmentDocx(
       },
       reason: adj.reason ?? '',
       rows,
+      totalOriginWan,
+      totalAdjustedWan,
       totalAdjustWan,
     });
   } catch (e) {
