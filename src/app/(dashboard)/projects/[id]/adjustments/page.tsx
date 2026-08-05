@@ -72,6 +72,8 @@ interface ProjectDetail {
   id: string;
   code: string;
   name: string;
+  /** 服务端随详情下发:当前用户是否可编辑该项目(查看态门控)。 */
+  canEdit?: boolean;
 }
 
 interface InitialBudgetState {
@@ -659,6 +661,14 @@ export default function AdjustmentsPage() {
           </Button>
         </div>
 
+        {project.canEdit === false && (
+          <Alert variant="info">
+            <AlertDescription>
+              你只有查看权限,表单不可保存。如需编辑,请联系管理员将你设为该项目负责人。
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* 年度 + 原因(原生受控 textarea,无输入法问题) */}
         <div className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-l2 lg:grid-cols-[200px_1fr]">
           <div className="grid content-start gap-1.5">
@@ -905,10 +915,14 @@ export default function AdjustmentsPage() {
         </Alert>
 
         <div className="flex gap-2">
-          <Button variant="outline" disabled={submitting} onClick={handleSaveDraft}>
+          <Button
+            variant="outline"
+            disabled={submitting || project.canEdit === false}
+            onClick={handleSaveDraft}
+          >
             保存草稿
           </Button>
-          <Button disabled={submitting} onClick={handleSaveAndSubmit}>
+          <Button disabled={submitting || project.canEdit === false} onClick={handleSaveAndSubmit}>
             {submitting ? '提交中…' : '保存并提交'}
           </Button>
           <Button variant="ghost" onClick={cancelForm}>
@@ -924,7 +938,11 @@ export default function AdjustmentsPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold tracking-[-0.3px]">调整单列表</h2>
-        <Button onClick={() => void openCreate()} disabled={!isEffective}>
+        <Button
+          onClick={() => void openCreate()}
+          disabled={!isEffective || project?.canEdit === false}
+          title={project?.canEdit === false ? '你只有查看权限' : undefined}
+        >
           <Plus />
           发起调整
         </Button>

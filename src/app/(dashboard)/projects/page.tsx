@@ -30,6 +30,13 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -59,9 +66,23 @@ const createSchema = z.object({
   undertakingUnit: z.string().trim(),
   range: z.custom<DateRange>().optional(),
   remark: z.string().trim(),
+  /** 负责人(获得该项目 OWNER 成员编辑权);默认创建者自己。 */
+  ownerId: z.string().trim(),
 });
 
 type CreateFormValues = z.infer<typeof createSchema>;
+
+/** /api/me 当前用户。 */
+interface CurrentUser {
+  id: string;
+  name: string;
+  role: 'ADMIN' | 'USER';
+}
+
+interface UserOption {
+  id: string;
+  name: string;
+}
 
 const formatDate = (d: string | null) => (d ? format(new Date(d), 'yyyy-MM-dd') : '—');
 
@@ -73,6 +94,9 @@ export default function ProjectsPage() {
   const [keyword, setKeyword] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 当前用户(角色决定新建入口可见性)+ 负责人候选(仅管理员可拉取用户列表)。
+  const [me, setMe] = useState<CurrentUser | null>(null);
+  const [userOptions, setUserOptions] = useState<UserOption[]>([]);
 
   const form = useForm<CreateFormValues>({
     resolver: zodResolver(createSchema),
@@ -83,6 +107,7 @@ export default function ProjectsPage() {
       projectType: '',
       undertakingUnit: '',
       remark: '',
+      ownerId: '',
     },
   });
 
@@ -103,6 +128,16 @@ export default function ProjectsPage() {
     // 数据拉取是 effect 的合法用途,禁用 set-state-in-effect(本场景无级联渲染风险)。
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProjects(false);
+    // 当前用户(新建入口门控);管理员顺带预拉负责人候选(仅 ADMIN 可调 /api/users)。
+    apiFetch<CurrentUser>('/api/me')
+      .then((u) => {
+        setMe(u);
+        if (u.role === 'ADMIN') {
+          return apiFetch<UserOption[]>('/api/users').then(setUserOptions);
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
   }, []);
 
   const filtered = useMemo(() => {
@@ -115,6 +150,8 @@ export default function ProjectsPage() {
 
   const openCreateDialog = () => {
     form.reset();
+    // 负责人默认创建者自己。
+    form.setValue('ownerId', me?.id ?? '');
     setDialogOpen(true);
   };
 
@@ -130,6 +167,8 @@ export default function ProjectsPage() {
         startDate: values.range?.from?.toISOString() ?? null,
         endDate: values.range?.to?.toISOString() ?? null,
         remark: values.remark || null,
+        // 负责人:空(未选)时服务端回退为创建者。
+        ownerId: values.ownerId || undefined,
       };
       const created = await apiFetch<ProjectRow>('/api/projects', {
         method: 'POST',
@@ -159,10 +198,12 @@ export default function ProjectsPage() {
           <p className="caption-mono">Projects</p>
           <h1 className="text-display-md">项目管理</h1>
         </div>
-        <Button onClick={openCreateDialog}>
-          <Plus />
-          新建项目
-        </Button>
+        {me?.role === 'ADMIN' ? (
+          <Button onClick={openCreateDialog}>
+            <Plus />
+            新建项目
+          </Button>
+        ) : null}
       </div>
 
       {/* 工具行 */}
@@ -327,6 +368,33 @@ export default function ProjectsPage() {
                     <FormControl>
                       <Input placeholder="如:XX 研究所" {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="ownerId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>负责人</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="默认为自己" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {userOptions.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      负责人将获得该项目的编辑权限(OWNER 成员);之后可在项目详情页调整。
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

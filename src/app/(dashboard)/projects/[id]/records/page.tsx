@@ -141,6 +141,8 @@ interface ProjectDetail {
   id: string;
   code: string;
   name: string;
+  /** 服务端随详情下发:当前用户是否可编辑该项目(决定新增/修改/状态/作废入口)。 */
+  canEdit?: boolean;
 }
 
 interface LedgerResponse {
@@ -575,10 +577,12 @@ function BusinessRecordsPageInner() {
             包含作废
           </label>
         </div>
-        <Button onClick={openCreate}>
-          <Plus />
-          新增
-        </Button>
+        {project?.canEdit ? (
+          <Button onClick={openCreate}>
+            <Plus />
+            新增
+          </Button>
+        ) : null}
       </div>
 
       {/* 记录表 */}
@@ -643,42 +647,47 @@ function BusinessRecordsPageInner() {
                   <TableCell className="tabular-nums">{formatDateTime(row.enteredAt)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEdit(row)}
-                        disabled={row.isVoid}
-                      >
-                        修改
-                      </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" disabled={row.isVoid}>
-                            状态
-                            <ChevronDown />
+                      {/* 编辑类操作仅项目编辑者可见;历史为只读,全员可见。 */}
+                      {project?.canEdit ? (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEdit(row)}
+                            disabled={row.isVoid}
+                          >
+                            修改
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
-                            <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
-                              切换为:{STATUS_LABEL[s]}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-error-deep hover:bg-error-soft"
-                        onClick={() => {
-                          setVoidTarget(row);
-                          setVoidReason('');
-                          setVoidError(null);
-                        }}
-                        disabled={row.isVoid}
-                      >
-                        作废
-                      </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" disabled={row.isVoid}>
+                                状态
+                                <ChevronDown />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
+                                <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
+                                  切换为:{STATUS_LABEL[s]}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-error-deep hover:bg-error-soft"
+                            onClick={() => {
+                              setVoidTarget(row);
+                              setVoidReason('');
+                              setVoidError(null);
+                            }}
+                            disabled={row.isVoid}
+                          >
+                            作废
+                          </Button>
+                        </>
+                      ) : null}
                       <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
                         历史
                       </Button>
