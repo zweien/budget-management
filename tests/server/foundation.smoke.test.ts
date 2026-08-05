@@ -18,7 +18,7 @@ describe('foundation smoke (prisma + audit + id)', () => {
   it('事务内写审计日志成功(before/after 为 JSONB)', async () => {
     const userId = uuidv7();
     await prisma.user.create({
-      data: { id: userId, name: 'tester', role: 'BUDGET_ADMIN' },
+      data: { id: userId, name: 'tester', role: 'ADMIN' },
     });
     const audit = await prisma.$transaction(async (tx) =>
       recordAudit(tx, {

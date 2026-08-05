@@ -1,13 +1,12 @@
 import { Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
-import { getAccessibleProjectIds } from '@/lib/auth/projects';
 
 /**
  * 操作日志查询服务(§14.1)。
  *
  * 全部 beforeData/afterData 以 Prisma JSON 形式返回(已存为 JSONB),前端展开渲染。
- * 权限:admin 看全部;非 admin 仅限其可访问项目(projectId IN getAccessibleProjectIds)。
+ * 权限:v0.3.0 起普通用户全局只读 → 所有登录用户可见全部审计日志(只读)。
  */
 
 /** §14.1 listAuditLogs 组合筛选条件。 */
@@ -57,10 +56,8 @@ function parseDateBound(s: string, label: string): Date {
  * 列出审计日志(§14.1)。
  *
  * 权限:
- * - admin(BUDGET_ADMIN)见全部。
- * - 非 admin:仅限其可访问的项目(getAccessibleProjectIds);若无任何项目访问权,返回空集。
- *   若显式传入 projectId,且该 projectId 不在其可访问范围内,同样返回空集(不抛 403,
- *   审计查询为只读,降级为"无可见数据"以避免泄露项目存在性)。
+ * - v0.3.0 起普通用户全局只读 → 所有登录用户可见全部审计日志(只读,无编辑面)。
+ *   若显式传入 projectId,按传入值过滤即可(不存在"不可见项目"的概念)。
  *
  * 筛选:projectId/objectType/objectId/action/operatorId/dateFrom/dateTo(全部可选,AND 组合)。
  *
@@ -71,28 +68,14 @@ export async function listAuditLogs(
   user: Pick<User, 'id' | 'role'>,
   pagination: AuditLogPagination = {},
 ): Promise<ListAuditLogsResult> {
-  // 1) 项目范围:非 admin 限定可访问项目集合;admin 无限制。
-  const accessibleIds = user.role === 'BUDGET_ADMIN' ? null : await getAccessibleProjectIds(user);
+  // 1) 项目范围:全局只读 → 不再按可访问项目裁剪。
+  void user;
 
   // 2) 构建 where。
   const where: Prisma.AuditLogWhereInput = {};
 
-  if (accessibleIds !== null) {
-    if (accessibleIds.length === 0) {
-      // 无任何项目访问权:直接返回空,避免 IN () 空集语义歧义。
-      return { logs: [], total: 0 };
-    }
-    where.projectId = { in: accessibleIds };
-  }
-
   if (filters.projectId) {
-    // 非 admin 若 projectId 不在 accessibleIds 内,会被 AND projectId 合并为不可能条件 → 空。
-    // 可访问范围用 `in`,再叠加精确 equals,Prisma 会 AND 合并。
-    const existing = where.projectId as { in?: string[]; equals?: string } | string | undefined;
-    where.projectId = {
-      ...(typeof existing === 'object' ? existing : {}),
-      equals: filters.projectId,
-    };
+    where.projectId = filters.projectId;
   }
   if (filters.objectType) where.objectType = filters.objectType;
   if (filters.objectId) where.objectId = filters.objectId;

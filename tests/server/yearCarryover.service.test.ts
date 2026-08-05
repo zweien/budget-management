@@ -76,13 +76,13 @@ function twoYearPayload(opts?: { x2026?: string; x2027?: string }): InitialBudge
 describe('yearCarryover.service (integration, real PG)', () => {
   const createdProjectIds: string[] = [];
   let adminId: string;
-  const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
 
   beforeAll(async () => {
     await prisma.$connect();
     adminId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-carryover', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-carryover', role: UserRole.ADMIN },
     });
   });
 
@@ -97,7 +97,10 @@ describe('yearCarryover.service (integration, real PG)', () => {
   /** helper:admin 建项目 + 两年度编制 + 提交 + 审批生效 → 返回 { project, leafX }。 */
   async function seedTwoYearProject(suffix: string, opts?: { x2026?: string; x2027?: string }) {
     const code = `CY-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `cy ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `cy ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, twoYearPayload(opts), adminUser());

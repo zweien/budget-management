@@ -1,74 +1,99 @@
 import { UserRole } from '@prisma/client';
-import { getAccessibleProjectIds } from './projects';
+import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
 
-// §2.2 权限矩阵的动作
+/**
+ * 权限动作(v0.3.0 重构)。
+ * 全局角色只有两级:ADMIN(全部)/ USER(全局只读)。
+ * 项目编辑权不看全局角色,看 ProjectMember(OWNER)——见 requirePermission 第二步。
+ */
 export type Action =
-  | 'project:view' // 查看获授权项目
-  | 'project:viewAll' // 查看全部项目(仅管理员)
-  | 'project:edit' // 维护项目基础信息/归档(owner/handler/admin 均可)
+  | 'project:view' // 查看项目(台账/记录/统计等;所有登录用户,全项目可见)
+  | 'project:create' // 新建项目(仅管理员)
+  | 'project:edit' // 维护项目基础信息/归档(管理员或该项目 OWNER 成员)
   | 'budget:editInitial' // 编制初始预算
   | 'budget:editSubjectTree' // 维护初始科目树
   | 'budget:adjust' // 发起预算调整
   | 'budget:changeSubject' // 发起科目变更
-  | 'budget:approve' // 审批(编制/调整/科目变更)
+  | 'budget:approve' // 审批(编制/调整/科目变更;仅管理员)
   | 'record:create' // 新增业务记录
   | 'record:edit' // 修改业务记录
   | 'record:void' // 作废业务记录
   | 'record:import' // Excel 导入
-  | 'audit:view'; // 查看操作审计
+  | 'audit:view' // 查看操作审计(所有登录用户)
+  | 'user:list' // 列出全部用户(仅管理员;成员管理选择器数据源)
+  | 'member:manage'; // 管理项目成员/设定负责人(仅管理员)
+
+/** 项目级编辑动作:除全局矩阵外,还要求该项目 OWNER 成员身份(管理员豁免)。 */
+const EDIT_ACTIONS = new Set<Action>([
+  'project:edit',
+  'budget:editInitial',
+  'budget:editSubjectTree',
+  'budget:adjust',
+  'budget:changeSubject',
+  'record:create',
+  'record:edit',
+  'record:void',
+  'record:import',
+]);
+
+const ADMIN_ACTIONS = new Set<Action>([
+  'project:view',
+  'project:create',
+  'project:edit',
+  'budget:editInitial',
+  'budget:editSubjectTree',
+  'budget:adjust',
+  'budget:changeSubject',
+  'budget:approve',
+  'record:create',
+  'record:edit',
+  'record:void',
+  'record:import',
+  'audit:view',
+  'user:list',
+  'member:manage',
+]);
+
+/** 普通用户:全局只读(查看/审计),无任何编辑动作。 */
+const USER_ACTIONS = new Set<Action>(['project:view', 'audit:view']);
 
 const MATRIX: Record<UserRole, Set<Action>> = {
-  PROJECT_OWNER: new Set<Action>([
-    'project:view',
-    'project:edit',
-    'budget:editInitial',
-    'budget:editSubjectTree',
-    'budget:adjust',
-    'budget:changeSubject',
-    'record:create',
-    'record:edit',
-    'record:void',
-    'record:import',
-    'audit:view',
-  ]),
-  AUTHORIZED_HANDLER: new Set<Action>([
-    'project:view',
-    'project:edit',
-    'budget:editInitial',
-    'budget:editSubjectTree',
-    'budget:adjust',
-    'budget:changeSubject',
-    'record:create',
-    'record:edit',
-    'record:void',
-    'record:import',
-    'audit:view',
-  ]),
-  BUDGET_ADMIN: new Set<Action>([
-    'project:view',
-    'project:viewAll',
-    'project:edit',
-    'budget:editInitial',
-    'budget:editSubjectTree',
-    'budget:adjust',
-    'budget:changeSubject',
-    'budget:approve',
-    'record:create',
-    'record:edit',
-    'record:void',
-    'record:import',
-    'audit:view',
-  ]),
+  ADMIN: ADMIN_ACTIONS,
+  USER: USER_ACTIONS,
 };
 
-/** 是否有某动作权限(仅按角色,不含项目范围) */
+/** 是否有某动作权限(仅按全局角色,不含项目成员维度) */
 export function can(user: { role: UserRole }, action: Action): boolean {
   return MATRIX[user.role]?.has(action) ?? false;
 }
 
+/** 编辑类动作判定(供 UI/服务端判断"是否需要项目 OWNER"前置)。 */
+export function isEditAction(action: Action): boolean {
+  return EDIT_ACTIONS.has(action);
+}
+
 /**
- * 要求用户具备某动作权限;若涉及具体项目,额外校验项目访问范围。
+ * 用户在某项目上是否有编辑权:管理员恒真;否则需该项目 OWNER 成员。
+ * UI 门控与服务端 requirePermission 共用同一真相源。
+ */
+export async function canEditProject(
+  user: { id: string; role: UserRole },
+  projectId: string,
+): Promise<boolean> {
+  if (user.role === 'ADMIN') return true;
+  const member = await prisma.projectMember.findUnique({
+    where: { projectId_userId: { projectId, userId: user.id } },
+    select: { memberRole: true },
+  });
+  return member?.memberRole === 'OWNER';
+}
+
+/**
+ * 要求用户具备某动作权限:
+ *  - 项目级编辑动作(EDIT_ACTIONS):不看全局矩阵,由"管理员 或 该项目 OWNER 成员"决定
+ *    (USER 角色的项目负责人在其项目内可编辑);必须携带 projectId。
+ *  - 其余动作:全局角色矩阵校验(查看类 USER 也有;审批/管理类仅 ADMIN)。
  * 服务端权限再校验(§15.3)。
  */
 export async function requirePermission(
@@ -76,13 +101,16 @@ export async function requirePermission(
   action: Action,
   projectId?: string,
 ): Promise<void> {
+  if (EDIT_ACTIONS.has(action)) {
+    if (!projectId) {
+      throw new HTTPError(403, `操作 ${action} 需要指定项目`);
+    }
+    if (!(await canEditProject(user, projectId))) {
+      throw new HTTPError(403, '仅项目负责人在该项目内可执行此操作');
+    }
+    return;
+  }
   if (!can(user, action)) {
     throw new HTTPError(403, `无权限执行操作:${action}`);
-  }
-  if (projectId && action !== 'project:viewAll') {
-    const accessible = await getAccessibleProjectIds(user);
-    if (!accessible.includes(projectId)) {
-      throw new HTTPError(403, '无权访问该项目');
-    }
   }
 }

@@ -120,7 +120,7 @@ export default function DashboardPage() {
     );
   }
 
-  const isAdmin = currentUser.role === 'BUDGET_ADMIN';
+  const isAdmin = currentUser.role === 'ADMIN';
 
   return (
     <div className="space-y-6">
@@ -130,9 +130,9 @@ export default function DashboardPage() {
         description={`欢迎回来,${currentUser.name}(§12.1 项目概览 / 预算指标 / 风险预警 / 待办)`}
       />
 
-      <ProjectOverview isAdmin={isAdmin} />
-      <BudgetMetricCards isAdmin={isAdmin} />
-      <RiskWarnings isAdmin={isAdmin} />
+      <ProjectOverview />
+      <BudgetMetricCards />
+      <RiskWarnings />
       {isAdmin ? <PendingApprovals /> : null}
     </div>
   );
@@ -141,20 +141,16 @@ export default function DashboardPage() {
 // ============================================================
 // 1) 项目概览(§12.1)
 // ============================================================
-function ProjectOverview({ isAdmin }: { isAdmin: boolean }) {
-  // 管理员:cross-project 一次取回项目数;非 admin:/api/projects 取可访问项目列表。
+function ProjectOverview() {
+  // v0.3.0 起全局只读:所有登录用户走 cross-project 一次取回项目数。
   const [rows, setRows] = useState<ProjectRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const promise = isAdmin
-      ? apiFetch<CrossProjectResult>('/api/statistics/cross-project').then((r) =>
-          r.projects.map((p) => ({ id: p.projectId, code: '', name: p.name })),
-        )
-      : apiFetch<ProjectRef[]>('/api/projects').then((list) => list ?? []);
-    promise
+    apiFetch<CrossProjectResult>('/api/statistics/cross-project')
+      .then((r) => r.projects.map((p) => ({ id: p.projectId, code: '', name: p.name })))
       .then((list) => {
         if (!cancelled) {
           setRows(list);
@@ -170,7 +166,7 @@ function ProjectOverview({ isAdmin }: { isAdmin: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin]);
+  }, []);
 
   return (
     <Card>
@@ -194,15 +190,7 @@ function ProjectOverview({ isAdmin }: { isAdmin: boolean }) {
         ) : (
           <div className="space-y-2">
             <MetricValue>{rows.length}</MetricValue>
-            <p className="text-sm text-muted-foreground">
-              {isAdmin ? '全部项目数' : '可访问项目数'}
-              {!isAdmin && rows.length > 0
-                ? `:${rows
-                    .slice(0, 5)
-                    .map((r) => r.name)
-                    .join('、')}${rows.length > 5 ? ` 等 ${rows.length} 个` : ''}`
-                : ''}
-            </p>
+            <p className="text-sm text-muted-foreground">全部项目数</p>
           </div>
         )}
       </CardContent>
@@ -222,7 +210,7 @@ interface Metrics {
   balance: string;
 }
 
-function BudgetMetricCards({ isAdmin }: { isAdmin: boolean }) {
+function BudgetMetricCards() {
   const year = new Date().getFullYear();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -232,21 +220,9 @@ function BudgetMetricCards({ isAdmin }: { isAdmin: boolean }) {
     let cancelled = false;
 
     const compute = async (): Promise<Metrics> => {
-      if (isAdmin) {
-        // 管理员:cross-project 一次取回所有项目行,前端再聚合。
-        const data = await apiFetch<CrossProjectResult>(
-          `/api/statistics/cross-project?year=${year}`,
-        );
-        return aggregateCross(data.projects);
-      }
-      // 非 admin:取可访问项目 → 逐项目 ledger(当年)。
-      const projects = await apiFetch<ProjectRef[]>('/api/projects');
-      const ledgers = await Promise.all(
-        (projects ?? []).map((p) =>
-          apiFetch<LedgerResponse>(`/api/projects/${p.id}/ledger?year=${year}`).catch(() => null),
-        ),
-      );
-      return aggregateLedgers(ledgers.filter((l): l is LedgerResponse => l !== null));
+      // 全局只读:所有登录用户走 cross-project 一次取回所有项目行,前端聚合。
+      const data = await apiFetch<CrossProjectResult>(`/api/statistics/cross-project?year=${year}`);
+      return aggregateCross(data.projects);
     };
 
     compute()
@@ -265,7 +241,7 @@ function BudgetMetricCards({ isAdmin }: { isAdmin: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, year]);
+  }, [year]);
 
   if (error) {
     return (
@@ -342,27 +318,6 @@ function aggregateCross(rows: CrossProjectRow[]): Metrics {
   };
 }
 
-/** 把若干 ledger 的叶节点金额求和(只取 isLeaf=true 的节点,避免与父节点重复)。 */
-function aggregateLedgers(ledgers: LedgerResponse[]): Metrics {
-  let budget = 0;
-  let occupied = 0;
-  for (const ledger of ledgers) {
-    for (const n of ledger.nodes) {
-      if (n.isLeaf) {
-        budget += Number.parseFloat(n.current ?? '0') || 0;
-        occupied += Number.parseFloat(n.totalOccupied ?? '0') || 0;
-      }
-    }
-  }
-  const balance = budget - occupied;
-  return {
-    currentBudget: budget.toFixed(2),
-    totalOccupied: occupied.toFixed(2),
-    balance: balance.toFixed(2),
-    executionRate: budget > 0 ? occupied / budget : null,
-  };
-}
-
 // ============================================================
 // 3) 风险预警(§12.1):负结余(超预算)的科目
 // ============================================================
@@ -376,7 +331,7 @@ interface RiskRow {
   executionRate: number | null;
 }
 
-function RiskWarnings({ isAdmin }: { isAdmin: boolean }) {
+function RiskWarnings() {
   const year = new Date().getFullYear();
   const [risks, setRisks] = useState<RiskRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -386,7 +341,7 @@ function RiskWarnings({ isAdmin }: { isAdmin: boolean }) {
     let cancelled = false;
 
     const compute = async (): Promise<RiskRow[]> => {
-      // admin 与非 admin 均通过 /api/projects 取得其可见项目(admin 全部,非 admin 可访问)。
+      // 全局只读:/api/projects 对所有登录用户返回全部项目。
       const projects = await apiFetch<ProjectRef[]>('/api/projects');
       const items = await Promise.all(
         (projects ?? []).map((p) =>
@@ -434,7 +389,7 @@ function RiskWarnings({ isAdmin }: { isAdmin: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, year]);
+  }, [year]);
 
   return (
     <Card>

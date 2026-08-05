@@ -271,7 +271,15 @@ export async function updateDraftAdjustment(
   payload: AdjustmentPayload,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<BudgetAdjustment> {
-  await requirePermission(user, 'budget:adjust');
+  // 项目级权限需要先知道调整单所属项目(轻量预查;事务内会再取全量做状态校验)。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    select: { projectId: true },
+  });
+  if (!adjRef) {
+    throw new HTTPError(404, '调整单不存在');
+  }
+  await requirePermission(user, 'budget:adjust', adjRef.projectId);
 
   if (payload?.year === undefined || payload?.year === null) {
     throw new HTTPError(422, '缺少 year(调整年度)');
@@ -344,7 +352,15 @@ export async function deleteDraftAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<void> {
-  await requirePermission(user, 'budget:adjust');
+  // 同 updateDraftAdjustment:先轻量预查 projectId 再做项目级权限校验。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    select: { projectId: true },
+  });
+  if (!adjRef) {
+    throw new HTTPError(404, '调整单不存在');
+  }
+  await requirePermission(user, 'budget:adjust', adjRef.projectId);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });

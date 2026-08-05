@@ -10,10 +10,11 @@ datasource db {
 // 金额统一 Decimal(18,2)
 // 主键统一 UUID v7(应用层生成,通过 @default(dbgenerated()) 兜底也可;此处显式传入)
 
+// v0.3.0 起收敛为两级:ADMIN 全局权限;USER 普通用户(全局只读,
+// 项目编辑权由 ProjectMember(OWNER) 驱动)。
 enum UserRole {
-  PROJECT_OWNER
-  AUTHORIZED_HANDLER
-  BUDGET_ADMIN
+  ADMIN
+  USER
 }
 
 enum MemberRole {
@@ -40,6 +41,8 @@ model User {
   id        String     @id @db.Uuid
   name      String
   role      UserRole
+  // Authentik OIDC sub(JIT 建档匹配键);mock/种子用户为 null。
+  authSubject String?   @unique @map("auth_subject")
   status    String     @default("active")
   createdAt DateTime   @default(now()) @map("created_at")
   updatedAt DateTime   @updatedAt @map("updated_at")

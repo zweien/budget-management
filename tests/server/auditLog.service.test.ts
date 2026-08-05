@@ -37,13 +37,13 @@ describe('auditLog.service (integration, real PG)', () => {
     outsiderId = uuidv7();
     memberUserId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-audit', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-audit', role: UserRole.ADMIN },
     });
     await prisma.user.create({
-      data: { id: outsiderId, name: 'outsider-audit', role: UserRole.AUTHORIZED_HANDLER },
+      data: { id: outsiderId, name: 'outsider-audit', role: UserRole.USER },
     });
     await prisma.user.create({
-      data: { id: memberUserId, name: 'member-audit', role: UserRole.AUTHORIZED_HANDLER },
+      data: { id: memberUserId, name: 'member-audit', role: UserRole.USER },
     });
   });
 
@@ -59,12 +59,15 @@ describe('auditLog.service (integration, real PG)', () => {
 
   it('admin 建项目生成 audit_logs:listAuditLogs(admin) 看到对应 create 日志', async () => {
     const code = `AU-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'audit-admin' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'audit-admin' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { logs, total } = await listAuditLogs(
       { projectId: project.id },
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
+      { id: adminId, role: UserRole.ADMIN },
     );
 
     expect(total).toBeGreaterThanOrEqual(1);
@@ -75,24 +78,30 @@ describe('auditLog.service (integration, real PG)', () => {
     expect(create!.operator.name).toBe('admin-audit');
   });
 
-  it('非 admin 且无项目访问权:返回空集(不抛 403,不泄露项目存在性)', async () => {
+  it('普通用户(无成员关系)也可见项目日志:v0.3.0 全局只读', async () => {
     const code = `AU2-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'audit-hidden' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'audit-visible' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { logs, total } = await listAuditLogs(
       { projectId: project.id },
-      { id: outsiderId, role: UserRole.AUTHORIZED_HANDLER },
+      { id: outsiderId, role: UserRole.USER },
     );
 
-    expect(total).toBe(0);
-    expect(logs).toEqual([]);
+    expect(total).toBeGreaterThanOrEqual(1);
+    expect(logs.some((l) => l.objectId === project.id && l.action === 'create')).toBe(true);
   });
 
-  it('非 admin 被加入项目成员:仅看到该项目的日志(跨项目隔离)', async () => {
-    // 项目 A:把 memberUserId 加为成员。
+  it('普通用户全量查询:可见多个项目的日志(无跨项目隔离)', async () => {
+    // 项目 A:把 memberUserId 加为 HANDLER 成员(只读语义,不影响可见性)。
     const codeA = `AU3A-${uuidv7().slice(0, 8)}`;
-    const projectA = await createProject({ code: codeA, name: 'audit-A' }, { id: adminId });
+    const projectA = await createProject(
+      { code: codeA, name: 'audit-A' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(projectA.id);
     await prisma.projectMember.create({
       data: {
@@ -103,52 +112,43 @@ describe('auditLog.service (integration, real PG)', () => {
       },
     });
 
-    // 项目 B:成员不属于该项目。
+    // 项目 B:与 memberUser 无任何成员关系。
     const codeB = `AU3B-${uuidv7().slice(0, 8)}`;
-    const projectB = await createProject({ code: codeB, name: 'audit-B' }, { id: adminId });
+    const projectB = await createProject(
+      { code: codeB, name: 'audit-B' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(projectB.id);
 
-    // member 视角全量查询:应只看到 A 的日志,不含 B。
-    const { logs, total } = await listAuditLogs(
-      {},
-      { id: memberUserId, role: UserRole.AUTHORIZED_HANDLER },
-    );
+    // member 视角全量查询:A、B 的日志均可见。
+    const { logs } = await listAuditLogs({}, { id: memberUserId, role: UserRole.USER });
 
-    // A 的 create 日志在内。
     const aCreate = logs.find((l) => l.projectId === projectA.id && l.action === 'create');
     expect(aCreate).toBeTruthy();
-    // B 的任何日志都不应出现。
-    const bLeak = logs.find((l) => l.projectId === projectB.id);
-    expect(bLeak).toBeUndefined();
-    // total 不超过 A 相关日志数(至少 1 条),且不包含 B。
-    expect(total).toBe(logs.length);
-    expect(total).toBeGreaterThanOrEqual(1);
+    // B 的日志同样可见(全局只读)。
+    const bCreate = logs.find((l) => l.projectId === projectB.id && l.action === 'create');
+    expect(bCreate).toBeTruthy();
 
-    // 显式按 A 查询也能命中。
-    const byA = await listAuditLogs(
-      { projectId: projectA.id },
-      { id: memberUserId, role: UserRole.AUTHORIZED_HANDLER },
-    );
-    expect(byA.logs.every((l) => l.projectId === projectA.id)).toBe(true);
-    expect(byA.total).toBeGreaterThanOrEqual(1);
-
-    // 显式按 B 查询:member 无权,应返回空。
+    // 显式按 B 查询:同样命中。
     const byB = await listAuditLogs(
       { projectId: projectB.id },
-      { id: memberUserId, role: UserRole.AUTHORIZED_HANDLER },
+      { id: memberUserId, role: UserRole.USER },
     );
-    expect(byB.total).toBe(0);
-    expect(byB.logs).toEqual([]);
+    expect(byB.total).toBeGreaterThanOrEqual(1);
+    expect(byB.logs.every((l) => l.projectId === projectB.id)).toBe(true);
   });
 
   it('按 objectType 过滤:只返回匹配对象类型', async () => {
     const code = `AU4-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'audit-filter' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'audit-filter' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { logs, total } = await listAuditLogs(
       { projectId: project.id, objectType: 'project' },
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
+      { id: adminId, role: UserRole.ADMIN },
     );
 
     expect(total).toBeGreaterThanOrEqual(1);
@@ -157,7 +157,7 @@ describe('auditLog.service (integration, real PG)', () => {
     // 用一个不可能存在的对象类型过滤:应为空。
     const empty = await listAuditLogs(
       { projectId: project.id, objectType: 'no_such_type' },
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
+      { id: adminId, role: UserRole.ADMIN },
     );
     expect(empty.total).toBe(0);
     expect(empty.logs).toEqual([]);
@@ -165,18 +165,21 @@ describe('auditLog.service (integration, real PG)', () => {
 
   it('分页 limit/offset 生效', async () => {
     const code = `AU5-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'audit-page' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'audit-page' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const all = await listAuditLogs(
       { projectId: project.id },
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
+      { id: adminId, role: UserRole.ADMIN },
     );
     expect(all.total).toBeGreaterThanOrEqual(1);
 
     const first = await listAuditLogs(
       { projectId: project.id },
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
+      { id: adminId, role: UserRole.ADMIN },
       { limit: 1, offset: 0 },
     );
     expect(first.logs.length).toBe(1);
@@ -185,7 +188,7 @@ describe('auditLog.service (integration, real PG)', () => {
     // offset 超出范围 → 空列表但 total 不变。
     const beyond = await listAuditLogs(
       { projectId: project.id },
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
+      { id: adminId, role: UserRole.ADMIN },
       { limit: 1, offset: 1000 },
     );
     expect(beyond.logs).toEqual([]);

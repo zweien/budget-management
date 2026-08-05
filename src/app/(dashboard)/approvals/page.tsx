@@ -182,7 +182,7 @@ export default function ApprovalsPage() {
       <EmptyState
         icon={<ShieldAlert />}
         title="无权访问审批中心"
-        description="审批中心仅对预算管理员(BUDGET_ADMIN)开放。请在右上角切换为管理员身份。"
+        description="审批中心仅对预算管理员开放。如需审批权限,请联系管理员调整角色。"
       />
     );
   }

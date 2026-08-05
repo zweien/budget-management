@@ -26,8 +26,8 @@ describe('receipt.service (integration, real PG)', () => {
   const createdUserIds: string[] = [];
   let adminId: string;
   let outsiderId: string;
-  const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
-  const outsiderUser = () => ({ id: outsiderId, role: UserRole.AUTHORIZED_HANDLER });
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
+  const outsiderUser = () => ({ id: outsiderId, role: UserRole.USER });
 
   beforeAll(async () => {
     await prisma.$connect();
@@ -35,8 +35,8 @@ describe('receipt.service (integration, real PG)', () => {
     outsiderId = uuidv7();
     await prisma.user.createMany({
       data: [
-        { id: adminId, name: 'admin-receipt', role: UserRole.BUDGET_ADMIN },
-        { id: outsiderId, name: 'outsider-receipt', role: UserRole.AUTHORIZED_HANDLER },
+        { id: adminId, name: 'admin-receipt', role: UserRole.ADMIN },
+        { id: outsiderId, name: 'outsider-receipt', role: UserRole.USER },
       ],
     });
     createdUserIds.push(adminId, outsiderId);
@@ -53,7 +53,10 @@ describe('receipt.service (integration, real PG)', () => {
   /** helper:admin 建项目(自动成为 owner/member)。 */
   async function seedProject(suffix: string) {
     const code = `TR-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `receipt ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `receipt ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
     return project;
   }
@@ -160,7 +163,7 @@ describe('receipt.service (integration, real PG)', () => {
     expect(audit).not.toBeNull();
   });
 
-  it('权限:非项目成员(AUTHORIZED_HANDLER 无 access)createReceipt → 403', async () => {
+  it('权限:非项目成员(无 OWNER 身份)createReceipt → 403', async () => {
     const project = await seedProject('PERM');
     await expect(
       createReceipt(
@@ -171,8 +174,9 @@ describe('receipt.service (integration, real PG)', () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
-  it('权限:非项目成员 listReceipts → 403', async () => {
+  it('权限:非项目成员也可 listReceipts(v0.3.0 全局只读)', async () => {
     const project = await seedProject('PERMLIST');
-    await expect(listReceipts(project.id, outsiderUser())).rejects.toMatchObject({ status: 403 });
+    const result = await listReceipts(project.id, outsiderUser());
+    expect(Array.isArray(result.records)).toBe(true);
   });
 });

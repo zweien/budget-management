@@ -114,10 +114,10 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
     adminId = uuidv7();
     outsiderId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-t5', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-t5', role: UserRole.ADMIN },
     });
     await prisma.user.create({
-      data: { id: outsiderId, name: 'outsider-t5', role: UserRole.AUTHORIZED_HANDLER },
+      data: { id: outsiderId, name: 'outsider-t5', role: UserRole.USER },
     });
   });
 
@@ -132,15 +132,18 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
   /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB, root }。 */
   async function seedApprovedProject(suffix: string) {
     const code = `T5-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `t5 ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `t5 ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
-    await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
-    await approveApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await submitDraft(appId, { id: adminId, role: UserRole.ADMIN });
+    await approveApplication(appId, { id: adminId, role: UserRole.ADMIN });
 
     const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
     const root = subjects.find((s) => s.code === 'ROOT')!;
@@ -181,7 +184,7 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
 
     const ledger = await getProjectLedger(project.id, 2026, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     expect(ledger.year).toBe(2026);
 
@@ -204,17 +207,20 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
   it('current=0 的叶节点 executionRate 为 null(除零保护);其余字段均为 0', async () => {
     // 用一个未审批的项目(createDraft 后 current=0)构造 current=0 叶节点。
     const code = `T5-ZERO-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't5 zero' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't5 zero' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
     await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     // 注意:不 submit / approve → current=0。
 
     const ledger = await getProjectLedger(project.id, 2026, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     const leafA = ledger.nodes.find((n) => n.code === 'A')!;
     expect(leafA.current).toBe('0.00');
@@ -250,7 +256,7 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
 
     const ledger = await getProjectLedger(project.id, 2026, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     const nodeA = ledger.nodes.find((n) => n.subjectId === leafA.id)!;
     const nodeB = ledger.nodes.find((n) => n.subjectId === leafB.id)!;
@@ -299,7 +305,7 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
 
     const ledger = await getProjectLedger(project.id, 2026, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     const nodeA = ledger.nodes.find((n) => n.subjectId === leafA.id)!;
     // 作废的 9999 被排除 → paid=100,occupied=100。
@@ -308,12 +314,16 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
     expect(nodeA.balance).toBe('500.00'); // 600 - 100
   });
 
-  it('非项目访问者 → HTTPError 403(权限校验含项目范围)', async () => {
-    const { project } = await seedApprovedProject('FORBID');
+  it('非项目成员也可查看台账(v0.3.0 全局只读)', async () => {
+    const { project, leafA } = await seedApprovedProject('FORBID');
 
-    await expect(
-      getProjectLedger(project.id, 2026, { id: outsiderId, role: UserRole.AUTHORIZED_HANDLER }),
-    ).rejects.toMatchObject({ status: 403 });
+    const ledger = await getProjectLedger(project.id, 2026, {
+      id: outsiderId,
+      role: UserRole.USER,
+    });
+    const nodeA = ledger.nodes.find((n) => n.subjectId === leafA.id)!;
+    expect(nodeA).toBeTruthy();
+    expect(Number.parseFloat(nodeA.current)).toBeGreaterThan(0);
   });
 
   it('不同年度隔离:2027 年度无预算/无记录 → 全 0、executionRate null', async () => {
@@ -331,7 +341,7 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
 
     const ledger2027 = await getProjectLedger(project.id, 2027, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     const nodeA2027 = ledger2027.nodes.find((n) => n.code === 'A')!;
     // 2027 没有 subject_budget → current=0,initial=0,executionRate=null。
@@ -344,7 +354,10 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
   it('三级树:祖父节点汇总全部叶后代(非仅直接子节点)', async () => {
     // 树:ROOT → MID(非叶) → {A,B 叶};ROOT → C(叶)。验证 ROOT 与 MID 各自汇总正确的叶后代集合。
     const code = `T5-3L-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't5 3level' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't5 3level' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const payload: InitialBudgetPayload = {
@@ -393,10 +406,10 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
     };
     const { appId } = await createDraft(project.id, payload, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
-    await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
-    await approveApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await submitDraft(appId, { id: adminId, role: UserRole.ADMIN });
+    await approveApplication(appId, { id: adminId, role: UserRole.ADMIN });
 
     const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
     const leafA = subjects.find((s) => s.code === 'A')!;
@@ -412,7 +425,7 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
 
     const ledger = await getProjectLedger(project.id, 2026, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     const mid = ledger.nodes.find((n) => n.code === 'MID')!;
     const root = ledger.nodes.find((n) => n.code === 'ROOT')!;
@@ -427,7 +440,7 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
 
   it('科目总预算列(totalCurrent)反映总预算维度调整:仅调总预算(年度额=0)时 current 不变、totalCurrent 变化', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('TOTADJ');
-    const adminUser = { id: adminId, role: UserRole.BUDGET_ADMIN };
+    const adminUser = { id: adminId, role: UserRole.ADMIN };
 
     // 调整前:台账 totalCurrent = 初始总预算(A=600,B=400)。
     const before = await getProjectLedger(project.id, 2026, adminUser);

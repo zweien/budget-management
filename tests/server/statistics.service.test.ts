@@ -79,8 +79,8 @@ describe('statistics.service (integration, real PG)', () => {
   const createdUserIds: string[] = [];
   let adminId: string;
   let outsiderId: string;
-  const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
-  const outsiderUser = () => ({ id: outsiderId, role: UserRole.AUTHORIZED_HANDLER });
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
+  const outsiderUser = () => ({ id: outsiderId, role: UserRole.USER });
 
   beforeAll(async () => {
     await prisma.$connect();
@@ -88,8 +88,8 @@ describe('statistics.service (integration, real PG)', () => {
     outsiderId = uuidv7();
     await prisma.user.createMany({
       data: [
-        { id: adminId, name: 'admin-stat', role: UserRole.BUDGET_ADMIN },
-        { id: outsiderId, name: 'outsider-stat', role: UserRole.AUTHORIZED_HANDLER },
+        { id: adminId, name: 'admin-stat', role: UserRole.ADMIN },
+        { id: outsiderId, name: 'outsider-stat', role: UserRole.USER },
       ],
     });
     createdUserIds.push(adminId, outsiderId);
@@ -106,7 +106,10 @@ describe('statistics.service (integration, real PG)', () => {
   /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB }。 */
   async function seedApprovedProject(suffix: string) {
     const code = `STAT-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `stat ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `stat ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), adminUser());
@@ -169,7 +172,7 @@ describe('statistics.service (integration, real PG)', () => {
     expect(result.records.length).toBe(2);
   });
 
-  it('customStatistics: 跨项目(无 projectId)非 admin → 403;admin → 聚合多项目', async () => {
+  it('customStatistics: 跨项目(无 projectId)普通用户可查(v0.3.0 全局只读)', async () => {
     await seedApprovedProject('CROSS1');
     const { project: p2, leafA: leafA2 } = await seedApprovedProject('CROSS2');
 
@@ -188,12 +191,8 @@ describe('statistics.service (integration, real PG)', () => {
       adminUser(),
     );
 
-    // 非管理员跨项目查询 → 403。
-    await expect(customStatistics({}, outsiderUser())).rejects.toMatchObject({ status: 403 });
-
-    // 管理员跨项目:汇总应包含 p1(无记录)+ p2(有 50 paid)。
-    const result = await customStatistics({}, adminUser());
-    // 至少包含本次新建的两个项目 + 数据库中其他已有项目。
+    // 普通用户跨项目查询:放行,聚合包含 p2 的 50 paid。
+    const result = await customStatistics({}, outsiderUser());
     expect(result.records.length).toBeGreaterThanOrEqual(1);
     const summaryPaid = Number(result.summary.paid);
     expect(summaryPaid).toBeGreaterThanOrEqual(50);
@@ -257,16 +256,15 @@ describe('statistics.service (integration, real PG)', () => {
     expect(jan.totalOccupied).toBe('0.00');
   });
 
-  it('monthlyHistory: 非项目成员 → 403', async () => {
+  it('monthlyHistory: 非项目成员也可查看(全局只读)', async () => {
     const { project } = await seedApprovedProject('MONTHPERM');
-    await expect(monthlyHistory(project.id, 2026, outsiderUser())).rejects.toMatchObject({
-      status: 403,
-    });
+    const result = await monthlyHistory(project.id, 2026, outsiderUser());
+    expect(result.months).toHaveLength(12);
   });
 
   // ---------------- crossProjectStatistics(§11.5) ----------------
 
-  it('crossProjectStatistics: 非 admin → 403;admin → 返回逐项目行', async () => {
+  it('crossProjectStatistics: 普通用户可查(全局只读),返回逐项目行', async () => {
     const { project: p1, leafA: leafA1 } = await seedApprovedProject('XP1');
     const { project: p2 } = await seedApprovedProject('XP2');
 
@@ -285,13 +283,8 @@ describe('statistics.service (integration, real PG)', () => {
       adminUser(),
     );
 
-    // 非管理员 → 403。
-    await expect(crossProjectStatistics({}, outsiderUser())).rejects.toMatchObject({
-      status: 403,
-    });
-
-    // 管理员:返回逐项目行。
-    const { projects } = await crossProjectStatistics({}, adminUser());
+    // 普通用户:返回逐项目行(v0.3.0 全局只读)。
+    const { projects } = await crossProjectStatistics({}, outsiderUser());
     const row1 = projects.find((r) => r.projectId === p1.id);
     const row2 = projects.find((r) => r.projectId === p2.id);
     expect(row1).toBeDefined();

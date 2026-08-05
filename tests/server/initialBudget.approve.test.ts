@@ -74,10 +74,10 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
     adminId = uuidv7();
     ownerId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-t4', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-t4', role: UserRole.ADMIN },
     });
     await prisma.user.create({
-      data: { id: ownerId, name: 'owner-t4', role: UserRole.PROJECT_OWNER },
+      data: { id: ownerId, name: 'owner-t4', role: UserRole.USER },
     });
   });
 
@@ -89,17 +89,20 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
     await prisma.$disconnect();
   });
 
-  /** helper:admin 建项目 + 编制 + 提交 → 返回 { project, appId, leafA, leafB }。 */
+  /** helper:admin 建项目(ownerId 为名义负责人,自动得 OWNER 成员)+ 编制 + 提交。 */
   async function seedPendingApp(suffix: string) {
     const code = `T4-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `t4 ${suffix}` }, { id: ownerId });
+    const project = await createProject(
+      { code, name: `t4 ${suffix}`, ownerId },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
-    await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await submitDraft(appId, { id: adminId, role: UserRole.ADMIN });
 
     const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
     const leafA = subjects.find((s) => s.code === 'A')!;
@@ -142,11 +145,7 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
     expect(stABefore!.currentAmount.toFixed(2)).toBe('0.00');
 
     // 审批生效。
-    const result = await approveApplication(
-      appId,
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
-      '同意',
-    );
+    const result = await approveApplication(appId, { id: adminId, role: UserRole.ADMIN }, '同意');
     expect(result.status).toBe(ApprovalStatus.APPROVED);
     expect(result.approverId).toBe(adminId);
     expect(result.approvedAt).not.toBeNull();
@@ -202,7 +201,7 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
     const { appId } = await seedPendingApp('NOADMIN');
 
     await expect(
-      approveApplication(appId, { id: ownerId, role: UserRole.PROJECT_OWNER }, '同意'),
+      approveApplication(appId, { id: ownerId, role: UserRole.USER }, '同意'),
     ).rejects.toMatchObject({ status: 403 });
   });
 
@@ -210,11 +209,11 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
     const { appId } = await seedPendingApp('REAPP');
 
     // 先正常审批一次。
-    await approveApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN }, '同意');
+    await approveApplication(appId, { id: adminId, role: UserRole.ADMIN }, '同意');
 
     // 再审批一次 → 409。
     await expect(
-      approveApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN }, '再次同意'),
+      approveApplication(appId, { id: adminId, role: UserRole.ADMIN }, '再次同意'),
     ).rejects.toMatchObject({ status: 409 });
   });
 
@@ -223,7 +222,7 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
 
     const result = await rejectApplication(
       appId,
-      { id: adminId, role: UserRole.BUDGET_ADMIN },
+      { id: adminId, role: UserRole.ADMIN },
       '金额不合理',
     );
     expect(result.status).toBe(ApprovalStatus.REJECTED);
@@ -247,17 +246,17 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
   it('rejectApplication: 非 PENDING → HTTPError 409', async () => {
     const { appId } = await seedPendingApp('REJ-409');
     // 先审批通过。
-    await approveApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await approveApplication(appId, { id: adminId, role: UserRole.ADMIN });
 
     await expect(
-      rejectApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN }, '驳回'),
+      rejectApplication(appId, { id: adminId, role: UserRole.ADMIN }, '驳回'),
     ).rejects.toMatchObject({ status: 409 });
   });
 
   it('withdrawApplication: PENDING → DRAFT(§6.2 已撤回 → 草稿),审计', async () => {
     const { appId } = await seedPendingApp('WITHDRAW');
 
-    const result = await withdrawApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    const result = await withdrawApplication(appId, { id: adminId, role: UserRole.ADMIN });
     expect(result.status).toBe(ApprovalStatus.DRAFT);
 
     const app = await prisma.initialBudgetApplication.findUnique({ where: { id: appId } });
@@ -273,16 +272,16 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
   it('withdrawApplication: 非 PENDING → HTTPError 409', async () => {
     const { appId } = await seedPendingApp('WD-409');
     // 先审批通过。
-    await approveApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await approveApplication(appId, { id: adminId, role: UserRole.ADMIN });
 
     await expect(
-      withdrawApplication(appId, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+      withdrawApplication(appId, { id: adminId, role: UserRole.ADMIN }),
     ).rejects.toMatchObject({ status: 409 });
   });
 
   it('approveApplication: 编制单不存在 → HTTPError 404', async () => {
     await expect(
-      approveApplication(uuidv7(), { id: adminId, role: UserRole.BUDGET_ADMIN }, '同意'),
+      approveApplication(uuidv7(), { id: adminId, role: UserRole.ADMIN }, '同意'),
     ).rejects.toMatchObject({ status: 404 });
   });
 });

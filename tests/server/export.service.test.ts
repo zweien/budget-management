@@ -75,13 +75,13 @@ describe('export.service (integration, real PG)', () => {
   const createdProjectIds: string[] = [];
   const createdUserIds: string[] = [];
   let adminId: string;
-  const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
 
   beforeAll(async () => {
     await prisma.$connect();
     adminId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-export', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-export', role: UserRole.ADMIN },
     });
     createdUserIds.push(adminId);
   });
@@ -97,7 +97,10 @@ describe('export.service (integration, real PG)', () => {
   /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB }。 */
   async function seedApprovedProject(suffix: string) {
     const code = `EXP-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `export ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `export ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), adminUser());
@@ -204,17 +207,16 @@ describe('export.service (integration, real PG)', () => {
     expect(foundAInitial).toBe(true);
   });
 
-  it('exportLedger: 非项目访问者 → 403(权限由 getProjectLedger 再校验)', async () => {
+  it('exportLedger: 非项目成员也可导出(v0.3.0 全局只读)', async () => {
     const { project } = await seedApprovedProject('PERM');
     const outsiderId = uuidv7();
     await prisma.user.create({
-      data: { id: outsiderId, name: 'outsider-export', role: UserRole.AUTHORIZED_HANDLER },
+      data: { id: outsiderId, name: 'outsider-export', role: UserRole.USER },
     });
     createdUserIds.push(outsiderId);
 
-    await expect(
-      exportLedger(project.id, 2026, { id: outsiderId, role: UserRole.AUTHORIZED_HANDLER }),
-    ).rejects.toMatchObject({ status: 403 });
+    const buf = await exportLedger(project.id, 2026, { id: outsiderId, role: UserRole.USER });
+    expect(buf.length).toBeGreaterThan(0);
   });
 
   // ---------------- exportStatistics ----------------
@@ -288,15 +290,15 @@ describe('export.service (integration, real PG)', () => {
     expect(foundAmount).toBe(true);
   });
 
-  it('exportStatistics: 跨项目(无 projectId)非 admin → 403', async () => {
+  it('exportStatistics: 跨项目(无 projectId)普通用户可导出(全局只读)', async () => {
     const outsiderId = uuidv7();
     await prisma.user.create({
-      data: { id: outsiderId, name: 'outsider-stat-export', role: UserRole.AUTHORIZED_HANDLER },
+      data: { id: outsiderId, name: 'outsider-stat-export', role: UserRole.USER },
     });
     createdUserIds.push(outsiderId);
 
-    await expect(
-      exportStatistics({}, { id: outsiderId, role: UserRole.AUTHORIZED_HANDLER }),
-    ).rejects.toMatchObject({ status: 403 });
+    // 普通用户跨项目导出:放行(v0.3.0 全局只读)。
+    const buf = await exportStatistics({}, { id: outsiderId, role: UserRole.USER });
+    expect(buf.length).toBeGreaterThan(0);
   });
 });
