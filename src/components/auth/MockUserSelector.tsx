@@ -1,12 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Select, Tag, Typography, message } from 'antd';
-import { UserOutlined } from '@ant-design/icons';
+import { UserRound } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { apiFetch, getMockUserId, setMockUserId } from '@/lib/api/client';
-
-const { Text } = Typography;
+import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface UserOption {
   id: string;
@@ -20,10 +27,11 @@ const ROLE_LABEL: Record<string, string> = {
   BUDGET_ADMIN: '预算管理员',
 };
 
-const ROLE_COLOR: Record<string, string> = {
-  PROJECT_OWNER: 'blue',
-  AUTHORIZED_HANDLER: 'green',
-  BUDGET_ADMIN: 'purple',
+/** Badge 语义色遵循 DESIGN.md:蓝=link/success、琥珀=warning、ink=primary。 */
+const ROLE_BADGE: Record<string, 'success' | 'warning' | 'default'> = {
+  PROJECT_OWNER: 'success',
+  AUTHORIZED_HANDLER: 'warning',
+  BUDGET_ADMIN: 'default',
 };
 
 /**
@@ -83,39 +91,39 @@ export function MockUserSelector() {
     setMockUserId(value);
     setCurrent(value);
     const u = users.find((x) => x.id === value);
-    message.success(`已切换为:${u?.name ?? value}`);
+    toast.success(`已切换为:${u?.name ?? value}`);
     // 切换身份后刷新用户列表(新身份可能能看到更多用户)。
     void refreshUsers();
   };
 
   if (!bootstrapped) {
-    return <Text type="secondary">加载用户列表…</Text>;
+    return <Skeleton className="h-8 w-48" />;
   }
   if (!current || users.length === 0) {
-    return <Text type="danger">未找到可用用户(请检查数据库种子)</Text>;
+    return <span className="text-sm text-error-deep">未找到可用用户(请检查数据库种子)</span>;
   }
 
   const me = users.find((u) => u.id === current);
 
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-      <UserOutlined />
-      <Select
-        size="small"
-        loading={loading}
-        value={current}
-        onChange={handleChange}
-        style={{ minWidth: 200 }}
-        showSearch
-        optionFilterProp="label"
-        options={users.map((u) => ({
-          value: u.id,
-          label: `${u.name} (${ROLE_LABEL[u.role] ?? u.role})`,
-        }))}
-        placeholder="选择模拟用户"
-      />
+    <span className="inline-flex items-center gap-2">
+      <UserRound className="size-4 text-mute" />
+      <Select value={current} onValueChange={handleChange} disabled={loading}>
+        <SelectTrigger className="w-36 sm:w-52" aria-label="选择模拟用户">
+          <SelectValue placeholder="选择模拟用户" />
+        </SelectTrigger>
+        <SelectContent>
+          {users.map((u) => (
+            <SelectItem key={u.id} value={u.id}>
+              {u.name}({ROLE_LABEL[u.role] ?? u.role})
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {me ? (
-        <Tag color={ROLE_COLOR[me.role] ?? 'default'}>{ROLE_LABEL[me.role] ?? me.role}</Tag>
+        <Badge variant={ROLE_BADGE[me.role] ?? 'secondary'} className="hidden sm:inline-flex">
+          {ROLE_LABEL[me.role] ?? me.role}
+        </Badge>
       ) : null}
     </span>
   );

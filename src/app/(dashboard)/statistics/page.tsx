@@ -1,45 +1,58 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  Col,
-  DatePicker,
-  Form,
-  Input,
-  Row,
-  Select,
-  Skeleton,
-  Space,
-  Statistic,
-  Switch,
-  Table,
-  Tabs,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import dayjs, { type Dayjs } from 'dayjs';
+import { format } from 'date-fns';
+import { Download, RotateCcw, Search } from 'lucide-react';
+import { toast } from 'sonner';
+import type { DateRange } from 'react-day-picker';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
+import { PageHeader } from '@/components/layout/page-header';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { MoneyText } from '@/components/ui/MoneyText';
-import { DownloadOutlined } from '@ant-design/icons';
-
-const { Title, Text } = Typography;
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // ---- §8 业务记录四态(与 Prisma BusinessStatus 同步,不依赖运行时枚举,
 //      避免 client bundle 强引 @prisma/client)。 ----
 const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] as const;
 type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
-const STATUS_META: Record<BusinessStatus, { label: string; color: string }> = {
-  PLACEHOLDER: { label: '登记占位', color: 'default' },
-  CONTRACT: { label: '合同', color: 'blue' },
-  FINANCE_APPROVAL: { label: '财务系统审批', color: 'processing' },
-  PAID: { label: '已支出', color: 'success' },
+const STATUS_LABEL: Record<BusinessStatus, string> = {
+  PLACEHOLDER: '登记占位',
+  CONTRACT: '合同',
+  FINANCE_APPROVAL: '财务系统审批',
+  PAID: '已支出',
+};
+
+/** Badge 语义色遵循 DESIGN.md。 */
+const STATUS_BADGE: Record<BusinessStatus, 'secondary' | 'outline' | 'warning' | 'success'> = {
+  PLACEHOLDER: 'secondary',
+  CONTRACT: 'outline',
+  FINANCE_APPROVAL: 'warning',
+  PAID: 'success',
 };
 
 // ---- 通用类型 ----
@@ -77,8 +90,8 @@ function yearOptions(): number[] {
 /** 把 businessDate(可能是 ISO 或带 T 的字符串)统一为 YYYY-MM-DD 展示。 */
 function formatDate(s: string | null | undefined): string {
   if (!s) return '—';
-  const d = dayjs(s);
-  return d.isValid() ? d.format('YYYY-MM-DD') : '—';
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '—' : format(d, 'yyyy-MM-dd');
 }
 
 /** 把执行率(number|null)渲染为百分比。 */
@@ -86,6 +99,9 @@ function renderRate(rate: number | null | undefined): string {
   if (rate === null || rate === undefined) return '—';
   return `${(rate * 100).toFixed(2)}%`;
 }
+
+/** Select 的"全部/清除"哨兵值(radix SelectItem 不允许空串)。 */
+const ALL = '__all__';
 
 // ============================================================
 // 主组件
@@ -102,7 +118,7 @@ export default function StatisticsPage() {
         if (!cancelled) setCurrentUser(u);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) message.error(e.message);
+        if (!cancelled && e instanceof Error) toast.error(e.message);
       })
       .finally(() => {
         if (!cancelled) setLoadingUser(false);
@@ -112,38 +128,43 @@ export default function StatisticsPage() {
     };
   }, []);
 
-  if (loadingUser) return <Skeleton active />;
+  if (loadingUser) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
 
   const isAdmin = currentUser?.role === 'BUDGET_ADMIN';
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Title level={3} style={{ margin: 0 }}>
-        统计分析
-      </Title>
-      <Text type="secondary">自定义统计、月度历史、跨项目汇总(§11.3-11.5)。</Text>
-
-      <Tabs
-        defaultActiveKey="custom"
-        items={[
-          {
-            key: 'custom',
-            label: '自定义统计',
-            children: <CustomStatisticsTab />,
-          },
-          {
-            key: 'monthly',
-            label: '月度历史',
-            children: <MonthlyHistoryTab />,
-          },
-          {
-            key: 'cross',
-            label: '跨项目统计',
-            children: <CrossProjectTab isAdmin={isAdmin} />,
-          },
-        ]}
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Statistics"
+        title="统计分析"
+        description="自定义统计、月度历史、跨项目汇总(§11.3-11.5)。"
       />
-    </Space>
+
+      <Tabs defaultValue="custom">
+        <TabsList>
+          <TabsTrigger value="custom">自定义统计</TabsTrigger>
+          <TabsTrigger value="monthly">月度历史</TabsTrigger>
+          <TabsTrigger value="cross">跨项目统计</TabsTrigger>
+        </TabsList>
+        <TabsContent value="custom">
+          <CustomStatisticsTab />
+        </TabsContent>
+        <TabsContent value="monthly">
+          <MonthlyHistoryTab />
+        </TabsContent>
+        <TabsContent value="cross">
+          <CrossProjectTab isAdmin={isAdmin} />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 
@@ -164,7 +185,7 @@ function useAccessibleProjects(): {
         if (!cancelled) setProjects(rows ?? []);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) message.error(e.message);
+        if (!cancelled && e instanceof Error) toast.error(e.message);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -186,8 +207,7 @@ function useLeafSubjects(projectId: string | undefined): {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // 无项目时不发请求;科目 Select 由调用方按 projectId 禁用,选择新项目时
-    // 本 effect 会重拉并替换(故无需在此同步清空,避免 effect 内同步 setState)。
+    // 无项目时不发请求;科目 Select 由调用方按 projectId 禁用。
     if (!projectId) return;
     let cancelled = false;
     apiFetch<LedgerResponse>(`/api/projects/${projectId}/ledger`)
@@ -200,7 +220,7 @@ function useLeafSubjects(projectId: string | undefined): {
         setSubjects(leaves);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) message.error(e.message);
+        if (!cancelled && e instanceof Error) toast.error(e.message);
         if (!cancelled) setSubjects([]);
       })
       .finally(() => {
@@ -248,22 +268,35 @@ interface CustomResult {
   records: CustomRecord[];
 }
 
+/** 查询筛选(全部可选;查询按钮落定,避免每次输入都请求)。 */
 interface CustomFilters {
   projectId?: string;
   budgetYear?: number;
   subjectId?: string;
   status?: BusinessStatus;
-  dateRange?: [Dayjs, Dayjs];
+  dateRange?: DateRange;
   handler?: string;
   includeVoid?: boolean;
 }
 
+function buildCustomQuery(f: CustomFilters): string {
+  const qs = new URLSearchParams();
+  if (f.projectId) qs.set('projectId', f.projectId);
+  if (f.budgetYear !== undefined) qs.set('budgetYear', String(f.budgetYear));
+  if (f.subjectId) qs.set('subjectId', f.subjectId);
+  if (f.status) qs.set('status', f.status);
+  if (f.dateRange?.from) qs.set('businessDateFrom', format(f.dateRange.from, 'yyyy-MM-dd'));
+  if (f.dateRange?.to) qs.set('businessDateTo', format(f.dateRange.to, 'yyyy-MM-dd'));
+  if (f.handler?.trim()) qs.set('handler', f.handler.trim());
+  if (f.includeVoid) qs.set('includeVoid', '1');
+  return qs.toString();
+}
+
 function CustomStatisticsTab() {
   const { projects, loading: loadingProjects } = useAccessibleProjects();
-  const [form] = Form.useForm<CustomFilters>();
-  // 活跃筛选(查询后落定,避免每次输入都查询)。
-  const [activeProjectId, setActiveProjectId] = useState<string | undefined>(undefined);
-  const { subjects } = useLeafSubjects(activeProjectId);
+  const [filters, setFilters] = useState<CustomFilters>({});
+  // 科目选项随项目选择即时加载(交互优化:不再等查询落定)。
+  const { subjects, loading: loadingSubjects } = useLeafSubjects(filters.projectId);
 
   const [result, setResult] = useState<CustomResult | null>(null);
   // 初始即 true:挂载自动查询,避免 mount effect 内同步 setState(react-hooks/set-state-in-effect)。
@@ -278,40 +311,22 @@ function CustomStatisticsTab() {
   }, [subjects]);
 
   // setLoading(true) 由调用方(事件处理器 / 初始 state)负责,函数内只做异步落值。
-  const runQuery = useCallback(async () => {
-    let values: CustomFilters;
+  const runQuery = useCallback(async (f: CustomFilters) => {
     try {
-      values = await form.validateFields();
-    } catch {
-      return; // AntD 已在字段下提示。
-    }
-    try {
-      const qs = new URLSearchParams();
-      if (values.projectId) qs.set('projectId', values.projectId);
-      if (values.budgetYear !== undefined) qs.set('budgetYear', String(values.budgetYear));
-      if (values.subjectId) qs.set('subjectId', values.subjectId);
-      if (values.status) qs.set('status', values.status);
-      if (values.dateRange?.[0])
-        qs.set('businessDateFrom', values.dateRange[0].format('YYYY-MM-DD'));
-      if (values.dateRange?.[1]) qs.set('businessDateTo', values.dateRange[1].format('YYYY-MM-DD'));
-      if (values.handler?.trim()) qs.set('handler', values.handler.trim());
-      if (values.includeVoid) qs.set('includeVoid', '1');
-      const suffix = qs.toString();
+      const suffix = buildCustomQuery(f);
       const data = await apiFetch<CustomResult>(
         `/api/statistics/custom${suffix ? `?${suffix}` : ''}`,
       );
       setResult(data);
-      setActiveProjectId(values.projectId);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setLoading(false);
       setHasQueried(true);
     }
-  }, [form]);
+  }, []);
 
-  // 首次挂载查询一次(loading 已为 true)。仿 records 页:effect 内直接发起异步请求,
-  // 在 .then/.finally 异步回调里落值,避免在 effect body 内同步调用含 setState 的函数。
+  // 首次挂载查询一次(loading 已为 true)。
   useEffect(() => {
     let cancelled = false;
     apiFetch<CustomResult>('/api/statistics/custom')
@@ -319,7 +334,7 @@ function CustomStatisticsTab() {
         if (!cancelled) setResult(data);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) message.error(e.message);
+        if (!cancelled && e instanceof Error) toast.error(e.message);
       })
       .finally(() => {
         if (!cancelled) {
@@ -334,234 +349,286 @@ function CustomStatisticsTab() {
 
   const handleQueryClick = () => {
     setLoading(true);
-    void runQuery();
+    void runQuery(filters);
   };
 
-  /** 用当前表单筛选作为查询参数导出 xlsx(§10.5),与 /api/statistics/custom 同参。 */
+  const handleReset = () => {
+    setFilters({});
+    setLoading(true);
+    void runQuery({});
+  };
+
+  /** 用当前筛选作为查询参数导出 xlsx(§10.5),与 /api/statistics/custom 同参。 */
   const handleExport = async () => {
-    let values: CustomFilters;
-    try {
-      values = await form.validateFields();
-    } catch {
-      // 校验失败仍允许导出(忽略必填):只取已填字段。
-      values = form.getFieldsValue(true) as CustomFilters;
-    }
     setExporting(true);
     try {
-      const qs = new URLSearchParams();
-      if (values.projectId) qs.set('projectId', values.projectId);
-      if (values.budgetYear !== undefined) qs.set('budgetYear', String(values.budgetYear));
-      if (values.subjectId) qs.set('subjectId', values.subjectId);
-      if (values.status) qs.set('status', values.status);
-      if (values.dateRange?.[0])
-        qs.set('businessDateFrom', values.dateRange[0].format('YYYY-MM-DD'));
-      if (values.dateRange?.[1]) qs.set('businessDateTo', values.dateRange[1].format('YYYY-MM-DD'));
-      if (values.handler?.trim()) qs.set('handler', values.handler.trim());
-      if (values.includeVoid) qs.set('includeVoid', '1');
-      const suffix = qs.toString();
+      const suffix = buildCustomQuery(filters);
       await downloadFile(`/api/statistics/export${suffix ? `?${suffix}` : ''}`, 'statistics.xlsx');
-      message.success('已开始导出');
+      toast.success('已开始导出');
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setExporting(false);
     }
   };
 
-  const columns: ColumnsType<CustomRecord> = [
-    {
-      title: '科目编码',
-      key: 'subjectCode',
-      width: 130,
-      render: (_: unknown, r: CustomRecord) =>
-        r.subject?.code ?? subjectMap.get(r.subjectId)?.code ?? r.subjectId.slice(0, 8),
-    },
-    {
-      title: '科目名称',
-      key: 'subjectName',
-      ellipsis: true,
-      render: (_: unknown, r: CustomRecord) =>
-        r.subject?.name ?? subjectMap.get(r.subjectId)?.name ?? '—',
-    },
-    {
-      title: '年度',
-      dataIndex: 'budgetYear',
-      key: 'budgetYear',
-      width: 90,
-    },
-    {
-      title: '业务发生日期',
-      dataIndex: 'businessDate',
-      key: 'businessDate',
-      width: 130,
-      render: (d: string) => formatDate(d),
-    },
-    {
-      title: '金额',
-      dataIndex: 'amount',
-      key: 'amount',
-      align: 'right',
-      render: (amount: string) => <MoneyText value={amount} riskOnNegative={false} />,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 130,
-      render: (_: BusinessStatus, r: CustomRecord) => {
-        const meta = STATUS_META[r.status] ?? { label: r.status, color: 'default' };
-        return r.isVoid ? (
-          <Tag color="red">已作废</Tag>
-        ) : (
-          <Tag color={meta.color}>{meta.label}</Tag>
-        );
-      },
-    },
-    {
-      title: '经办人',
-      dataIndex: 'handler',
-      key: 'handler',
-      width: 110,
-    },
-    {
-      title: '摘要',
-      dataIndex: 'summary',
-      key: 'summary',
-      ellipsis: true,
-      render: (s: string) => s || <Text type="secondary">—</Text>,
-    },
-  ];
-
   const summary = result?.summary;
 
+  const summaryCards: Array<{ label: string; node: React.ReactNode }> = summary
+    ? [
+        {
+          label: '当前预算',
+          node: (
+            <MoneyText value={summary.currentBudget} riskOnNegative={false} className="text-left" />
+          ),
+        },
+        {
+          label: '已支出',
+          node: <MoneyText value={summary.paid} riskOnNegative={false} className="text-left" />,
+        },
+        {
+          label: '应付未付',
+          node: <MoneyText value={summary.payable} riskOnNegative={false} className="text-left" />,
+        },
+        {
+          label: '总占用',
+          node: (
+            <MoneyText value={summary.totalOccupied} riskOnNegative={false} className="text-left" />
+          ),
+        },
+        { label: '结余', node: <MoneyText value={summary.balance} className="text-left" /> },
+        { label: '执行率', node: renderRate(summary.executionRate) },
+      ]
+    : [];
+
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Form<CustomFilters> form={form} layout="inline" style={{ flexWrap: 'wrap', rowGap: 8 }}>
-        <Form.Item name="projectId" label="项目">
-          <Select<string>
-            style={{ width: 220 }}
-            allowClear
-            loading={loadingProjects}
-            placeholder="跨项目(管理员)"
-            options={projects.map((p) => ({
-              value: p.id,
-              label: `${p.code} ${p.name}`,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="budgetYear" label="年度">
-          <Select<number>
-            style={{ width: 120 }}
-            allowClear
-            options={yearOptions().map((y) => ({ value: y, label: String(y) }))}
-          />
-        </Form.Item>
-        <Form.Item shouldUpdate noStyle>
-          {() => {
-            const pid = form.getFieldValue('projectId') as string | undefined;
-            return (
-              <Form.Item name="subjectId" label="科目">
-                <Select<string>
-                  style={{ width: 220 }}
-                  allowClear
-                  disabled={!pid}
-                  placeholder={pid ? '选择科目' : '请先选项目'}
-                  options={subjects.map((s) => ({
-                    value: s.subjectId,
-                    label: `${s.code} ${s.name}`,
-                  }))}
-                />
-              </Form.Item>
-            );
-          }}
-        </Form.Item>
-        <Form.Item name="status" label="状态">
-          <Select<BusinessStatus>
-            style={{ width: 160 }}
-            allowClear
-            options={BUSINESS_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label }))}
-          />
-        </Form.Item>
-        <Form.Item name="dateRange" label="业务发生日期">
-          <DatePicker.RangePicker style={{ width: 240 }} />
-        </Form.Item>
-        <Form.Item name="handler" label="经办人">
-          <Input allowClear placeholder="模糊匹配" style={{ width: 140 }} />
-        </Form.Item>
-        <Form.Item name="includeVoid" label="是否作废" valuePropName="checked">
-          <Switch checkedChildren="含作废" unCheckedChildren="仅有效" />
-        </Form.Item>
-        <Form.Item>
-          <Button type="primary" loading={loading} onClick={handleQueryClick}>
-            查询
-          </Button>
-        </Form.Item>
-        <Form.Item>
-          <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
-            导出
-          </Button>
-        </Form.Item>
-      </Form>
+    <div className="space-y-4">
+      {/* 查询构建器:标签在上的网格布局,替代 antd 内联挤排 */}
+      <Card className="p-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid gap-1.5">
+            <Label>项目</Label>
+            <Select
+              value={filters.projectId ?? ALL}
+              onValueChange={(v) =>
+                setFilters((f) => ({
+                  ...f,
+                  projectId: v === ALL ? undefined : v,
+                  subjectId: undefined, // 换项目后科目失效
+                }))
+              }
+              disabled={loadingProjects}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="跨项目(管理员)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>跨项目(管理员)</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.code} {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>年度</Label>
+            <Select
+              value={filters.budgetYear !== undefined ? String(filters.budgetYear) : ALL}
+              onValueChange={(v) =>
+                setFilters((f) => ({ ...f, budgetYear: v === ALL ? undefined : Number(v) }))
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="全部年度" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部年度</SelectItem>
+                {yearOptions().map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>科目</Label>
+            <Select
+              value={filters.subjectId ?? ALL}
+              onValueChange={(v) =>
+                setFilters((f) => ({ ...f, subjectId: v === ALL ? undefined : v }))
+              }
+              disabled={!filters.projectId || loadingSubjects}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={filters.projectId ? '全部科目' : '请先选项目'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部科目</SelectItem>
+                {subjects.map((s) => (
+                  <SelectItem key={s.subjectId} value={s.subjectId}>
+                    {s.code} {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>状态</Label>
+            <Select
+              value={filters.status ?? ALL}
+              onValueChange={(v) =>
+                setFilters((f) => ({ ...f, status: v === ALL ? undefined : (v as BusinessStatus) }))
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="全部状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部状态</SelectItem>
+                {BUSINESS_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_LABEL[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>业务发生日期</Label>
+            <DateRangePicker
+              value={filters.dateRange}
+              onChange={(range) => setFilters((f) => ({ ...f, dateRange: range }))}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>经办人</Label>
+            <Input
+              placeholder="模糊匹配,回车查询"
+              value={filters.handler ?? ''}
+              onChange={(e) => setFilters((f) => ({ ...f, handler: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleQueryClick();
+              }}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>作废记录</Label>
+            <div className="flex h-8 items-center gap-2">
+              <Switch
+                checked={filters.includeVoid ?? false}
+                onCheckedChange={(checked) =>
+                  setFilters((f) => ({ ...f, includeVoid: checked || undefined }))
+                }
+                aria-label="是否包含作废记录"
+              />
+              <span className="text-sm text-muted-foreground">
+                {filters.includeVoid ? '含作废' : '仅有效'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-end gap-2">
+            <Button onClick={handleQueryClick} disabled={loading}>
+              <Search />
+              {loading ? '查询中…' : '查询'}
+            </Button>
+            <Button variant="outline" onClick={handleReset} disabled={loading}>
+              <RotateCcw />
+              重置
+            </Button>
+            <Button variant="outline" onClick={handleExport} disabled={exporting}>
+              <Download />
+              {exporting ? '导出中…' : '导出'}
+            </Button>
+          </div>
+        </div>
+      </Card>
 
-      {summary && (
-        <Row gutter={[16, 16]}>
-          <Col xs={12} md={8} lg={4}>
-            <Card size="small">
-              <Statistic
-                title="当前预算"
-                formatter={() => <MoneyText value={summary.currentBudget} riskOnNegative={false} />}
-              />
+      {summary ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {summaryCards.map((c) => (
+            <Card key={c.label} className="p-3">
+              <p className="caption-mono">{c.label}</p>
+              <p className="mt-1.5 text-lg font-semibold tracking-[-0.4px] tabular-nums">
+                {c.node}
+              </p>
             </Card>
-          </Col>
-          <Col xs={12} md={8} lg={4}>
-            <Card size="small">
-              <Statistic
-                title="已支出"
-                formatter={() => <MoneyText value={summary.paid} riskOnNegative={false} />}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} md={8} lg={4}>
-            <Card size="small">
-              <Statistic
-                title="应付未付"
-                formatter={() => <MoneyText value={summary.payable} riskOnNegative={false} />}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} md={8} lg={4}>
-            <Card size="small">
-              <Statistic
-                title="总占用"
-                formatter={() => <MoneyText value={summary.totalOccupied} riskOnNegative={false} />}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} md={8} lg={4}>
-            <Card size="small">
-              <Statistic title="结余" formatter={() => <MoneyText value={summary.balance} />} />
-            </Card>
-          </Col>
-          <Col xs={12} md={8} lg={4}>
-            <Card size="small">
-              <Statistic title="执行率" value={renderRate(summary.executionRate)} />
-            </Card>
-          </Col>
-        </Row>
-      )}
+          ))}
+        </div>
+      ) : null}
 
-      <Table<CustomRecord>
-        rowKey="id"
-        loading={loading}
-        dataSource={result?.records ?? []}
-        columns={columns}
-        pagination={{ pageSize: 10, showSizeChanger: true }}
-        scroll={{ x: 'max-content' }}
-        locale={{
-          emptyText: hasQueried ? '没有匹配的业务记录' : '点击"查询"加载明细',
-        }}
-      />
-    </Space>
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-32">科目编码</TableHead>
+              <TableHead>科目名称</TableHead>
+              <TableHead className="w-20">年度</TableHead>
+              <TableHead className="w-32">业务发生日期</TableHead>
+              <TableHead className="w-32 text-right">金额</TableHead>
+              <TableHead className="w-32">状态</TableHead>
+              <TableHead className="w-28">经办人</TableHead>
+              <TableHead>摘要</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <TableRow key={i} className="hover:bg-transparent">
+                  <TableCell colSpan={8}>
+                    <Skeleton className="h-6 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (result?.records.length ?? 0) === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                  {hasQueried ? '没有匹配的业务记录' : '点击"查询"加载明细'}
+                </TableCell>
+              </TableRow>
+            ) : (
+              result?.records.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="font-mono text-[13px]">
+                    {r.subject?.code ??
+                      subjectMap.get(r.subjectId)?.code ??
+                      r.subjectId.slice(0, 8)}
+                  </TableCell>
+                  <TableCell className="max-w-48 truncate" title={r.subject?.name}>
+                    {r.subject?.name ?? subjectMap.get(r.subjectId)?.name ?? '—'}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{r.budgetYear}</TableCell>
+                  <TableCell className="tabular-nums">{formatDate(r.businessDate)}</TableCell>
+                  <TableCell>
+                    <MoneyText value={r.amount} riskOnNegative={false} />
+                  </TableCell>
+                  <TableCell>
+                    {r.isVoid ? (
+                      <Badge variant="error">已作废</Badge>
+                    ) : (
+                      <Badge variant={STATUS_BADGE[r.status] ?? 'secondary'}>
+                        {STATUS_LABEL[r.status] ?? r.status}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>{r.handler}</TableCell>
+                  <TableCell className="max-w-48 truncate" title={r.summary}>
+                    {r.summary || <span className="text-mute">—</span>}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+        {!loading && (result?.records.length ?? 0) > 0 ? (
+          <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
+            共 {result?.records.length} 条记录
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -580,123 +647,125 @@ interface MonthlyResult {
   months: MonthlyBucket[];
 }
 
-interface MonthlyFilters {
-  projectId?: string;
-  year?: number;
-}
-
 function MonthlyHistoryTab() {
   const { projects, loading: loadingProjects } = useAccessibleProjects();
-  const [form] = Form.useForm<MonthlyFilters>();
+  const [projectId, setProjectId] = useState<string | undefined>(undefined);
+  const [year, setYear] = useState<number | undefined>(undefined);
   const [result, setResult] = useState<MonthlyResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeProjectId, setActiveProjectId] = useState<string | undefined>(undefined);
 
-  const runQuery = useCallback(async () => {
-    let values: MonthlyFilters;
-    try {
-      values = await form.validateFields();
-    } catch {
-      return;
-    }
-    if (!values.projectId || values.year === undefined) {
-      message.warning('请选择项目与年度');
+  const runQuery = async () => {
+    if (!projectId || year === undefined) {
+      toast.warning('请选择项目与年度');
       return;
     }
     setLoading(true);
     try {
-      const qs = new URLSearchParams({
-        projectId: values.projectId,
-        year: String(values.year),
-      });
+      const qs = new URLSearchParams({ projectId, year: String(year) });
       const data = await apiFetch<MonthlyResult>(`/api/statistics/monthly?${qs.toString()}`);
       setResult(data);
-      setActiveProjectId(values.projectId);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setLoading(false);
     }
-  }, [form]);
-
-  const columns: ColumnsType<MonthlyBucket> = [
-    {
-      title: '月份',
-      dataIndex: 'month',
-      key: 'month',
-      width: 100,
-      render: (m: number) => `${m} 月`,
-    },
-    {
-      title: '已支出',
-      dataIndex: 'paid',
-      key: 'paid',
-      align: 'right',
-      render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-    },
-    {
-      title: '应付未付',
-      dataIndex: 'payable',
-      key: 'payable',
-      align: 'right',
-      render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-    },
-    {
-      title: '总占用',
-      dataIndex: 'totalOccupied',
-      key: 'totalOccupied',
-      align: 'right',
-      render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-    },
-  ];
+  };
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Form<MonthlyFilters> form={form} layout="inline" style={{ flexWrap: 'wrap', rowGap: 8 }}>
-        <Form.Item
-          name="projectId"
-          label="项目"
-          rules={[{ required: true, message: '请选择项目' }]}
-        >
-          <Select<string>
-            style={{ width: 240 }}
-            loading={loadingProjects}
-            placeholder="选择项目"
-            options={projects.map((p) => ({
-              value: p.id,
-              label: `${p.code} ${p.name}`,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="year" label="年度" rules={[{ required: true, message: '请选择年度' }]}>
-          <Select<number>
-            style={{ width: 120 }}
-            placeholder="选择年度"
-            options={yearOptions().map((y) => ({ value: y, label: String(y) }))}
-          />
-        </Form.Item>
-        <Form.Item>
-          <Button type="primary" loading={loading} onClick={() => void runQuery()}>
-            查询
+    <div className="space-y-4">
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid w-64 gap-1.5">
+            <Label>项目</Label>
+            <Select value={projectId} onValueChange={setProjectId} disabled={loadingProjects}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="选择项目" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.code} {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid w-32 gap-1.5">
+            <Label>年度</Label>
+            <Select
+              value={year !== undefined ? String(year) : undefined}
+              onValueChange={(v) => setYear(Number(v))}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="选择年度" />
+              </SelectTrigger>
+              <SelectContent>
+                {yearOptions().map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={() => void runQuery()} disabled={loading}>
+            <Search />
+            {loading ? '查询中…' : '查询'}
           </Button>
-        </Form.Item>
-      </Form>
+        </div>
+      </Card>
 
-      <Alert
-        type="info"
-        showIcon
-        message="按业务发生日期归月,实时重算;仅统计有效(非作废)记录(§11.4)。"
-      />
+      <Alert variant="info">
+        <AlertDescription>
+          按业务发生日期归月,实时重算;仅统计有效(非作废)记录(§11.4)。
+        </AlertDescription>
+      </Alert>
 
-      <Table<MonthlyBucket>
-        rowKey="month"
-        loading={loading}
-        dataSource={result?.months ?? []}
-        columns={columns}
-        pagination={false}
-        locale={{ emptyText: activeProjectId ? '暂无数据' : '选择项目与年度后查询' }}
-      />
-    </Space>
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-24">月份</TableHead>
+              <TableHead className="text-right">已支出</TableHead>
+              <TableHead className="text-right">应付未付</TableHead>
+              <TableHead className="text-right">总占用</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <TableRow key={i} className="hover:bg-transparent">
+                  <TableCell colSpan={4}>
+                    <Skeleton className="h-6 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (result?.months.length ?? 0) === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
+                  {result ? '暂无数据' : '选择项目与年度后查询'}
+                </TableCell>
+              </TableRow>
+            ) : (
+              result?.months.map((m) => (
+                <TableRow key={m.month}>
+                  <TableCell className="tabular-nums">{m.month} 月</TableCell>
+                  <TableCell>
+                    <MoneyText value={m.paid} riskOnNegative={false} />
+                  </TableCell>
+                  <TableCell>
+                    <MoneyText value={m.payable} riskOnNegative={false} />
+                  </TableCell>
+                  <TableCell>
+                    <MoneyText value={m.totalOccupied} riskOnNegative={false} />
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
   );
 }
 
@@ -730,15 +799,14 @@ function CrossProjectTab({ isAdmin }: { isAdmin: boolean }) {
       const data = await apiFetch<CrossProjectResult>('/api/statistics/cross-project');
       setResult(data);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setLoading(false);
       setHasQueried(true);
     }
   }, []);
 
-  // 仅管理员首次挂载自动查询一次(loading 已为 true)。effect 内直接发起异步请求,
-  // 在 .then/.finally 异步回调里落值,避免 effect body 内同步 setState。
+  // 仅管理员首次挂载自动查询一次(loading 已为 true)。
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
@@ -747,7 +815,7 @@ function CrossProjectTab({ isAdmin }: { isAdmin: boolean }) {
         if (!cancelled) setResult(data);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) message.error(e.message);
+        if (!cancelled && e instanceof Error) toast.error(e.message);
       })
       .finally(() => {
         if (!cancelled) {
@@ -765,83 +833,82 @@ function CrossProjectTab({ isAdmin }: { isAdmin: boolean }) {
     void runQuery();
   };
 
-  const columns: ColumnsType<CrossProjectRow> = [
-    {
-      title: '项目',
-      dataIndex: 'name',
-      key: 'name',
-    },
-    {
-      title: '当前预算',
-      dataIndex: 'currentBudget',
-      key: 'currentBudget',
-      align: 'right',
-      render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-    },
-    {
-      title: '已支出',
-      dataIndex: 'paid',
-      key: 'paid',
-      align: 'right',
-      render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-    },
-    {
-      title: '总占用',
-      dataIndex: 'totalOccupied',
-      key: 'totalOccupied',
-      align: 'right',
-      render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-    },
-    {
-      title: '结余',
-      dataIndex: 'balance',
-      key: 'balance',
-      align: 'right',
-      render: (v: string) => <MoneyText value={v} />,
-    },
-    {
-      title: '执行率',
-      dataIndex: 'executionRate',
-      key: 'executionRate',
-      align: 'right',
-      width: 120,
-      render: (rate: number | null) => renderRate(rate),
-    },
-  ];
-
   if (!isAdmin) {
     return (
-      <Alert
-        type="warning"
-        showIcon
-        message="仅预算管理员可访问"
-        description="跨项目统计(§11.5)仅 BUDGET_ADMIN 可执行。"
-      />
+      <Alert variant="warning">
+        <AlertTitle>仅预算管理员可访问</AlertTitle>
+        <AlertDescription>跨项目统计(§11.5)仅 BUDGET_ADMIN 可执行。</AlertDescription>
+      </Alert>
     );
   }
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Space>
-        <Button type="primary" loading={loading} onClick={handleRefresh}>
-          刷新
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={handleRefresh} disabled={loading}>
+          <RotateCcw />
+          {loading ? '刷新中…' : '刷新'}
         </Button>
-      </Space>
+      </div>
 
-      <Alert
-        type="info"
-        showIcon
-        message="跨项目汇总管理员可见的全部项目(非归档),同名科目不合并(§11.5)。"
-      />
+      <Alert variant="info">
+        <AlertDescription>
+          跨项目汇总管理员可见的全部项目(非归档),同名科目不合并(§11.5)。
+        </AlertDescription>
+      </Alert>
 
-      <Table<CrossProjectRow>
-        rowKey="projectId"
-        loading={loading}
-        dataSource={result?.projects ?? []}
-        columns={columns}
-        pagination={{ pageSize: 10, showSizeChanger: true }}
-        locale={{ emptyText: hasQueried ? '暂无项目' : '点击"刷新"加载' }}
-      />
-    </Space>
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>项目</TableHead>
+              <TableHead className="text-right">当前预算</TableHead>
+              <TableHead className="text-right">已支出</TableHead>
+              <TableHead className="text-right">总占用</TableHead>
+              <TableHead className="text-right">结余</TableHead>
+              <TableHead className="w-28 text-right">执行率</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <TableRow key={i} className="hover:bg-transparent">
+                  <TableCell colSpan={6}>
+                    <Skeleton className="h-6 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (result?.projects.length ?? 0) === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                  {hasQueried ? '暂无项目' : '点击"刷新"加载'}
+                </TableCell>
+              </TableRow>
+            ) : (
+              result?.projects.map((r) => (
+                <TableRow key={r.projectId}>
+                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell>
+                    <MoneyText value={r.currentBudget} riskOnNegative={false} />
+                  </TableCell>
+                  <TableCell>
+                    <MoneyText value={r.paid} riskOnNegative={false} />
+                  </TableCell>
+                  <TableCell>
+                    <MoneyText value={r.totalOccupied} riskOnNegative={false} />
+                  </TableCell>
+                  <TableCell>
+                    <MoneyText value={r.balance} />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {renderRate(r.executionRate)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
   );
 }

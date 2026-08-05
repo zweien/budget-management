@@ -1,41 +1,68 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import {
-  Alert,
-  Button,
-  Descriptions,
-  Drawer,
-  Empty,
-  Modal,
-  Result,
-  Select,
-  Skeleton,
-  Space,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { format } from 'date-fns';
+import { Plus, Sparkles, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
+import { cn } from '@/lib/utils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/layout/empty-state';
+import { Label } from '@/components/ui/label';
 import { MoneyText } from '@/components/ui/MoneyText';
-
-const { Title, Text } = Typography;
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 
 // ------------------------------------------------------------
 // 枚举(本地定义,不引 @prisma/client)。
 // ------------------------------------------------------------
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  DRAFT: { label: '草稿', color: 'default' },
-  PENDING: { label: '待审批', color: 'processing' },
-  APPROVED: { label: '已通过', color: 'success' },
-  REJECTED: { label: '已驳回', color: 'error' },
-  WITHDRAWN: { label: '已撤回', color: 'default' },
+const STATUS_LABEL: Record<string, string> = {
+  DRAFT: '草稿',
+  PENDING: '待审批',
+  APPROVED: '已通过',
+  REJECTED: '已驳回',
+  WITHDRAWN: '已撤回',
+};
+
+/** Badge 语义色遵循 DESIGN.md。 */
+const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'error' | 'outline'> = {
+  DRAFT: 'secondary',
+  PENDING: 'warning',
+  APPROVED: 'success',
+  REJECTED: 'error',
+  WITHDRAWN: 'outline',
 };
 
 // ------------------------------------------------------------
@@ -117,6 +144,9 @@ interface SubjectNode {
 let keySeq = 0;
 const genKey = () => `line-${++keySeq}`;
 
+/** 新增科目 Select 哨兵值。 */
+const NEW_SUBJECT = '__NEW__';
+
 function yearOptions(): number[] {
   const now = new Date().getFullYear();
   return [now, now - 1, now - 2, now - 3, now - 4];
@@ -124,8 +154,8 @@ function yearOptions(): number[] {
 
 function formatDateTime(s: string | null): string {
   if (!s) return '—';
-  const d = dayjs(s);
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—';
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '—' : format(d, 'yyyy-MM-dd HH:mm');
 }
 
 /** 字符串金额 → 显示带正负号(用于明细摘要)。 */
@@ -135,9 +165,18 @@ function signedAmount(v: string): string {
   return n >= 0 ? `+${n.toFixed(2)}` : n.toFixed(2);
 }
 
+const emptyLine = (): EditLine => ({
+  key: genKey(),
+  subjectId: null,
+  isNew: false,
+  newName: '',
+  newParentId: null,
+  totalAdjustment: '',
+  annualAdjustment: '',
+});
+
 export default function AdjustmentsPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const projectId = params.id;
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
@@ -158,31 +197,17 @@ export default function AdjustmentsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   // 科目全树(用于新增科目的父节点下拉,只取非叶)。
   const [subjectTree, setSubjectTree] = useState<SubjectNode[]>([]);
-  // 调整原因用原生 textarea(非受控 + ref):AntD Input.TextArea 与中文输入法冲突,
-  // 原生元素无此问题。
-  const totalReasonRef = useRef<string>('');
-  const annualReasonRef = useRef<string>('');
-  const totalReasonInputEl = useRef<HTMLTextAreaElement | null>(null);
-  const annualReasonInputEl = useRef<HTMLTextAreaElement | null>(null);
+  // 调整原因:原生受控 textarea(React 受控原生元素无中文输入法问题,
+  // 历史问题源于 antd TextArea 的内部重格式化)。
+  const [totalReason, setTotalReason] = useState('');
+  const [annualReason, setAnnualReason] = useState('');
 
-  /** 设置两个原因值(同步 ref + textarea DOM)。 */
-  const setReasonValues = (total: string, annual: string) => {
-    totalReasonRef.current = total;
-    annualReasonRef.current = annual;
-    if (totalReasonInputEl.current) totalReasonInputEl.current.value = total;
-    if (annualReasonInputEl.current) annualReasonInputEl.current.value = annual;
-  };
-
-  /** 事件中写 ref(lint react-hooks/refs 要求通过函数写,不在 JSX 内联直接赋值)。 */
-  const onTotalReasonChange = (v: string) => {
-    totalReasonRef.current = v;
-  };
-  const onAnnualReasonChange = (v: string) => {
-    annualReasonRef.current = v;
-  };
-
-  // 只读明细 Drawer。
+  // 只读明细 Sheet。
   const [detailTarget, setDetailTarget] = useState<AdjustmentRow | null>(null);
+  // 删除确认。
+  const [deleteTarget, setDeleteTarget] = useState<AdjustmentRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   /** 初始预算是否已生效(发起调整的前提)。 */
   const isEffective = budgetStatus === 'APPROVED';
@@ -235,7 +260,7 @@ export default function AdjustmentsPage() {
         setBaseline(baseRes.baseline);
       }
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     }
   };
 
@@ -260,7 +285,7 @@ export default function AdjustmentsPage() {
       );
       setBaseline(b);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setBaselineLoading(false);
     }
@@ -274,7 +299,7 @@ export default function AdjustmentsPage() {
       );
       setSubjectTree(subjects);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     }
   };
 
@@ -294,26 +319,18 @@ export default function AdjustmentsPage() {
     setEditingId(null);
     const y = new Date().getFullYear();
     setFormYear(y);
-    setReasonValues('', '');
+    setTotalReason('');
+    setAnnualReason('');
     await Promise.all([loadBaseline(y), loadSubjectTree()]);
-    setFormLines([
-      {
-        key: genKey(),
-        subjectId: null,
-        isNew: false,
-        newName: '',
-        newParentId: null,
-        totalAdjustment: '',
-        annualAdjustment: '',
-      },
-    ]);
+    setFormLines([emptyLine()]);
     setMode('form');
   };
 
   const openEdit = async (row: AdjustmentRow) => {
     setEditingId(row.id);
     setFormYear(row.year);
-    setReasonValues(row.totalReason ?? '', row.annualReason ?? '');
+    setTotalReason(row.totalReason ?? '');
+    setAnnualReason(row.annualReason ?? '');
     await Promise.all([loadBaseline(row.year), loadSubjectTree()]);
     setFormLines(
       row.lines.map((l) => ({
@@ -339,18 +356,7 @@ export default function AdjustmentsPage() {
   };
 
   const addLine = () => {
-    setFormLines((prev) => [
-      ...prev,
-      {
-        key: genKey(),
-        subjectId: null,
-        isNew: false,
-        newName: '',
-        newParentId: null,
-        totalAdjustment: '',
-        annualAdjustment: '',
-      },
-    ]);
+    setFormLines((prev) => [...prev, emptyLine()]);
   };
 
   const removeLine = (key: string) => {
@@ -362,7 +368,6 @@ export default function AdjustmentsPage() {
     await loadBaseline(y);
   };
 
-  /** 构建并校验 payload。 */
   /**
    * 构建并校验 payload。
    * @param requireBalance 是否强制双维度收支平衡(草稿=false,提交=true)。
@@ -416,8 +421,8 @@ export default function AdjustmentsPage() {
       ok: true,
       payload: {
         year: formYear,
-        totalReason: totalReasonRef.current.trim() || null,
-        annualReason: annualReasonRef.current.trim() || null,
+        totalReason: totalReason.trim() || null,
+        annualReason: annualReason.trim() || null,
         lines,
       },
     };
@@ -427,7 +432,7 @@ export default function AdjustmentsPage() {
     // 草稿:不校验平衡,允许保存未完成的中间态。
     const { ok, payload, error } = buildPayload(false);
     if (!ok) {
-      message.warning(error);
+      toast.warning(error);
       return;
     }
     setSubmitting(true);
@@ -443,12 +448,12 @@ export default function AdjustmentsPage() {
           body: JSON.stringify(payload),
         });
       }
-      message.success('已保存草稿');
+      toast.success('已保存草稿');
       setMode('list');
       setEditingId(null);
       await reload();
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setSubmitting(false);
     }
@@ -458,7 +463,7 @@ export default function AdjustmentsPage() {
     // 提交:强制双维度收支平衡。
     const { ok, payload, error } = buildPayload(true);
     if (!ok) {
-      message.warning(error);
+      toast.warning(error);
       return;
     }
     setSubmitting(true);
@@ -470,11 +475,11 @@ export default function AdjustmentsPage() {
       await apiFetch(`/api/projects/${projectId}/adjustments/${adjustment.id}/submit`, {
         method: 'POST',
       });
-      message.success('已提交审批,可在审批中心查看进度');
+      toast.success('已提交审批,可在审批中心查看进度');
       setMode('list');
       await reload();
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setSubmitting(false);
     }
@@ -485,36 +490,31 @@ export default function AdjustmentsPage() {
       await apiFetch(`/api/projects/${projectId}/adjustments/${row.id}/submit`, {
         method: 'POST',
       });
-      message.success('已提交审批');
+      toast.success('已提交审批');
       await reload();
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     }
   };
 
-  const deleteRow = (row: AdjustmentRow) => {
-    Modal.confirm({
-      title: '删除调整草稿',
-      content: '确认删除该调整草稿?此操作不可撤销。',
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await apiFetch(`/api/projects/${projectId}/adjustments/${row.id}`, {
-            method: 'DELETE',
-          });
-          message.success('已删除草稿');
-          await reload();
-        } catch (e) {
-          if (e instanceof Error) message.error(e.message);
-        }
-      },
-    });
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/adjustments/${deleteTarget.id}`, {
+        method: 'DELETE',
+      });
+      toast.success('已删除草稿');
+      setDeleteTarget(null);
+      await reload();
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   /** 导出该次调整为 docx(按模板填充)。dim=total 总预算维度 / annual 年度维度。 */
-  const [exporting, setExporting] = useState(false);
   const exportDocx = async (row: AdjustmentRow, dim: 'total' | 'annual') => {
     setExporting(true);
     try {
@@ -522,9 +522,9 @@ export default function AdjustmentsPage() {
         `/api/projects/${projectId}/adjustments/${row.id}/export?dim=${dim}`,
         dim === 'total' ? '总预算调整.docx' : '年度预算调整.docx',
       );
-      message.success('已开始下载');
+      toast.success('已开始下载');
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setExporting(false);
     }
@@ -584,8 +584,9 @@ export default function AdjustmentsPage() {
   const handleAutoGenerate = () => {
     const t = generateReason('total');
     const a = generateReason('annual');
-    setReasonValues(t, a);
-    message.success(t || a ? '已生成调整原因说明,可继续编辑' : '当前调整无变动,未生成说明');
+    setTotalReason(t);
+    setAnnualReason(a);
+    toast.success(t || a ? '已生成调整原因说明,可继续编辑' : '当前调整无变动,未生成说明');
   };
 
   // ------------------------------------------------------------
@@ -608,32 +609,19 @@ export default function AdjustmentsPage() {
   // ------------------------------------------------------------
   if (loading) {
     return (
-      <>
-        <Title level={3} style={{ marginTop: 0 }}>
-          预算调整
-        </Title>
-        <Skeleton active />
-      </>
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
     );
   }
 
   if (fatal || !project) {
     return (
-      <>
-        <Title level={3} style={{ marginTop: 0 }}>
-          预算调整
-        </Title>
-        <Result
-          status="warning"
-          title="加载失败"
-          subTitle={fatal}
-          extra={
-            <Button type="primary" onClick={() => router.push(`/projects/${projectId}`)}>
-              返回项目详情
-            </Button>
-          }
-        />
-      </>
+      <Alert variant="error">
+        <AlertTitle>加载失败</AlertTitle>
+        <AlertDescription>{fatal}</AlertDescription>
+      </Alert>
     );
   }
 
@@ -651,518 +639,515 @@ export default function AdjustmentsPage() {
       return (base + adj).toFixed(2);
     };
 
-    const lineCols: ColumnsType<EditLine> = [
-      {
-        title: '科目',
-        dataIndex: 'subjectId',
-        width: 200,
-        render: (_: unknown, r) =>
-          r.isNew ? (
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Space size={4}>
-                <Tag color="orange">新</Tag>
-                <input
-                  style={{
-                    flex: 1,
-                    padding: '2px 8px',
-                    border: '1px solid #d9d9d9',
-                    borderRadius: 4,
-                    minWidth: 90,
-                  }}
-                  placeholder="新科目名称"
-                  value={r.newName}
-                  onChange={(e) => updateLine(r.key, { newName: e.target.value })}
-                />
-              </Space>
-              <Select
-                size="small"
-                style={{ width: '100%' }}
-                placeholder="选择父节点(非叶)"
-                value={r.newParentId}
-                onChange={(v) => updateLine(r.key, { newParentId: v })}
-                options={parentOptions}
-              />
-            </Space>
-          ) : (
-            <Select
-              size="small"
-              style={{ width: '100%' }}
-              placeholder="选择科目"
-              showSearch
-              optionFilterProp="label"
-              value={r.subjectId}
-              onChange={(v) => {
-                if (v === '__NEW__') {
-                  updateLine(r.key, { isNew: true, subjectId: null });
-                } else {
-                  updateLine(r.key, { subjectId: v });
-                }
-              }}
-              options={[
-                ...baseline.map((s) => ({ value: s.subjectId, label: s.name })),
-                { value: '__NEW__', label: '➕ 新增科目...' },
-              ]}
-            />
-          ),
-      },
-      {
-        title: '原总预算',
-        key: 'origTotal',
-        width: 110,
-        align: 'right',
-        render: (_: unknown, r) => (
-          <Text type="secondary">
-            {r.isNew
-              ? '0.00'
-              : r.subjectId
-                ? (baselineMap.get(r.subjectId)?.totalCurrent ?? '0.00')
-                : '—'}
-          </Text>
-        ),
-      },
-      {
-        title: '总预算调整额',
-        key: 'totalAdj',
-        width: 130,
-        render: (_: unknown, r) => (
-          <AmountInput
-            size="small"
-            allowNegative
-            value={r.totalAdjustment}
-            onChange={(v) => updateLine(r.key, { totalAdjustment: v ?? '' })}
-          />
-        ),
-      },
-      {
-        title: '调整后总预算',
-        key: 'afterTotal',
-        width: 120,
-        align: 'right',
-        render: (_: unknown, r) => (
-          <Text strong>
-            {r.isNew
-              ? (Number(r.totalAdjustment) || 0).toFixed(2)
-              : r.subjectId
-                ? afterTotal(r)
-                : '—'}
-          </Text>
-        ),
-      },
-      {
-        title: '原年度预算',
-        key: 'origAnnual',
-        width: 110,
-        align: 'right',
-        render: (_: unknown, r) => (
-          <Text type="secondary">
-            {r.isNew
-              ? '0.00'
-              : r.subjectId
-                ? (baselineMap.get(r.subjectId)?.annualCurrent ?? '0.00')
-                : '—'}
-          </Text>
-        ),
-      },
-      {
-        title: '年度调整额',
-        key: 'annualAdj',
-        width: 130,
-        render: (_: unknown, r) => (
-          <AmountInput
-            size="small"
-            allowNegative
-            value={r.annualAdjustment}
-            onChange={(v) => updateLine(r.key, { annualAdjustment: v ?? '' })}
-          />
-        ),
-      },
-      {
-        title: '调整后年度预算',
-        key: 'afterAnnual',
-        width: 130,
-        align: 'right',
-        render: (_: unknown, r) => (
-          <Text strong>
-            {r.isNew
-              ? (Number(r.annualAdjustment) || 0).toFixed(2)
-              : r.subjectId
-                ? afterAnnual(r)
-                : '—'}
-          </Text>
-        ),
-      },
-      {
-        title: '',
-        key: 'op',
-        width: 60,
-        render: (_: unknown, r) => (
-          <Button
-            size="small"
-            type="link"
-            danger
-            onClick={() => removeLine(r.key)}
-            disabled={formLines.length <= 1}
-          >
-            删除
-          </Button>
-        ),
-      },
-    ];
+    const sumOrigTotal = formLines.reduce(
+      (a, l) => a + (l.isNew ? 0 : Number(baselineMap.get(l.subjectId ?? '')?.totalCurrent ?? 0)),
+      0,
+    );
+    const sumOrigAnnual = formLines.reduce(
+      (a, l) => a + (l.isNew ? 0 : Number(baselineMap.get(l.subjectId ?? '')?.annualCurrent ?? 0)),
+      0,
+    );
 
     return (
-      <>
-        <Title level={3} style={{ marginTop: 0 }}>
-          {editingId ? '编辑调整单' : '发起预算调整'} — {project.name}
-        </Title>
-        <Space style={{ marginBottom: 16 }}>
-          <Button onClick={cancelForm}>取消</Button>
-        </Space>
-
-        <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
-          <Descriptions.Item label="调整年度">
-            <Select<number>
-              style={{ width: 160 }}
-              value={formYear}
-              onChange={handleYearChange}
-              loading={baselineLoading}
-              options={yearOptions().map((y) => ({ label: `${y} 年`, value: y }))}
-            />
-          </Descriptions.Item>
-          <Descriptions.Item label="调整原因">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Space>
-                <Button size="small" type="dashed" onClick={handleAutoGenerate}>
-                  自动生成原因说明
-                </Button>
-                <Text type="secondary">根据当前调整明细自动生成,生成后可手动编辑</Text>
-              </Space>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                总预算调整原因:
-              </Text>
-              {/* 原生 textarea(非受控 + ref):AntD Input.TextArea 与中文输入法有冲突,
-                  原生元素无此问题;min-height 保证可展开。 */}
-              <textarea
-                style={{
-                  width: 480,
-                  minHeight: 60,
-                  padding: '4px 11px',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: 6,
-                  resize: 'vertical',
-                }}
-                placeholder="总预算调整原因说明(导出总预算调整文档用)"
-                // eslint-disable-next-line react-hooks/refs
-                defaultValue={totalReasonRef.current}
-                ref={totalReasonInputEl}
-                onChange={(e) => onTotalReasonChange(e.target.value)}
-              />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                年度预算调整原因:
-              </Text>
-              <textarea
-                style={{
-                  width: 480,
-                  minHeight: 60,
-                  padding: '4px 11px',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: 6,
-                  resize: 'vertical',
-                }}
-                placeholder="年度预算调整原因说明(导出年度预算调整文档用)"
-                // eslint-disable-next-line react-hooks/refs
-                defaultValue={annualReasonRef.current}
-                ref={annualReasonInputEl}
-                onChange={(e) => onAnnualReasonChange(e.target.value)}
-              />
-            </Space>
-          </Descriptions.Item>
-        </Descriptions>
-
-        <div style={{ marginBottom: 8 }}>
-          <Text strong>调整明细</Text>
-          <Button size="small" type="dashed" style={{ marginLeft: 12 }} onClick={addLine}>
-            + 新增科目行
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold tracking-[-0.3px]">
+            {editingId ? '编辑调整单' : '发起预算调整'}
+          </h2>
+          <Button variant="outline" onClick={cancelForm}>
+            取消
           </Button>
         </div>
-        <Table<EditLine>
-          rowKey="key"
-          size="small"
-          pagination={false}
-          dataSource={formLines}
-          columns={lineCols}
-          scroll={{ x: 'max-content' }}
-          locale={{ emptyText: '请点击「新增科目行」' }}
-          style={{ marginBottom: 16 }}
-          summary={() => {
-            const sum = (sel: 'totalAdjustment' | 'annualAdjustment') =>
-              formLines.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
-            const sumOrigTotal = formLines.reduce(
-              (a, l) =>
-                a + (l.isNew ? 0 : Number(baselineMap.get(l.subjectId ?? '')?.totalCurrent ?? 0)),
-              0,
-            );
-            const sumOrigAnnual = formLines.reduce(
-              (a, l) =>
-                a + (l.isNew ? 0 : Number(baselineMap.get(l.subjectId ?? '')?.annualCurrent ?? 0)),
-              0,
-            );
-            const totalAdj = sum('totalAdjustment');
-            const annualAdj = sum('annualAdjustment');
-            const money = (n: number) => n.toFixed(2);
-            const red = { color: '#cf1322' };
-            return (
-              <Table.Summary fixed>
-                <Table.Summary.Row>
-                  <Table.Summary.Cell index={0}>
-                    <Text strong>合计</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={1} align="right">
-                    <Text strong>{money(sumOrigTotal)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right">
-                    <Text strong style={Math.abs(totalAdj) > 0.001 ? red : undefined}>
-                      {money(totalAdj)}
-                    </Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} align="right">
-                    <Text strong>{money(sumOrigTotal + totalAdj)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right">
-                    <Text strong>{money(sumOrigAnnual)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} align="right">
-                    <Text strong style={Math.abs(annualAdj) > 0.001 ? red : undefined}>
-                      {money(annualAdj)}
-                    </Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={6} align="right">
-                    <Text strong>{money(sumOrigAnnual + annualAdj)}</Text>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={7} />
-                </Table.Summary.Row>
-              </Table.Summary>
-            );
-          }}
-        />
 
-        <Alert
-          style={{ marginBottom: 16 }}
-          type={summary.balanced ? 'success' : 'error'}
-          showIcon
-          message={
-            <span>
-              汇总:总预算调整合计{' '}
-              <MoneyText value={summary.totalSum.toFixed(2)} riskOnNegative={false} /> ·
-              年度调整合计 <MoneyText value={summary.annualSum.toFixed(2)} riskOnNegative={false} />
-              {summary.balanced
-                ? ' · 两维度均已平衡 ✓ 可提交'
-                : ' · 调整合计须为 0 才可提交(原预算=调整后预算)'}
-            </span>
-          }
-        />
+        {/* 年度 + 原因(原生受控 textarea,无输入法问题) */}
+        <div className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-l2 lg:grid-cols-[200px_1fr]">
+          <div className="grid content-start gap-1.5">
+            <Label>调整年度</Label>
+            <Select
+              value={String(formYear)}
+              onValueChange={(v) => void handleYearChange(Number(v))}
+              disabled={baselineLoading}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {yearOptions().map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y} 年
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Label>调整原因</Label>
+              <Button variant="outline" size="sm" onClick={handleAutoGenerate}>
+                <Sparkles />
+                自动生成原因说明
+              </Button>
+              <span className="text-xs text-mute">根据当前调整明细自动生成,生成后可手动编辑</span>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs font-normal text-muted-foreground">总预算调整原因</Label>
+              <Textarea
+                className="min-h-14 resize-y"
+                placeholder="总预算调整原因说明(导出总预算调整文档用)"
+                value={totalReason}
+                onChange={(e) => setTotalReason(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs font-normal text-muted-foreground">年度预算调整原因</Label>
+              <Textarea
+                className="min-h-14 resize-y"
+                placeholder="年度预算调整原因说明(导出年度预算调整文档用)"
+                value={annualReason}
+                onChange={(e) => setAnnualReason(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
 
-        <Space>
-          <Button type="primary" loading={submitting} onClick={handleSaveDraft}>
+        {/* 调整明细 */}
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">调整明细</h3>
+          <Button variant="outline" size="sm" onClick={addLine}>
+            <Plus />
+            新增科目行
+          </Button>
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="min-w-52">科目</TableHead>
+                <TableHead className="w-28 text-right">原总预算</TableHead>
+                <TableHead className="w-32">总预算调整额</TableHead>
+                <TableHead className="w-32 text-right">调整后总预算</TableHead>
+                <TableHead className="w-28 text-right">原年度预算</TableHead>
+                <TableHead className="w-32">年度调整额</TableHead>
+                <TableHead className="w-32 text-right">调整后年度预算</TableHead>
+                <TableHead className="w-14" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {formLines.map((r) => (
+                <TableRow key={r.key} className="hover:bg-transparent">
+                  <TableCell>
+                    {r.isNew ? (
+                      <div className="grid min-w-48 gap-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="warning">新</Badge>
+                          <input
+                            className="h-7 w-full min-w-24 rounded-md border border-input bg-card px-2 text-sm outline-none placeholder:text-mute focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                            placeholder="新科目名称"
+                            value={r.newName}
+                            onChange={(e) => updateLine(r.key, { newName: e.target.value })}
+                          />
+                        </div>
+                        <Select
+                          value={r.newParentId ?? undefined}
+                          onValueChange={(v) => updateLine(r.key, { newParentId: v })}
+                        >
+                          <SelectTrigger size="sm" className="w-full">
+                            <SelectValue placeholder="选择父节点(非叶)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {parentOptions.map((o) => (
+                              <SelectItem key={o.value} value={o.value}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <Select
+                        value={r.subjectId ?? undefined}
+                        onValueChange={(v) => {
+                          if (v === NEW_SUBJECT) {
+                            updateLine(r.key, { isNew: true, subjectId: null });
+                          } else {
+                            updateLine(r.key, { subjectId: v });
+                          }
+                        }}
+                      >
+                        <SelectTrigger size="sm" className="w-full min-w-40">
+                          <SelectValue placeholder="选择科目" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {baseline.map((s) => (
+                            <SelectItem key={s.subjectId} value={s.subjectId}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={NEW_SUBJECT}>➕ 新增科目...</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground tabular-nums">
+                    {r.isNew
+                      ? '0.00'
+                      : r.subjectId
+                        ? (baselineMap.get(r.subjectId)?.totalCurrent ?? '0.00')
+                        : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <AmountInput
+                      size="sm"
+                      allowNegative
+                      value={r.totalAdjustment}
+                      onChange={(v) => updateLine(r.key, { totalAdjustment: v ?? '' })}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">
+                    {r.isNew
+                      ? (Number(r.totalAdjustment) || 0).toFixed(2)
+                      : r.subjectId
+                        ? afterTotal(r)
+                        : '—'}
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground tabular-nums">
+                    {r.isNew
+                      ? '0.00'
+                      : r.subjectId
+                        ? (baselineMap.get(r.subjectId)?.annualCurrent ?? '0.00')
+                        : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <AmountInput
+                      size="sm"
+                      allowNegative
+                      value={r.annualAdjustment}
+                      onChange={(v) => updateLine(r.key, { annualAdjustment: v ?? '' })}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">
+                    {r.isNew
+                      ? (Number(r.annualAdjustment) || 0).toFixed(2)
+                      : r.subjectId
+                        ? afterAnnual(r)
+                        : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 text-mute hover:text-error-deep"
+                      aria-label="删除该行"
+                      onClick={() => removeLine(r.key)}
+                      disabled={formLines.length <= 1}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+            <TableFooter>
+              <TableRow className="hover:bg-transparent">
+                <TableCell className="font-semibold">合计</TableCell>
+                <TableCell className="text-right font-semibold tabular-nums">
+                  {sumOrigTotal.toFixed(2)}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    'text-right font-semibold tabular-nums',
+                    Math.abs(summary.totalSum) > 0.001 && 'text-error-deep',
+                  )}
+                >
+                  {summary.totalSum.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-right font-semibold tabular-nums">
+                  {(sumOrigTotal + summary.totalSum).toFixed(2)}
+                </TableCell>
+                <TableCell className="text-right font-semibold tabular-nums">
+                  {sumOrigAnnual.toFixed(2)}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    'text-right font-semibold tabular-nums',
+                    Math.abs(summary.annualSum) > 0.001 && 'text-error-deep',
+                  )}
+                >
+                  {summary.annualSum.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-right font-semibold tabular-nums">
+                  {(sumOrigAnnual + summary.annualSum).toFixed(2)}
+                </TableCell>
+                <TableCell />
+              </TableRow>
+            </TableFooter>
+          </Table>
+        </div>
+
+        <Alert variant={summary.balanced ? 'success' : 'error'}>
+          <AlertDescription>
+            汇总:总预算调整合计{' '}
+            <MoneyText
+              value={summary.totalSum.toFixed(2)}
+              riskOnNegative={false}
+              className="inline"
+            />{' '}
+            · 年度调整合计{' '}
+            <MoneyText
+              value={summary.annualSum.toFixed(2)}
+              riskOnNegative={false}
+              className="inline"
+            />
+            {summary.balanced
+              ? ' · 两维度均已平衡 ✓ 可提交'
+              : ' · 调整合计须为 0 才可提交(原预算=调整后预算)'}
+          </AlertDescription>
+        </Alert>
+
+        <div className="flex gap-2">
+          <Button variant="outline" disabled={submitting} onClick={handleSaveDraft}>
             保存草稿
           </Button>
-          <Button type="primary" loading={submitting} onClick={handleSaveAndSubmit}>
-            保存并提交
+          <Button disabled={submitting} onClick={handleSaveAndSubmit}>
+            {submitting ? '提交中…' : '保存并提交'}
           </Button>
-          <Button onClick={cancelForm}>取消</Button>
-        </Space>
-      </>
+          <Button variant="ghost" onClick={cancelForm}>
+            取消
+          </Button>
+        </div>
+      </div>
     );
   }
 
   // ============== 列表视图 ==============
-  const listCols: ColumnsType<AdjustmentRow> = [
-    {
-      title: '年度',
-      dataIndex: 'year',
-      width: 80,
-      render: (y: number) => `${y}`,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 100,
-      render: (s: string) => {
-        const meta = STATUS_META[s];
-        return meta ? <Tag color={meta.color}>{meta.label}</Tag> : <Tag>{s}</Tag>;
-      },
-    },
-    {
-      title: '明细摘要',
-      key: 'lines',
-      render: (_: unknown, row) => {
-        if (!row.lines?.length) return <Text type="secondary">—</Text>;
-        return (
-          <Space size={4} wrap>
-            {row.lines.slice(0, 2).map((l) => (
-              <span key={l.id}>
-                <Text strong>{subjectName(l.subjectId)}</Text>
-                <Text type="secondary"> 总{signedAmount(l.totalAdjustment)}</Text>
-                <Text type="secondary"> 年{signedAmount(l.annualAdjustment)}</Text>
-              </span>
-            ))}
-            {row.lines.length > 2 && <Text type="secondary">+{row.lines.length - 2} 行</Text>}
-          </Space>
-        );
-      },
-    },
-    {
-      title: '原因',
-      key: 'reason',
-      ellipsis: true,
-      render: (_: unknown, row) => {
-        const parts: string[] = [];
-        if (row.totalReason) parts.push(`总:${row.totalReason}`);
-        if (row.annualReason) parts.push(`年:${row.annualReason}`);
-        return parts.length ? <span>{parts.join(' / ')}</span> : <Text type="secondary">—</Text>;
-      },
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'createdAt',
-      width: 150,
-      render: (d: string) => formatDateTime(d),
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 340,
-      fixed: 'right',
-      render: (_: unknown, row) => (
-        <Space size={4}>
-          {row.status === 'DRAFT' && (
-            <>
-              <Button size="small" onClick={() => void openEdit(row)}>
-                编辑
-              </Button>
-              <Button size="small" type="primary" onClick={() => void submitRow(row)}>
-                提交审批
-              </Button>
-              <Button size="small" type="link" danger onClick={() => deleteRow(row)}>
-                删除
-              </Button>
-            </>
-          )}
-          {row.status === 'PENDING' && <Text type="secondary">审批中</Text>}
-          <Button size="small" type="link" onClick={() => setDetailTarget(row)}>
-            明细
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            loading={exporting}
-            onClick={() => void exportDocx(row, 'total')}
-          >
-            导出总预算
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            loading={exporting}
-            onClick={() => void exportDocx(row, 'annual')}
-          >
-            导出年度
-          </Button>
-        </Space>
-      ),
-    },
-  ];
-
   return (
-    <>
-      <Title level={3} style={{ marginTop: 0 }}>
-        预算调整 — {project.name}
-      </Title>
-
-      <Space style={{ marginBottom: 16 }}>
-        <Button onClick={() => router.push(`/projects/${projectId}`)}>返回项目详情</Button>
-        <Button type="primary" onClick={() => void openCreate()} disabled={!isEffective}>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold tracking-[-0.3px]">调整单列表</h2>
+        <Button onClick={() => void openCreate()} disabled={!isEffective}>
+          <Plus />
           发起调整
         </Button>
-      </Space>
+      </div>
 
       {!isEffective && (
-        <Alert
-          style={{ marginBottom: 16 }}
-          type="warning"
-          showIcon
-          message="初始预算尚未生效,暂无法发起预算调整"
-          description="请先完成初始预算编制并审批通过,再进行预算调整。"
-        />
+        <Alert variant="warning">
+          <AlertTitle>初始预算尚未生效,暂无法发起预算调整</AlertTitle>
+          <AlertDescription>请先完成初始预算编制并审批通过,再进行预算调整。</AlertDescription>
+        </Alert>
       )}
 
-      <Table<AdjustmentRow>
-        rowKey="id"
-        size="small"
-        pagination={false}
-        dataSource={adjustments}
-        columns={listCols}
-        scroll={{ x: 'max-content' }}
-        locale={{
-          emptyText: (
-            <Empty description={isEffective ? '暂无调整单,点击「发起调整」' : '暂无调整单'} />
-          ),
-        }}
-      />
+      {adjustments.length === 0 ? (
+        <EmptyState title={isEffective ? '暂无调整单,点击「发起调整」' : '暂无调整单'} />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-20">年度</TableHead>
+                <TableHead className="w-24">状态</TableHead>
+                <TableHead>明细摘要</TableHead>
+                <TableHead>原因</TableHead>
+                <TableHead className="w-40">创建时间</TableHead>
+                <TableHead className="w-80">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {adjustments.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="tabular-nums">{row.year}</TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS_BADGE[row.status] ?? 'secondary'}>
+                      {STATUS_LABEL[row.status] ?? row.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {!row.lines?.length ? (
+                      <span className="text-mute">—</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+                        {row.lines.slice(0, 2).map((l) => (
+                          <span key={l.id}>
+                            <span className="font-medium">{subjectName(l.subjectId)}</span>
+                            <span className="text-muted-foreground tabular-nums">
+                              {' '}
+                              总{signedAmount(l.totalAdjustment)} 年
+                              {signedAmount(l.annualAdjustment)}
+                            </span>
+                          </span>
+                        ))}
+                        {row.lines.length > 2 && (
+                          <span className="text-mute">+{row.lines.length - 2} 行</span>
+                        )}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell
+                    className="max-w-48 truncate"
+                    title={[
+                      row.totalReason && `总:${row.totalReason}`,
+                      row.annualReason && `年:${row.annualReason}`,
+                    ]
+                      .filter(Boolean)
+                      .join(' / ')}
+                  >
+                    {row.totalReason || row.annualReason ? (
+                      <span className="text-sm">
+                        {[
+                          row.totalReason && `总:${row.totalReason}`,
+                          row.annualReason && `年:${row.annualReason}`,
+                        ]
+                          .filter(Boolean)
+                          .join(' / ')}
+                      </span>
+                    ) : (
+                      <span className="text-mute">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{formatDateTime(row.createdAt)}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {row.status === 'DRAFT' && (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => void openEdit(row)}>
+                            编辑
+                          </Button>
+                          <Button size="sm" onClick={() => void submitRow(row)}>
+                            提交审批
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-error-deep hover:bg-error-soft"
+                            onClick={() => setDeleteTarget(row)}
+                          >
+                            删除
+                          </Button>
+                        </>
+                      )}
+                      {row.status === 'PENDING' && (
+                        <span className="px-2 text-sm text-mute">审批中</span>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={() => setDetailTarget(row)}>
+                        明细
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={exporting}
+                        onClick={() => void exportDocx(row, 'total')}
+                      >
+                        导出总预算
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={exporting}
+                        onClick={() => void exportDocx(row, 'annual')}
+                      >
+                        导出年度
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
-      <Drawer
-        title="调整单明细"
-        width={680}
-        open={!!detailTarget}
-        onClose={() => setDetailTarget(null)}
-      >
-        {detailTarget && (
-          <>
-            <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="年度">{detailTarget.year}</Descriptions.Item>
-              <Descriptions.Item label="状态">
-                <Tag color={STATUS_META[detailTarget.status]?.color}>
-                  {STATUS_META[detailTarget.status]?.label ?? detailTarget.status}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="总预算调整原因">
-                {detailTarget.totalReason ?? <Text type="secondary">—</Text>}
-              </Descriptions.Item>
-              <Descriptions.Item label="年度预算调整原因">
-                {detailTarget.annualReason ?? <Text type="secondary">—</Text>}
-              </Descriptions.Item>
-              <Descriptions.Item label="创建时间">
-                {formatDateTime(detailTarget.createdAt)}
-              </Descriptions.Item>
-            </Descriptions>
-            <Table<AdjustmentLine>
-              rowKey="id"
-              size="small"
-              pagination={false}
-              dataSource={detailTarget.lines}
-              scroll={{ x: 'max-content' }}
-              columns={[
-                {
-                  title: '科目',
-                  dataIndex: 'subjectId',
-                  render: (v: string) => subjectName(v),
-                },
-                {
-                  title: '总预算调整',
-                  dataIndex: 'totalAdjustment',
-                  align: 'right',
-                  render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-                },
-                {
-                  title: '年度预算调整',
-                  dataIndex: 'annualAdjustment',
-                  align: 'right',
-                  render: (v: string) => <MoneyText value={v} riskOnNegative={false} />,
-                },
-              ]}
-            />
-          </>
-        )}
-      </Drawer>
-    </>
+      {/* 删除确认 */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除调整草稿</AlertDialogTitle>
+            <AlertDialogDescription>确认删除该调整草稿?此操作不可撤销。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDelete();
+              }}
+            >
+              {deleting ? '删除中…' : '删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 只读明细 Sheet */}
+      <Sheet open={!!detailTarget} onOpenChange={(open) => !open && setDetailTarget(null)}>
+        <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-6 sm:max-w-xl">
+          <SheetHeader className="p-0 pb-4">
+            <SheetTitle>调整单明细</SheetTitle>
+          </SheetHeader>
+          {detailTarget ? (
+            <div className="space-y-4">
+              <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border">
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">年度</dt>
+                  <dd className="mt-1 text-sm tabular-nums">{detailTarget.year}</dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">状态</dt>
+                  <dd className="mt-1">
+                    <Badge variant={STATUS_BADGE[detailTarget.status] ?? 'secondary'}>
+                      {STATUS_LABEL[detailTarget.status] ?? detailTarget.status}
+                    </Badge>
+                  </dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">总预算调整原因</dt>
+                  <dd className="mt-1 text-sm whitespace-pre-wrap">
+                    {detailTarget.totalReason ?? <span className="text-mute">—</span>}
+                  </dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">年度预算调整原因</dt>
+                  <dd className="mt-1 text-sm whitespace-pre-wrap">
+                    {detailTarget.annualReason ?? <span className="text-mute">—</span>}
+                  </dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">创建时间</dt>
+                  <dd className="mt-1 text-sm tabular-nums">
+                    {formatDateTime(detailTarget.createdAt)}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="overflow-hidden rounded-lg border border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>科目</TableHead>
+                      <TableHead className="text-right">总预算调整</TableHead>
+                      <TableHead className="text-right">年度预算调整</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {detailTarget.lines.map((l) => (
+                      <TableRow key={l.id}>
+                        <TableCell>{subjectName(l.subjectId)}</TableCell>
+                        <TableCell>
+                          <MoneyText value={l.totalAdjustment} riskOnNegative={false} />
+                        </TableCell>
+                        <TableCell>
+                          <MoneyText value={l.annualAdjustment} riskOnNegative={false} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }

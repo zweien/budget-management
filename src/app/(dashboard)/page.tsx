@@ -1,28 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  Col,
-  Empty,
-  Row,
-  Skeleton,
-  Space,
-  Spin,
-  Statistic,
-  Table,
-  Tag,
-  Typography,
-} from 'antd';
-import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
+import { ArrowRight, Inbox } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api/client';
+import { PageHeader } from '@/components/layout/page-header';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/layout/empty-state';
 import { MoneyText } from '@/components/ui/MoneyText';
-
-const { Title, Text } = Typography;
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 interface CurrentUser {
   id: string;
@@ -79,6 +76,11 @@ function renderRate(rate: number | null | undefined): string {
   return `${(rate * 100).toFixed(2)}%`;
 }
 
+/** 指标数值:display-md 字级 + tabular-nums(DESIGN.md 负字距标题字重 600)。 */
+function MetricValue({ children }: { children: React.ReactNode }) {
+  return <p className="mt-2 text-display-md tabular-nums">{children}</p>;
+}
+
 export default function DashboardPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
@@ -100,36 +102,39 @@ export default function DashboardPage() {
     };
   }, []);
 
-  if (loadingUser) return <Skeleton active />;
+  if (loadingUser) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
   if (!currentUser) {
     return (
-      <Alert
-        type="warning"
-        showIcon
-        message="未登录"
-        description="无法获取当前用户身份,请刷新页面或在右上角切换用户。"
-      />
+      <Alert variant="warning">
+        <AlertTitle>未登录</AlertTitle>
+        <AlertDescription>无法获取当前用户身份,请刷新页面或在右上角切换用户。</AlertDescription>
+      </Alert>
     );
   }
 
   const isAdmin = currentUser.role === 'BUDGET_ADMIN';
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Space direction="vertical" size={0}>
-        <Title level={3} style={{ margin: 0 }}>
-          工作台
-        </Title>
-        <Text type="secondary">
-          欢迎回来,{currentUser.name}(§12.1 项目概览 / 预算指标 / 风险预警 / 待办)
-        </Text>
-      </Space>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Dashboard"
+        title="工作台"
+        description={`欢迎回来,${currentUser.name}(§12.1 项目概览 / 预算指标 / 风险预警 / 待办)`}
+      />
 
       <ProjectOverview isAdmin={isAdmin} />
       <BudgetMetricCards isAdmin={isAdmin} />
       <RiskWarnings isAdmin={isAdmin} />
       {isAdmin ? <PendingApprovals /> : null}
-    </Space>
+    </div>
   );
 }
 
@@ -167,31 +172,40 @@ function ProjectOverview({ isAdmin }: { isAdmin: boolean }) {
     };
   }, [isAdmin]);
 
-  const count = rows.length;
-
   return (
-    <Card size="small" title="项目概览" loading={loading}>
-      {error ? (
-        <Alert type="error" message={error} />
-      ) : (
-        <Space direction="vertical" size="small" style={{ width: '100%' }}>
-          <Statistic title={isAdmin ? '全部项目数' : '可访问项目数'} value={count} />
-          <Link href="/projects">
-            <Button type="link" style={{ padding: 0 }}>
-              进入项目管理 →
-            </Button>
-          </Link>
-          {!isAdmin && rows.length > 0 ? (
-            <Text type="secondary">
-              {rows
-                .slice(0, 5)
-                .map((r) => r.name)
-                .join('、')}
-              {rows.length > 5 ? ` 等 ${rows.length} 个` : ''}
-            </Text>
-          ) : null}
-        </Space>
-      )}
+    <Card>
+      <CardHeader className="flex-row items-center justify-between">
+        <CardTitle>项目概览</CardTitle>
+        <Link
+          href="/projects"
+          className="inline-flex items-center gap-1 text-sm text-link transition-colors hover:text-link-deep"
+        >
+          进入项目管理
+          <ArrowRight className="size-4" />
+        </Link>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-12 w-40" />
+        ) : error ? (
+          <Alert variant="error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : (
+          <div className="space-y-2">
+            <MetricValue>{rows.length}</MetricValue>
+            <p className="text-sm text-muted-foreground">
+              {isAdmin ? '全部项目数' : '可访问项目数'}
+              {!isAdmin && rows.length > 0
+                ? `:${rows
+                    .slice(0, 5)
+                    .map((r) => r.name)
+                    .join('、')}${rows.length > 5 ? ` 等 ${rows.length} 个` : ''}`
+                : ''}
+            </p>
+          </div>
+        )}
+      </CardContent>
     </Card>
   );
 }
@@ -253,60 +267,61 @@ function BudgetMetricCards({ isAdmin }: { isAdmin: boolean }) {
     };
   }, [isAdmin, year]);
 
-  if (loading) {
-    return (
-      <Row gutter={[16, 16]}>
-        {[0, 1, 2, 3].map((i) => (
-          <Col xs={12} md={6} key={i}>
-            <Card size="small">
-              <Spin />
-            </Card>
-          </Col>
-        ))}
-      </Row>
-    );
-  }
   if (error) {
-    return <Alert type="error" message={`预算指标:${error}`} />;
-  }
-  if (!metrics) {
-    return <Empty description="暂无预算数据" />;
+    return (
+      <Alert variant="error">
+        <AlertDescription>预算指标:{error}</AlertDescription>
+      </Alert>
+    );
   }
 
   return (
-    <div>
-      <Title level={5} style={{ marginTop: 0 }}>
-        预算指标({year} 年)
-      </Title>
-      <Row gutter={[16, 16]}>
-        <Col xs={12} md={6}>
-          <Card size="small">
-            <Statistic
-              title="当前预算"
-              formatter={() => <MoneyText value={metrics.currentBudget} riskOnNegative={false} />}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} md={6}>
-          <Card size="small">
-            <Statistic
-              title="总占用"
-              formatter={() => <MoneyText value={metrics.totalOccupied} riskOnNegative={false} />}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} md={6}>
-          <Card size="small">
-            <Statistic title="执行率" value={renderRate(metrics.executionRate)} />
-          </Card>
-        </Col>
-        <Col xs={12} md={6}>
-          <Card size="small">
-            <Statistic title="总结余" formatter={() => <MoneyText value={metrics.balance} />} />
-          </Card>
-        </Col>
-      </Row>
-    </div>
+    <section className="space-y-3">
+      <h2 className="text-base font-semibold tracking-[-0.3px]">预算指标({year} 年)</h2>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        {loading || !metrics ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="p-4">
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="mt-2 h-8 w-24" />
+            </Card>
+          ))
+        ) : (
+          <>
+            <Card className="p-4">
+              <p className="caption-mono">当前预算</p>
+              <MetricValue>
+                <MoneyText
+                  value={metrics.currentBudget}
+                  riskOnNegative={false}
+                  className="text-left"
+                />
+              </MetricValue>
+            </Card>
+            <Card className="p-4">
+              <p className="caption-mono">总占用</p>
+              <MetricValue>
+                <MoneyText
+                  value={metrics.totalOccupied}
+                  riskOnNegative={false}
+                  className="text-left"
+                />
+              </MetricValue>
+            </Card>
+            <Card className="p-4">
+              <p className="caption-mono">执行率</p>
+              <MetricValue>{renderRate(metrics.executionRate)}</MetricValue>
+            </Card>
+            <Card className="p-4">
+              <p className="caption-mono">总结余</p>
+              <MetricValue>
+                <MoneyText value={metrics.balance} className="text-left" />
+              </MetricValue>
+            </Card>
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -421,52 +436,65 @@ function RiskWarnings({ isAdmin }: { isAdmin: boolean }) {
     };
   }, [isAdmin, year]);
 
-  const columns: ColumnsType<RiskRow> = [
-    {
-      title: '项目',
-      dataIndex: 'projectName',
-      key: 'projectName',
-      render: (name: string, r) => <Link href={`/projects/${r.projectId}`}>{name}</Link>,
-    },
-    { title: '科目编码', dataIndex: 'subjectCode', key: 'subjectCode', width: 130 },
-    { title: '科目名称', dataIndex: 'subjectName', key: 'subjectName' },
-    {
-      title: '结余',
-      dataIndex: 'balance',
-      key: 'balance',
-      align: 'right',
-      width: 160,
-      render: (v: string) => <MoneyText value={v} />,
-    },
-    {
-      title: '执行率',
-      dataIndex: 'executionRate',
-      key: 'executionRate',
-      align: 'right',
-      width: 120,
-      render: (rate: number | null) => renderRate(rate),
-    },
-  ];
-
   return (
-    <Card
-      size="small"
-      title="风险预警"
-      extra={<Tag color={risks.length ? 'red' : 'green'}>{risks.length} 项</Tag>}
-    >
-      {error ? (
-        <Alert type="error" message={error} />
-      ) : (
-        <Table<RiskRow>
-          rowKey="key"
-          size="small"
-          loading={loading}
-          dataSource={risks}
-          columns={columns}
-          pagination={false}
-          locale={{ emptyText: `暂无负结余(超预算)科目(${year} 年)` }}
-        />
-      )}
+    <Card>
+      <CardHeader className="flex-row items-center justify-between">
+        <CardTitle>风险预警</CardTitle>
+        <Badge variant={risks.length ? 'error' : 'success'}>{risks.length} 项</Badge>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <Alert variant="error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : loading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-8 w-full" />
+            ))}
+          </div>
+        ) : risks.length === 0 ? (
+          <EmptyState
+            icon={<Inbox />}
+            title={`暂无负结余(超预算)科目(${year} 年)`}
+            className="py-10"
+          />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>项目</TableHead>
+                <TableHead className="w-32">科目编码</TableHead>
+                <TableHead>科目名称</TableHead>
+                <TableHead className="w-40 text-right">结余</TableHead>
+                <TableHead className="w-28 text-right">执行率</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {risks.map((r) => (
+                <TableRow key={r.key}>
+                  <TableCell>
+                    <Link
+                      href={`/projects/${r.projectId}`}
+                      className="text-link transition-colors hover:text-link-deep"
+                    >
+                      {r.projectName}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="font-mono text-[13px]">{r.subjectCode}</TableCell>
+                  <TableCell>{r.subjectName}</TableCell>
+                  <TableCell>
+                    <MoneyText value={r.balance} />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {renderRate(r.executionRate)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
     </Card>
   );
 }
@@ -507,36 +535,43 @@ function PendingApprovals() {
   }, [pending]);
 
   return (
-    <Card
-      size="small"
-      title="待审批事项"
-      extra={
-        <Link href="/approvals">
-          <Button type="link" style={{ padding: 0 }}>
-            进入审批中心 →
-          </Button>
+    <Card>
+      <CardHeader className="flex-row items-center justify-between">
+        <CardTitle>待审批事项</CardTitle>
+        <Link
+          href="/approvals"
+          className="inline-flex items-center gap-1 text-sm text-link transition-colors hover:text-link-deep"
+        >
+          进入审批中心
+          <ArrowRight className="size-4" />
         </Link>
-      }
-    >
-      {loading ? (
-        <Spin />
-      ) : error ? (
-        <Alert type="error" message={error} />
-      ) : counts.total === 0 ? (
-        <Empty description="暂无待审批事项" />
-      ) : (
-        <Row gutter={[16, 16]}>
-          <Col xs={12} md={8}>
-            <Statistic title="初始预算编制" value={counts.initial} />
-          </Col>
-          <Col xs={12} md={8}>
-            <Statistic title="预算调整" value={counts.adjust} />
-          </Col>
-          <Col xs={12} md={8}>
-            <Statistic title="科目变更" value={counts.subject} />
-          </Col>
-        </Row>
-      )}
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : error ? (
+          <Alert variant="error">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : counts.total === 0 ? (
+          <EmptyState icon={<Inbox />} title="暂无待审批事项" className="py-10" />
+        ) : (
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <p className="caption-mono">初始预算编制</p>
+              <MetricValue>{counts.initial}</MetricValue>
+            </div>
+            <div>
+              <p className="caption-mono">预算调整</p>
+              <MetricValue>{counts.adjust}</MetricValue>
+            </div>
+            <div>
+              <p className="caption-mono">科目变更</p>
+              <MetricValue>{counts.subject}</MetricValue>
+            </div>
+          </div>
+        )}
+      </CardContent>
     </Card>
   );
 }

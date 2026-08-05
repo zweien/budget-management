@@ -1,46 +1,90 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import {
-  Alert,
-  Button,
-  Checkbox,
-  DatePicker,
-  Descriptions,
-  Drawer,
-  Dropdown,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Result,
-  Select,
-  Skeleton,
-  Space,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { format } from 'date-fns';
+import { ChevronDown, Plus } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { toast } from 'sonner';
+import { z } from 'zod';
 
 import { apiFetch } from '@/lib/api/client';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { DatePicker } from '@/components/ui/date-picker';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { MoneyText } from '@/components/ui/MoneyText';
-
-const { Title, Text } = Typography;
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 
 /** §8 业务记录四态(与 Prisma BusinessStatus 同步,不依赖运行时枚举以避免在 client bundle 里强引 @prisma/client)。 */
 const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] as const;
 type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
-const STATUS_META: Record<BusinessStatus, { label: string; color: string }> = {
-  PLACEHOLDER: { label: '登记占位', color: 'default' },
-  CONTRACT: { label: '合同', color: 'blue' },
-  FINANCE_APPROVAL: { label: '财务系统审批', color: 'processing' },
-  PAID: { label: '已支出', color: 'success' },
+const STATUS_LABEL: Record<BusinessStatus, string> = {
+  PLACEHOLDER: '登记占位',
+  CONTRACT: '合同',
+  FINANCE_APPROVAL: '财务系统审批',
+  PAID: '已支出',
+};
+
+/** Badge 语义色遵循 DESIGN.md。 */
+const STATUS_BADGE: Record<BusinessStatus, 'secondary' | 'outline' | 'warning' | 'success'> = {
+  PLACEHOLDER: 'secondary',
+  CONTRACT: 'outline',
+  FINANCE_APPROVAL: 'warning',
+  PAID: 'success',
 };
 
 /** §17.7 history.action 的中文展示。 */
@@ -118,43 +162,57 @@ function yearOptions(): number[] {
 /** 把 BusinessRecord.businessDate(可能是 ISO 或带 T 的字符串)统一为 YYYY-MM-DD 展示。 */
 function formatDate(s: string | null): string {
   if (!s) return '—';
-  const d = dayjs(s);
-  return d.isValid() ? d.format('YYYY-MM-DD') : '—';
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '—' : format(d, 'yyyy-MM-dd');
 }
 
 /** 把时间戳统一为 YYYY-MM-DD HH:mm 展示。 */
 function formatDateTime(s: string | null): string {
   if (!s) return '—';
-  const d = dayjs(s);
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—';
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '—' : format(d, 'yyyy-MM-dd HH:mm');
 }
 
-/** 新增/修改表单字段定义。 */
-interface RecordFormValues {
-  budgetYear: number;
-  subjectId: string;
-  amount: string;
-  businessDate: dayjs.Dayjs;
-  handler: string;
-  summary: string;
-  status: BusinessStatus;
-  remark?: string;
-}
+const recordSchema = z.object({
+  budgetYear: z.coerce
+    .number({ message: '请输入年度' })
+    .int('年度须为整数')
+    .min(1900, '年度不合法')
+    .max(9999, '年度不合法'),
+  subjectId: z.string().min(1, '请选择科目'),
+  amount: z.string({ message: '请输入金额' }).min(1, '请输入金额'),
+  businessDate: z.date({ message: '请选择日期' }),
+  handler: z.string().trim().min(1, '请输入经办人').max(64),
+  summary: z.string().trim().min(1, '请输入摘要').max(200),
+  status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
+  remark: z.string().trim().max(500),
+});
 
-export default function BusinessRecordsPage() {
+type RecordFormValues = z.infer<typeof recordSchema>;
+
+/** Select 的"全部"哨兵值(radix SelectItem 不允许空串)。 */
+const ALL = '__all__';
+
+function BusinessRecordsPageInner() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
+  const search = useSearchParams();
   const projectId = params.id;
 
-  // 项目标题。
+  // 项目标题(仅用于错误态;标题由项目壳承载)。
   const [project, setProject] = useState<ProjectDetail | null>(null);
   // 叶科目列表(用于筛选 + 新增/修改表单)。
   const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
   // 业务记录列表。
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
-  // 筛选状态。
-  const [yearFilter, setYearFilter] = useState<number | undefined>(undefined);
-  const [subjectFilter, setSubjectFilter] = useState<string | undefined>(undefined);
+  // 筛选状态。初始值来自 URL(台账页叶科目跳转:?subjectId=xx&year=yyyy),仍可手动改/清除。
+  const [yearFilter, setYearFilter] = useState<number | undefined>(() => {
+    const y = search.get('year');
+    const n = y ? Number(y) : NaN;
+    return Number.isInteger(n) && n >= 1900 && n <= 9999 ? n : undefined;
+  });
+  const [subjectFilter, setSubjectFilter] = useState<string | undefined>(
+    () => search.get('subjectId') ?? undefined,
+  );
   const [statusFilter, setStatusFilter] = useState<BusinessStatus | undefined>(undefined);
   const [includeVoid, setIncludeVoid] = useState(false);
   // 加载/错误。
@@ -163,26 +221,39 @@ export default function BusinessRecordsPage() {
   const [fatal, setFatal] = useState<string | null>(null);
   // 提交中。
   const [submitting, setSubmitting] = useState(false);
-  // 新增/修改 Modal。
+  // 新增/修改 Dialog。
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<BusinessRecordRow | null>(null);
-  const [form] = Form.useForm<RecordFormValues>();
-  // 作废 Modal。
+  // §8.4 超预算预警(已保存)。
+  const [overBudgetOpen, setOverBudgetOpen] = useState(false);
+  // 作废 Dialog。
   const [voidTarget, setVoidTarget] = useState<BusinessRecordRow | null>(null);
-  const [voidForm] = Form.useForm<{ reason: string }>();
-  // §17.7 历史 Drawer。
+  const [voidReason, setVoidReason] = useState('');
+  const [voidError, setVoidError] = useState<string | null>(null);
+  // §17.7 历史 Sheet。
   const [historyTarget, setHistoryTarget] = useState<BusinessRecordRow | null>(null);
   const [historyRows, setHistoryRows] = useState<BusinessRecordHistoryRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // subjectId → {code, name} 映射,用于表格展示"科目(code+name)"。
+  const form = useForm<RecordFormValues>({
+    resolver: zodResolver(recordSchema),
+    defaultValues: {
+      budgetYear: new Date().getFullYear(),
+      status: 'PLACEHOLDER',
+      handler: '',
+      summary: '',
+      remark: '',
+    },
+  });
+
+  // subjectId → {code, name} 映射,用于表格展示。
   const subjectMap = useMemo(() => {
     const m = new Map<string, LeafSubject>();
     for (const s of leafSubjects) m.set(s.subjectId, s);
     return m;
   }, [leafSubjects]);
 
-  // 拉取项目标题 + 叶科目(仅一次)。
+  // 拉取项目 + 叶科目(仅一次)。
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -200,7 +271,7 @@ export default function BusinessRecordsPage() {
         setLeafSubjects(leaves);
       } catch (e) {
         if (!cancelled) {
-          if (e instanceof Error) message.error(e.message);
+          if (e instanceof Error) toast.error(e.message);
           setFatal(e instanceof Error ? e.message : '加载项目信息失败');
         }
       } finally {
@@ -213,8 +284,7 @@ export default function BusinessRecordsPage() {
   }, [projectId]);
 
   // 拉取业务记录(随筛选变化重拉)。
-  // 仿照 ledger 页:loading 重置放在筛选事件处理器里(effect 内只发请求 + 异步落结果),
-  // 避免在 effect body 同步 setState(react-hooks/set-state-in-effect)。
+  // loading 重置放在筛选事件处理器里(事件驱动),effect 内只发请求 + 异步落结果。
   useEffect(() => {
     let cancelled = false;
     const qs = new URLSearchParams();
@@ -230,7 +300,7 @@ export default function BusinessRecordsPage() {
         if (!cancelled) setRecords(data.records ?? []);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) message.error(e.message);
+        if (!cancelled && e instanceof Error) toast.error(e.message);
       })
       .finally(() => {
         if (!cancelled) setLoadingRecords(false);
@@ -255,102 +325,108 @@ export default function BusinessRecordsPage() {
       );
       setRecords(data.records ?? []);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setLoadingRecords(false);
     }
   }, [projectId, yearFilter, subjectFilter, statusFilter, includeVoid]);
 
-  /** 处理新增/修改提交后返回的 overBudget 预警(§8.4:仍已保存)。 */
-  const showOverBudgetIfNeeded = (overBudget?: boolean) => {
-    if (overBudget) {
-      Modal.warning({
-        title: '该记录导致超预算,但已保存',
-        content: '本次登记使该科目在该年度的占用超过当前预算。记录已保存,请及时跟进预算调整。',
-      });
-    }
-  };
-
-  /** 打开"新增"Modal。 */
+  /** 打开"新增"Dialog。 */
   const openCreate = () => {
     setEditing(null);
-    form.resetFields();
-    form.setFieldsValue({
+    form.reset({
       budgetYear: new Date().getFullYear(),
+      subjectId: undefined,
+      amount: undefined,
+      businessDate: new Date(),
+      handler: '',
+      summary: '',
       status: 'PLACEHOLDER',
-      businessDate: dayjs(),
+      remark: '',
     });
     setFormOpen(true);
   };
 
-  /** 打开"修改"Modal,预填当前行。 */
+  /** 打开"修改"Dialog,预填当前行。 */
   const openEdit = (row: BusinessRecordRow) => {
     setEditing(row);
-    form.setFieldsValue({
+    form.reset({
       budgetYear: row.budgetYear,
       subjectId: row.subjectId,
       amount: row.amount,
-      businessDate: dayjs(row.businessDate),
+      businessDate: new Date(row.businessDate),
       handler: row.handler,
       summary: row.summary,
       status: row.status,
-      remark: row.remark ?? undefined,
+      remark: row.remark ?? '',
     });
     setFormOpen(true);
   };
 
-  /** 提交新增/修改。 */
-  const handleSubmit = async () => {
-    let values: RecordFormValues;
-    try {
-      values = await form.validateFields();
-    } catch {
-      return; // 校验失败,AntD 已在字段下提示。
-    }
-    const payload = {
-      budgetYear: values.budgetYear,
-      subjectId: values.subjectId,
-      amount: values.amount,
-      businessDate: values.businessDate.format('YYYY-MM-DD'),
-      handler: values.handler,
-      summary: values.summary,
-      status: values.status,
-      remark: values.remark ?? null,
-    };
-    setSubmitting(true);
-    try {
-      if (editing) {
-        const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
-          `/api/projects/${projectId}/records/${editing.id}`,
-          { method: 'PATCH', body: JSON.stringify(payload) },
-        );
-        message.success('已保存修改');
-        showOverBudgetIfNeeded(res.overBudget);
-      } else {
-        const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
-          `/api/projects/${projectId}/records`,
-          { method: 'POST', body: JSON.stringify(payload) },
-        );
-        message.success('已新增业务记录');
-        showOverBudgetIfNeeded(res.overBudget);
+  /**
+   * 提交新增/修改。
+   * keepOpen(连续录入):仅新增模式可用——保存后保留 年度/科目/经办人/日期/状态,
+   * 清空金额/摘要/备注并聚焦金额,快速录入下一条。
+   */
+  const submitForm = (keepOpen: boolean) =>
+    form.handleSubmit(async (values) => {
+      const payload = {
+        budgetYear: values.budgetYear,
+        subjectId: values.subjectId,
+        amount: values.amount,
+        businessDate: format(values.businessDate, 'yyyy-MM-dd'),
+        handler: values.handler,
+        summary: values.summary,
+        status: values.status,
+        remark: values.remark || null,
+      };
+      setSubmitting(true);
+      try {
+        if (editing) {
+          const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
+            `/api/projects/${projectId}/records/${editing.id}`,
+            { method: 'PATCH', body: JSON.stringify(payload) },
+          );
+          toast.success('已保存修改');
+          if (res.overBudget) setOverBudgetOpen(true);
+          setFormOpen(false);
+        } else {
+          const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
+            `/api/projects/${projectId}/records`,
+            { method: 'POST', body: JSON.stringify(payload) },
+          );
+          toast.success('已新增业务记录');
+          if (res.overBudget) setOverBudgetOpen(true);
+          if (keepOpen) {
+            form.reset({
+              budgetYear: values.budgetYear,
+              subjectId: values.subjectId,
+              amount: undefined,
+              businessDate: values.businessDate,
+              handler: values.handler,
+              summary: '',
+              status: values.status,
+              remark: '',
+            });
+            form.setFocus('amount');
+          } else {
+            setFormOpen(false);
+          }
+        }
+        await reloadRecords();
+      } catch (e) {
+        if (e instanceof Error) toast.error(e.message);
+      } finally {
+        setSubmitting(false);
       }
-      setFormOpen(false);
-      await reloadRecords();
-    } catch (e) {
-      if (e instanceof Error) message.error(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    })();
 
-  /** 提交作废(二次确认 + 原因)。 */
+  /** 提交作废(原因必填)。 */
   const submitVoid = async () => {
     if (!voidTarget) return;
-    let reason: string;
-    try {
-      const v = await voidForm.validateFields();
-      reason = v.reason;
-    } catch {
+    const reason = voidReason.trim();
+    if (!reason) {
+      setVoidError('请填写作废原因');
       return;
     }
     setSubmitting(true);
@@ -359,33 +435,22 @@ export default function BusinessRecordsPage() {
         `/api/projects/${projectId}/records/${voidTarget.id}/void`,
         { method: 'POST', body: JSON.stringify({ reason }) },
       );
-      message.success('已作废');
+      toast.success('已作废');
       setVoidTarget(null);
-      voidForm.resetFields();
+      setVoidReason('');
+      setVoidError(null);
       await reloadRecords();
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setSubmitting(false);
     }
   };
 
   /** 筛选变化:同步重置 loading,随后由 effect 重拉数据。 */
-  const applyYearFilter = (v: number | undefined) => {
+  const applyFilter = <K,>(setter: (v: K) => void, value: K) => {
     setLoadingRecords(true);
-    setYearFilter(v);
-  };
-  const applySubjectFilter = (v: string | undefined) => {
-    setLoadingRecords(true);
-    setSubjectFilter(v);
-  };
-  const applyStatusFilter = (v: BusinessStatus | undefined) => {
-    setLoadingRecords(true);
-    setStatusFilter(v);
-  };
-  const applyIncludeVoid = (v: boolean) => {
-    setLoadingRecords(true);
-    setIncludeVoid(v);
+    setter(value);
   };
 
   /** 切换状态(下拉菜单触发)。 */
@@ -396,14 +461,14 @@ export default function BusinessRecordsPage() {
         `/api/projects/${projectId}/records/${row.id}/status`,
         { method: 'POST', body: JSON.stringify({ status: next }) },
       );
-      message.success(`状态已切换为:${STATUS_META[next].label}`);
+      toast.success(`状态已切换为:${STATUS_LABEL[next]}`);
       await reloadRecords();
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     }
   };
 
-  /** §17.7 打开变更历史 Drawer,拉取该记录的 history 行。 */
+  /** §17.7 打开变更历史 Sheet,拉取该记录的 history 行。 */
   const openHistory = async (row: BusinessRecordRow) => {
     setHistoryTarget(row);
     setHistoryRows([]);
@@ -414,393 +479,561 @@ export default function BusinessRecordsPage() {
       );
       setHistoryRows(data.history ?? []);
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      if (e instanceof Error) toast.error(e.message);
     } finally {
       setHistoryLoading(false);
     }
   };
 
-  const columns: ColumnsType<BusinessRecordRow> = [
-    {
-      title: '年度',
-      dataIndex: 'budgetYear',
-      key: 'budgetYear',
-      width: 90,
-      render: (y: number) => `${y}`,
-    },
-    {
-      title: '科目',
-      dataIndex: 'subjectId',
-      key: 'subject',
-      render: (subjectId: string) => {
-        const s = subjectMap.get(subjectId);
-        if (!s) return <Text type="secondary">{subjectId.slice(0, 8)}</Text>;
-        // 仅显示科目名称,不展示编码。
-        return <span>{s.name}</span>;
-      },
-    },
-    {
-      title: '金额',
-      dataIndex: 'amount',
-      key: 'amount',
-      align: 'right',
-      render: (amount: string) => <MoneyText value={amount} riskOnNegative={false} />,
-    },
-    {
-      title: '业务发生日期',
-      dataIndex: 'businessDate',
-      key: 'businessDate',
-      width: 130,
-      render: (d: string) => formatDate(d),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 130,
-      render: (_: BusinessStatus, row: BusinessRecordRow) => {
-        const meta = STATUS_META[row.status] ?? { label: row.status, color: 'default' };
-        return row.isVoid ? (
-          <Tag color="red">已作废</Tag>
-        ) : (
-          <Tag color={meta.color}>{meta.label}</Tag>
-        );
-      },
-    },
-    {
-      title: '经办人',
-      dataIndex: 'handler',
-      key: 'handler',
-      width: 110,
-    },
-    {
-      title: '摘要',
-      dataIndex: 'summary',
-      key: 'summary',
-      ellipsis: true,
-    },
-    {
-      title: '录入时间',
-      dataIndex: 'enteredAt',
-      key: 'enteredAt',
-      width: 150,
-      render: (d: string) => formatDateTime(d),
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 240,
-      fixed: 'right',
-      render: (_: unknown, row: BusinessRecordRow) => {
-        const statusMenuItems = BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => ({
-          key: s,
-          label: `切换为:${STATUS_META[s].label}`,
-          onClick: () => void switchStatus(row, s),
-        }));
-        return (
-          <Space size={4}>
-            <Button size="small" onClick={() => openEdit(row)} disabled={row.isVoid}>
-              修改
-            </Button>
-            <Dropdown.Button
-              size="small"
-              menu={{ items: statusMenuItems }}
-              disabled={row.isVoid}
-              trigger={['click']}
-            >
-              状态
-            </Dropdown.Button>
-            <Button size="small" danger onClick={() => setVoidTarget(row)} disabled={row.isVoid}>
-              作废
-            </Button>
-            <Button size="small" onClick={() => void openHistory(row)}>
-              历史
-            </Button>
-          </Space>
-        );
-      },
-    },
-  ];
-
-  if (loadingMeta) return <Skeleton active />;
-
-  if (fatal || !project) {
+  if (loadingMeta) {
     return (
-      <Result
-        status="warning"
-        title="无法访问该项目"
-        subTitle={fatal ?? '项目可能不存在或您没有访问权限。'}
-        extra={
-          <Button type="primary" onClick={() => router.push('/projects')}>
-            返回项目列表
-          </Button>
-        }
-      />
+      <div className="space-y-3">
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
     );
   }
 
-  const subjectOptions = leafSubjects.map((s) => ({
-    label: s.name,
-    value: s.subjectId,
-  }));
-  const statusOptions = BUSINESS_STATUSES.map((s) => ({
-    label: STATUS_META[s].label,
-    value: s,
-  }));
+  if (fatal || !project) {
+    return (
+      <Alert variant="error">
+        <AlertTitle>无法访问该项目</AlertTitle>
+        <AlertDescription>{fatal ?? '项目可能不存在或您没有访问权限。'}</AlertDescription>
+      </Alert>
+    );
+  }
 
   return (
-    <>
-      <Title level={3} style={{ marginTop: 0 }}>
-        业务记录{project ? ` — ${project.name}` : ''}
-      </Title>
-
-      <Space wrap style={{ marginBottom: 16 }}>
-        <Button onClick={() => router.push(`/projects/${projectId}`)}>返回项目详情</Button>
-        <Button type="primary" onClick={openCreate}>
+    <div className="space-y-4">
+      {/* 筛选行 + 新增 */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid w-32 gap-1.5">
+            <Label>年度</Label>
+            <Select
+              value={yearFilter !== undefined ? String(yearFilter) : ALL}
+              onValueChange={(v) => applyFilter(setYearFilter, v === ALL ? undefined : Number(v))}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="全部年度" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部年度</SelectItem>
+                {yearOptions().map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y} 年
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid w-52 gap-1.5">
+            <Label>科目</Label>
+            <Select
+              value={subjectFilter ?? ALL}
+              onValueChange={(v) => applyFilter(setSubjectFilter, v === ALL ? undefined : v)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="全部科目" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部科目</SelectItem>
+                {leafSubjects.map((s) => (
+                  <SelectItem key={s.subjectId} value={s.subjectId}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid w-36 gap-1.5">
+            <Label>状态</Label>
+            <Select
+              value={statusFilter ?? ALL}
+              onValueChange={(v) =>
+                applyFilter(setStatusFilter, v === ALL ? undefined : (v as BusinessStatus))
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="全部状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部状态</SelectItem>
+                {BUSINESS_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_LABEL[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <label className="flex h-8 cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              checked={includeVoid}
+              onCheckedChange={(checked) => applyFilter(setIncludeVoid, checked === true)}
+            />
+            包含作废
+          </label>
+        </div>
+        <Button onClick={openCreate}>
+          <Plus />
           新增
         </Button>
-      </Space>
+      </div>
 
-      <Space wrap style={{ marginBottom: 16 }}>
-        <Text type="secondary">年度:</Text>
-        <Select<number | undefined>
-          allowClear
-          placeholder="全部年度"
-          value={yearFilter}
-          onChange={applyYearFilter}
-          style={{ width: 130 }}
-          options={yearOptions().map((y) => ({ label: `${y} 年`, value: y }))}
-        />
-        <Text type="secondary">科目:</Text>
-        <Select<string | undefined>
-          allowClear
-          showSearch
-          optionFilterProp="label"
-          placeholder="全部科目"
-          value={subjectFilter}
-          onChange={applySubjectFilter}
-          style={{ width: 220 }}
-          options={subjectOptions}
-        />
-        <Text type="secondary">状态:</Text>
-        <Select<BusinessStatus | undefined>
-          allowClear
-          placeholder="全部状态"
-          value={statusFilter}
-          onChange={applyStatusFilter}
-          style={{ width: 150 }}
-          options={statusOptions}
-        />
-        <Checkbox checked={includeVoid} onChange={(e) => applyIncludeVoid(e.target.checked)}>
-          包含作废
-        </Checkbox>
-      </Space>
+      {/* 记录表 */}
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-20">年度</TableHead>
+              <TableHead>科目</TableHead>
+              <TableHead className="w-32 text-right">金额</TableHead>
+              <TableHead className="w-32">业务发生日期</TableHead>
+              <TableHead className="w-32">状态</TableHead>
+              <TableHead className="w-24">经办人</TableHead>
+              <TableHead>摘要</TableHead>
+              <TableHead className="w-40">录入时间</TableHead>
+              <TableHead className="w-60">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loadingRecords ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <TableRow key={i} className="hover:bg-transparent">
+                  <TableCell colSpan={9}>
+                    <Skeleton className="h-6 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : records.length === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+                  暂无业务记录
+                </TableCell>
+              </TableRow>
+            ) : (
+              records.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="tabular-nums">{row.budgetYear}</TableCell>
+                  <TableCell>
+                    {subjectMap.get(row.subjectId)?.name ?? (
+                      <span className="font-mono text-xs text-mute">
+                        {row.subjectId.slice(0, 8)}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <MoneyText value={row.amount} riskOnNegative={false} />
+                  </TableCell>
+                  <TableCell className="tabular-nums">{formatDate(row.businessDate)}</TableCell>
+                  <TableCell>
+                    {row.isVoid ? (
+                      <Badge variant="error">已作废</Badge>
+                    ) : (
+                      <Badge variant={STATUS_BADGE[row.status] ?? 'secondary'}>
+                        {STATUS_LABEL[row.status] ?? row.status}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>{row.handler}</TableCell>
+                  <TableCell className="max-w-40 truncate" title={row.summary}>
+                    {row.summary}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{formatDateTime(row.enteredAt)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEdit(row)}
+                        disabled={row.isVoid}
+                      >
+                        修改
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" disabled={row.isVoid}>
+                            状态
+                            <ChevronDown />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
+                            <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
+                              切换为:{STATUS_LABEL[s]}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-error-deep hover:bg-error-soft"
+                        onClick={() => {
+                          setVoidTarget(row);
+                          setVoidReason('');
+                          setVoidError(null);
+                        }}
+                        disabled={row.isVoid}
+                      >
+                        作废
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
+                        历史
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+        {!loadingRecords && records.length > 0 ? (
+          <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
+            共 {records.length} 条记录
+          </div>
+        ) : null}
+      </div>
 
-      <Table<BusinessRecordRow>
-        rowKey="id"
-        columns={columns}
-        dataSource={records}
-        loading={loadingRecords}
-        pagination={{ pageSize: 20, showSizeChanger: true }}
-        scroll={{ x: 'max-content' }}
-      />
+      {/* 新增/修改 Dialog(react-hook-form + zod) */}
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editing ? '修改业务记录' : '新增业务记录'}</DialogTitle>
+          </DialogHeader>
+          <Form {...form}>
+            <form className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <FormField
+                  control={form.control}
+                  name="budgetYear"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>年度</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={1900} max={9999} {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="status"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>状态</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="选择状态" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BUSINESS_STATUSES.map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {STATUS_LABEL[s]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={form.control}
+                name="subjectId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>科目</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择叶科目" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {leafSubjects.map((s) => (
+                          <SelectItem key={s.subjectId} value={s.subjectId}>
+                            {s.code} {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <FormField
+                  control={form.control}
+                  name="amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>金额</FormLabel>
+                      <FormControl>
+                        <AmountInput
+                          value={field.value}
+                          onChange={field.onChange}
+                          aria-invalid={!!form.formState.errors.amount}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="businessDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>业务发生日期</FormLabel>
+                      <DatePicker value={field.value} onChange={field.onChange} />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={form.control}
+                name="handler"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>经办人</FormLabel>
+                    <FormControl>
+                      <Input maxLength={64} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="summary"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>摘要</FormLabel>
+                    <FormControl>
+                      <Input maxLength={200} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="remark"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>备注</FormLabel>
+                    <FormControl>
+                      <Textarea maxLength={500} rows={2} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setFormOpen(false)}
+                  disabled={submitting}
+                >
+                  取消
+                </Button>
+                {!editing ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void submitForm(true)}
+                    disabled={submitting}
+                  >
+                    保存并继续新增
+                  </Button>
+                ) : null}
+                <Button type="button" onClick={() => void submitForm(false)} disabled={submitting}>
+                  {submitting ? '保存中…' : '保存'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
-      <Modal
-        title={editing ? '修改业务记录' : '新增业务记录'}
-        open={formOpen}
-        onOk={handleSubmit}
-        onCancel={() => setFormOpen(false)}
-        confirmLoading={submitting}
-        okText="保存"
-        cancelText="取消"
-        destroyOnHidden
-        width={560}
-      >
-        <Form<RecordFormValues>
-          form={form}
-          layout="vertical"
-          initialValues={{ budgetYear: new Date().getFullYear(), status: 'PLACEHOLDER' }}
-        >
-          <Form.Item
-            name="budgetYear"
-            label="年度"
-            rules={[{ required: true, message: '请输入年度' }]}
-          >
-            <InputNumber min={1900} max={9999} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            name="subjectId"
-            label="科目"
-            rules={[{ required: true, message: '请选择科目' }]}
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择叶科目"
-              options={subjectOptions}
-            />
-          </Form.Item>
-          <Form.Item name="amount" label="金额" rules={[{ required: true, message: '请输入金额' }]}>
-            <AmountInput />
-          </Form.Item>
-          <Form.Item
-            name="businessDate"
-            label="业务发生日期"
-            rules={[{ required: true, message: '请选择日期' }]}
-          >
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item
-            name="handler"
-            label="经办人"
-            rules={[{ required: true, message: '请输入经办人' }]}
-          >
-            <Input maxLength={64} />
-          </Form.Item>
-          <Form.Item
-            name="summary"
-            label="摘要"
-            rules={[{ required: true, message: '请输入摘要' }]}
-          >
-            <Input maxLength={200} />
-          </Form.Item>
-          <Form.Item name="status" label="状态" rules={[{ required: true, message: '请选择状态' }]}>
-            <Select options={statusOptions} />
-          </Form.Item>
-          <Form.Item name="remark" label="备注">
-            <Input.TextArea maxLength={500} rows={2} />
-          </Form.Item>
-        </Form>
-      </Modal>
+      {/* §8.4 超预算预警(记录已保存) */}
+      <AlertDialog open={overBudgetOpen} onOpenChange={setOverBudgetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>该记录导致超预算,但已保存</AlertDialogTitle>
+            <AlertDialogDescription>
+              本次登记使该科目在该年度的占用超过当前预算。记录已保存,请及时跟进预算调整。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>知道了</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      <Modal
-        title="作废业务记录"
+      {/* 作废 Dialog(原因必填,原生受控 textarea) */}
+      <Dialog
         open={voidTarget !== null}
-        onOk={submitVoid}
-        onCancel={() => {
-          setVoidTarget(null);
-          voidForm.resetFields();
+        onOpenChange={(open) => {
+          if (!open) {
+            setVoidTarget(null);
+            setVoidReason('');
+            setVoidError(null);
+          }
         }}
-        confirmLoading={submitting}
-        okText="确认作废"
-        okButtonProps={{ danger: true }}
-        cancelText="取消"
-        destroyOnHidden
       >
-        {voidTarget ? (
-          <Alert
-            style={{ marginBottom: 12 }}
-            type="warning"
-            showIcon
-            message={`将作废记录:${formatDate(voidTarget.businessDate)} · ${
-              subjectMap.get(voidTarget.subjectId)?.name ?? ''
-            } · ${voidTarget.summary}`}
-            description="作废后该记录占用将由台账实时解除,不可恢复。"
-          />
-        ) : null}
-        <Form form={voidForm} layout="vertical">
-          <Form.Item
-            name="reason"
-            label="作废原因"
-            rules={[{ required: true, message: '请填写作废原因' }]}
-          >
-            <Input.TextArea maxLength={200} rows={3} placeholder="请填写作废原因" />
-          </Form.Item>
-        </Form>
-      </Modal>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>作废业务记录</DialogTitle>
+          </DialogHeader>
+          {voidTarget ? (
+            <div className="space-y-3">
+              <Alert variant="warning">
+                <AlertTitle>
+                  将作废记录:{formatDate(voidTarget.businessDate)} ·{' '}
+                  {subjectMap.get(voidTarget.subjectId)?.name ?? ''} · {voidTarget.summary}
+                </AlertTitle>
+                <AlertDescription>作废后该记录占用将由台账实时解除,不可恢复。</AlertDescription>
+              </Alert>
+              <div className="grid gap-1.5">
+                <Label htmlFor="void-reason">作废原因</Label>
+                <Textarea
+                  id="void-reason"
+                  maxLength={200}
+                  rows={3}
+                  placeholder="请填写作废原因"
+                  value={voidReason}
+                  onChange={(e) => {
+                    setVoidReason(e.target.value);
+                    if (voidError) setVoidError(null);
+                  }}
+                  aria-invalid={!!voidError}
+                />
+                {voidError ? <p className="text-xs text-destructive">{voidError}</p> : null}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setVoidTarget(null);
+                setVoidReason('');
+                setVoidError(null);
+              }}
+              disabled={submitting}
+            >
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void submitVoid()} disabled={submitting}>
+              {submitting ? '提交中…' : '确认作废'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <Drawer
-        title="变更历史"
-        open={historyTarget !== null}
-        onClose={() => setHistoryTarget(null)}
-        width={640}
-        destroyOnHidden
-      >
-        {historyTarget ? (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Descriptions bordered column={1} size="small">
-              <Descriptions.Item label="业务发生日期">
-                {formatDate(historyTarget.businessDate)}
-              </Descriptions.Item>
-              <Descriptions.Item label="摘要">{historyTarget.summary}</Descriptions.Item>
-              <Descriptions.Item label="金额">
-                <MoneyText value={historyTarget.amount} riskOnNegative={false} />
-              </Descriptions.Item>
-            </Descriptions>
+      {/* §17.7 变更历史 Sheet */}
+      <Sheet open={historyTarget !== null} onOpenChange={(open) => !open && setHistoryTarget(null)}>
+        <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-6 sm:max-w-xl">
+          <SheetHeader className="p-0 pb-4">
+            <SheetTitle>变更历史</SheetTitle>
+          </SheetHeader>
+          {historyTarget ? (
+            <div className="space-y-4">
+              <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border">
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">业务发生日期</dt>
+                  <dd className="mt-1 text-sm tabular-nums">
+                    {formatDate(historyTarget.businessDate)}
+                  </dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">摘要</dt>
+                  <dd className="mt-1 text-sm">{historyTarget.summary}</dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">金额</dt>
+                  <dd className="mt-1 text-sm">
+                    <MoneyText value={historyTarget.amount} riskOnNegative={false} />
+                  </dd>
+                </div>
+              </dl>
 
-            <Text type="secondary">§17.7 变更链(按时间正序),共 {historyRows.length} 条。</Text>
+              <p className="text-sm text-muted-foreground">
+                §17.7 变更链(按时间正序),共 {historyRows.length} 条。
+              </p>
 
-            <Table<BusinessRecordHistoryRow>
-              rowKey="id"
-              size="small"
-              loading={historyLoading}
-              dataSource={historyRows}
-              pagination={false}
-              scroll={{ x: 'max-content' }}
-              locale={{ emptyText: historyLoading ? '加载中…' : '暂无变更历史' }}
-              columns={[
-                {
-                  title: '时间',
-                  dataIndex: 'operatedAt',
-                  key: 'operatedAt',
-                  width: 150,
-                  render: (d: string) => formatDateTime(d),
-                },
-                {
-                  title: '操作',
-                  dataIndex: 'action',
-                  key: 'action',
-                  width: 110,
-                  render: (a: string) => HISTORY_ACTION_LABEL[a] ?? a,
-                },
-                {
-                  title: '操作人',
-                  dataIndex: 'operatorId',
-                  key: 'operatorId',
-                  width: 120,
-                  ellipsis: true,
-                  render: (id: string) => id.slice(0, 8),
-                },
-                {
-                  title: '原因',
-                  dataIndex: 'reason',
-                  key: 'reason',
-                  ellipsis: true,
-                  render: (r: string | null) => r ?? <Text type="secondary">—</Text>,
-                },
-                {
-                  title: '变更前',
-                  key: 'before',
-                  render: (_: unknown, row: BusinessRecordHistoryRow) =>
-                    row.beforeData ? (
-                      <Text
-                        style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}
-                      >
-                        {JSON.stringify(row.beforeData, null, 2)}
-                      </Text>
-                    ) : (
-                      <Text type="secondary">—</Text>
-                    ),
-                },
-                {
-                  title: '变更后',
-                  key: 'after',
-                  render: (_: unknown, row: BusinessRecordHistoryRow) =>
-                    row.afterData ? (
-                      <Text
-                        style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}
-                      >
-                        {JSON.stringify(row.afterData, null, 2)}
-                      </Text>
-                    ) : (
-                      <Text type="secondary">—</Text>
-                    ),
-                },
-              ]}
-            />
-          </Space>
-        ) : null}
-      </Drawer>
-    </>
+              {historyLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-8 w-full" />
+                  ))}
+                </div>
+              ) : historyRows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">暂无变更历史</p>
+              ) : (
+                <div className="space-y-3">
+                  {historyRows.map((h) => (
+                    <div
+                      key={h.id}
+                      className="rounded-lg border border-border bg-card p-3 text-sm shadow-l1"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">
+                          {HISTORY_ACTION_LABEL[h.action] ?? h.action}
+                        </Badge>
+                        <span className="text-xs text-mute tabular-nums">
+                          {formatDateTime(h.operatedAt)}
+                        </span>
+                        <span className="font-mono text-xs text-mute">
+                          {h.operatorId.slice(0, 8)}
+                        </span>
+                      </div>
+                      {h.reason ? (
+                        <p className="mt-1.5 text-sm text-muted-foreground">原因:{h.reason}</p>
+                      ) : null}
+                      {h.beforeData || h.afterData ? (
+                        <div className="mt-2 grid gap-2">
+                          {h.beforeData ? (
+                            <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap">
+                              {JSON.stringify(h.beforeData, null, 2)}
+                            </pre>
+                          ) : null}
+                          {h.afterData ? (
+                            <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap">
+                              {JSON.stringify(h.afterData, null, 2)}
+                            </pre>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+export default function BusinessRecordsPage() {
+  // useSearchParams 需在 Suspense 边界内(台账页叶科目跳转带入 ?subjectId=&year= 初值)。
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-3">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      }
+    >
+      <BusinessRecordsPageInner />
+    </Suspense>
   );
 }
