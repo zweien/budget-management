@@ -5,7 +5,7 @@ import { rejectApplication } from '@/server/services/initialBudget.service';
 
 /**
  * POST /api/projects/:id/initial-budget/:appId/reject — 驳回(PENDING→REJECTED)。
- * body { opinion }。仅 BUDGET_ADMIN 有 budget:approve 权限。
+ * body { opinion }。仅 ADMIN 有 budget:approve 权限。
  */
 export async function POST(
   req: NextRequest,
