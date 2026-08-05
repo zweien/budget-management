@@ -3,6 +3,30 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与[语义化版本](https://semver.org/lang/zh-CN/)。
 版本发布流程见 [AGENTS.md](./AGENTS.md)。
 
+## [0.3.0] - 2026-08-05
+
+### 新增
+
+- **Authentik SSO 登录**：登录页 + OIDC 授权码流程（PKCE/state/nonce),`openid-client` + `jose` 手写集成，会话为 HttpOnly JWT cookie(8h)
+- 首次 SSO 登录自动建档（JIT，默认普通用户）;`npm run make-admin -- <用户名>` 提升首个管理员
+- 项目成员管理：管理员在项目概览页增删成员、调整角色（负责人=可编辑 / 成员=只读），全程审计留痕
+- 新建项目可指定负责人（自动获得 OWNER 成员编辑权）
+- 顶栏用户菜单（姓名 + 角色 + 退出登录，联动 Authentik end-session)
+
+### 变更
+
+- **角色模型收敛（破坏性）**：全局角色改为 `ADMIN` / `USER` 两级；项目编辑权改由 `ProjectMember(OWNER)` 驱动——存量 `PROJECT_OWNER` / `AUTHORIZED_HANDLER` 用户迁移为 `USER`，并按 `Project.ownerId` 自动回填 OWNER 成员行
+- **普通用户全局只读**：全部项目的台账/记录/统计/审计日志可见（跨项目统计与导出同步开放），编辑动作服务端 403
+- HANDLER 成员语义降级为只读成员（历史存量保留，不再拥有编辑权）
+- 查看态 UI 门控：无编辑权时隐藏/禁用新建项目、新增记录、发起调整、保存、导入等入口
+- `MOCK_AUTH` 开关保留：本地开发/测试继续用 mock 身份；`false` 时启用 SSO 并强制要求 OIDC 环境变量
+- `/api/users` 在 SSO 模式下仅管理员可用（`user:list`);`excel-template` 下载补充登录校验
+
+### 修复
+
+- 审批待办接口由原始角色比较改为权限矩阵校验
+- 调整草稿编辑/删除补齐项目级权限校验（此前只查全局角色）
+
 ## [0.2.0] - 2026-08-05
 
 ### 新增
