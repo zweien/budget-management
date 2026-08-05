@@ -48,15 +48,17 @@ interface BootstrapUser {
  * - Promise:某次 bootstrap 正在跑,后续调用 await 同一个。
  * 选择器写入身份后会置为 null,确保新身份立刻生效。
  */
-let bootstrapPromise: Promise<string> | null = null;
+let bootstrapPromise: Promise<string | null> | null = null;
 
 /**
  * 确保存在可用的 mock 用户身份,返回其 id。
  *
  * - 已有 localStorage 身份:直接返回(无需网络)。
  * - 无身份:发起一次 `/api/users` 请求(**不经过 apiFetch、不带 header**,
- *   服务端会放行返回种子 BUDGET_ADMIN 列表),选中第一个 BUDGET_ADMIN
+ *   服务端会放行返回种子 ADMIN 列表),选中第一个 ADMIN
  *   (回退第一个),写入 localStorage 后返回。
+ * - SSO 模式(/api/users 返回 401):返回 null——不注入 mock header,
+ *   请求仅凭浏览器 cookie 会话鉴权。
  * - 并发调用复用同一个 in-flight promise(去重),避免重复 bootstrap。
  *
  * SSR(无 window)环境:返回 null,由调用方决定降级行为(apiFetch 不写 header)。
@@ -70,15 +72,17 @@ export function bootstrapMockUser(): Promise<string | null> {
 
   if (bootstrapPromise) return bootstrapPromise;
 
-  const inflight = (async (): Promise<string> => {
+  const inflight = (async (): Promise<string | null> => {
     // 注意:此处必须用裸 fetch,不能走 apiFetch(否则递归 bootstrap)。
     // 不带 x-mock-user-id → 服务端走"未登录 bootstrap"分支,返回种子 admin。
     const res = await fetch('/api/users', { headers: { Accept: 'application/json' } });
+    // SSO 模式(/api/users 401):无 mock bootstrap,返回 null → 请求仅靠 cookie 会话。
+    if (res.status === 401) return null;
     const list: BootstrapUser[] | null = res.ok ? await res.json().catch(() => null) : null;
     if (!res.ok || !Array.isArray(list) || list.length === 0) {
       throw new Error('无法加载模拟用户列表(bootstrap 失败)');
     }
-    const admin = list.find((u) => u.role === 'BUDGET_ADMIN') ?? list[0];
+    const admin = list.find((u) => u.role === 'ADMIN') ?? list[0];
     setMockUserId(admin.id);
     return admin.id;
   })()
@@ -125,6 +129,11 @@ export async function downloadFile(path: string, filename: string): Promise<void
 
   const res = await fetch(path, { headers });
   if (!res.ok) {
+    // 同 apiFetch:SSO 模式 401 → 跳登录页。
+    if (res.status === 401 && !mockUserId) {
+      const returnTo = window.location.pathname + window.location.search;
+      window.location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
+    }
     // 服务端错误仍以 JSON 返回(如 { error: '...' }),尽量解析出可读信息。
     let message = `请求失败 (${res.status})`;
     try {
@@ -187,6 +196,12 @@ export async function apiFetch<T = unknown>(path: string, init: ApiFetchOptions 
   const body = isJson ? await res.json().catch(() => null) : await res.text().catch(() => null);
 
   if (!res.ok) {
+    // SSO 模式(无 mock 身份)下 401 = 会话缺失/过期 → 跳登录页,回跳当前地址。
+    // mock 模式不跳转:401 多为 localStorage 残留失效身份,交给调用方错误提示。
+    if (res.status === 401 && !mockUserId && typeof window !== 'undefined') {
+      const returnTo = window.location.pathname + window.location.search;
+      window.location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
+    }
     const message =
       (isJson && body && typeof body === 'object' && 'error' in body
         ? String((body as { error: unknown }).error)

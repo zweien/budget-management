@@ -1,6 +1,9 @@
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 
 import pkg from '../../../package.json';
+import { env } from '@/lib/env';
+import { getCurrentUser } from '@/lib/auth/session';
 import { SIDEBAR_COLLAPSED_COOKIE } from '@/lib/ui-prefs';
 import { DashboardShell } from '@/components/layout/dashboard-shell';
 
@@ -11,8 +14,13 @@ export const dynamic = 'force-dynamic';
  * Dashboard 外壳:固定侧边栏(lg+,可收缩为图标窄栏)+ 顶栏(移动端抽屉导航 / 身份选择 / 主题切换)。
  * 内容区不带卡片包裹,由各页自管表面(canvas / canvas-soft 分层)。
  * 折叠态(cookie)与版本号(package.json)由服务端注入,首屏无闪烁、无水合不一致。
+ * SSO 模式服务端门岗:未登录一律重定向 /login(API 层另有 requireUser 兜底)。
  */
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  if (!env.MOCK_AUTH && !(await getCurrentUser())) {
+    redirect('/login');
+  }
+
   const cookieStore = await cookies();
   const collapsed = cookieStore.get(SIDEBAR_COLLAPSED_COOKIE)?.value === '1';
 
