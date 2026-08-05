@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+/* shadcn 组件的 animate-in/out 动效工具类(Tailwind v4 官方接替 tailwindcss-animate)。 */
+@import 'tw-animate-css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
