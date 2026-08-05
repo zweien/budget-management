@@ -57,7 +57,7 @@ let bootstrapPromise: Promise<string | null> | null = null;
  * - 无身份:发起一次 `/api/users` 请求(**不经过 apiFetch、不带 header**,
  *   服务端会放行返回种子 ADMIN 列表),选中第一个 ADMIN
  *   (回退第一个),写入 localStorage 后返回。
- * - SSO 模式(/api/users 返回 401):返回 null——不注入 mock header,
+ * - SSO 模式(/api/users 返回 401/403):返回 null——不注入 mock header,
  *   请求仅凭浏览器 cookie 会话鉴权。
  * - 并发调用复用同一个 in-flight promise(去重),避免重复 bootstrap。
  *
@@ -66,6 +66,9 @@ let bootstrapPromise: Promise<string | null> | null = null;
  */
 export function bootstrapMockUser(): Promise<string | null> {
   if (typeof window === 'undefined') return Promise.resolve(null);
+
+  // SSO 模式(callback 落非 HttpOnly 标记):无需探测,直接跳过。
+  if (document.cookie.includes('bm_auth_mode=sso')) return Promise.resolve(null);
 
   const stored = getMockUserId();
   if (stored) return Promise.resolve(stored);
@@ -76,8 +79,9 @@ export function bootstrapMockUser(): Promise<string | null> {
     // 注意:此处必须用裸 fetch,不能走 apiFetch(否则递归 bootstrap)。
     // 不带 x-mock-user-id → 服务端走"未登录 bootstrap"分支,返回种子 admin。
     const res = await fetch('/api/users', { headers: { Accept: 'application/json' } });
-    // SSO 模式(/api/users 401):无 mock bootstrap,返回 null → 请求仅靠 cookie 会话。
-    if (res.status === 401) return null;
+    // SSO 模式:匿名 401 / 已登录非管理员 403——均表示无 mock bootstrap,
+    // 返回 null → 请求仅靠 cookie 会话。
+    if (res.status === 401 || res.status === 403) return null;
     const list: BootstrapUser[] | null = res.ok ? await res.json().catch(() => null) : null;
     if (!res.ok || !Array.isArray(list) || list.length === 0) {
       throw new Error('无法加载模拟用户列表(bootstrap 失败)');

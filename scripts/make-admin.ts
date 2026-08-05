@@ -18,7 +18,11 @@ async function main() {
     process.exit(1);
   }
 
-  const user = await prisma.user.findFirst({ where: { OR: [{ id: key }, { name: key }] } });
+  // id 是 UUID 列:非 UUID 输入不能只靠 OR 兜底(Prisma 会先在校验阶段报错)。
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
+  const user = await prisma.user.findFirst({
+    where: isUuid ? { OR: [{ id: key }, { name: key }] } : { name: key },
+  });
   if (!user) {
     console.error(`未找到用户: ${key}(请先通过 SSO 登录一次完成自动建档)`);
     process.exit(1);

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as client from 'openid-client';
 
 import { env } from '@/lib/env';
-import { getOidcConfig, OIDC_FLOW_COOKIE, SESSION_COOKIE } from '@/lib/auth/oidc';
+import { getOidcConfig, OIDC_FLOW_COOKIE, SESSION_COOKIE, AUTH_MODE_COOKIE } from '@/lib/auth/oidc';
 import { verifySession } from '@/lib/auth/session';
 
 /**
@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
 
   const res = NextResponse.redirect(target);
   res.cookies.delete(SESSION_COOKIE);
+  res.cookies.delete(AUTH_MODE_COOKIE);
   res.cookies.delete(OIDC_FLOW_COOKIE);
   return res;
 }

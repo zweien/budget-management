@@ -11,10 +11,17 @@ let configPromise: Promise<client.Configuration> | null = null;
 
 export function getOidcConfig(): Promise<client.Configuration> {
   if (!configPromise) {
+    const issuer = new URL(env.AUTHENTIK_ISSUER as string);
+    // openid-client v6 默认仅允许 HTTPS;本地/内网 http 部署需在 discovery 请求时就放开
+    // (config 还没建出来,事后再改已来不及),经 options.execute 注入。
+    const options =
+      issuer.protocol === 'http:' ? { execute: [client.allowInsecureRequests] } : undefined;
     configPromise = client.discovery(
-      new URL(env.AUTHENTIK_ISSUER as string),
+      issuer,
       env.AUTHENTIK_CLIENT_ID as string,
       env.AUTHENTIK_CLIENT_SECRET as string,
+      undefined,
+      options,
     );
     // discovery 失败(如 Authentik 未启动)时清空缓存,下次调用重试。
     configPromise.catch(() => {
@@ -34,6 +41,12 @@ export const OIDC_FLOW_COOKIE = 'bm_oidc_flow';
 
 /** 会话 cookie(jose HS256 JWT,sub=本地用户 id)。 */
 export const SESSION_COOKIE = 'bm_session';
+
+/**
+ * 认证模式标记 cookie(非 HttpOnly,仅作客户端提示):
+ * sso 模式下 apiFetch 跳过 mock bootstrap 探测(避免 /api/users 401/403 噪音)。
+ */
+export const AUTH_MODE_COOKIE = 'bm_auth_mode';
 
 /** 会话时长:8 小时。 */
 export const SESSION_TTL_SECONDS = 8 * 60 * 60;

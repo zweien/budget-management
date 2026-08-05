@@ -9,6 +9,7 @@ import {
   getOidcConfig,
   sanitizeReturnTo,
   OIDC_FLOW_COOKIE,
+  AUTH_MODE_COOKIE,
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
   type OidcFlowState,
@@ -40,7 +41,8 @@ export async function GET(req: NextRequest) {
     const flow = JSON.parse(rawFlow) as OidcFlowState;
 
     const config = await getOidcConfig();
-    const tokens = await client.authorizationCodeGrant(config, req.nextUrl, {
+    // 注意:不能传 req.nextUrl(NextURL 非 URL 实例,v6 会拒绝),需显式构造。
+    const tokens = await client.authorizationCodeGrant(config, new URL(req.url), {
       pkceCodeVerifier: flow.codeVerifier,
       expectedState: flow.state,
       expectedNonce: flow.nonce,
@@ -71,6 +73,13 @@ export async function GET(req: NextRequest) {
     const res = NextResponse.redirect(new URL(sanitizeReturnTo(flow.returnTo), env.APP_BASE_URL));
     res.cookies.set(SESSION_COOKIE, sessionJwt, {
       httpOnly: true,
+      sameSite: 'lax',
+      secure: env.NODE_ENV === 'production',
+      maxAge: SESSION_TTL_SECONDS,
+      path: '/',
+    });
+    // 非 HttpOnly 模式标记:客户端 apiFetch 据此跳过 mock bootstrap 探测。
+    res.cookies.set(AUTH_MODE_COOKIE, 'sso', {
       sameSite: 'lax',
       secure: env.NODE_ENV === 'production',
       maxAge: SESSION_TTL_SECONDS,
