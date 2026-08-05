@@ -122,7 +122,15 @@ export default function ProjectLedgerPage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : ledger && ledger.nodes.length > 0 ? (
-        <BudgetTreeTable nodes={ledger.nodes} />
+        <BudgetTreeTable
+          nodes={ledger.nodes}
+          subjectHref={(n) =>
+            // 业务记录只挂在叶科目上:仅叶科目可点,携带当前年度筛选跳转。
+            n.isLeaf
+              ? `/projects/${projectId}/records?subjectId=${n.subjectId}&year=${year}`
+              : undefined
+          }
+        />
       ) : (
         <Alert variant="info">
           <AlertTitle>{year} 年度暂无预算执行数据</AlertTitle>

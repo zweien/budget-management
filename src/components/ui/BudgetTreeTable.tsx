@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   flexRender,
   getCoreRowModel,
@@ -53,6 +54,11 @@ interface TreeNode extends LedgerNode {
 
 interface Props {
   nodes: LedgerNode[];
+  /**
+   * 科目名链接构造(可选):返回 href 则该科目名渲染为链接(DESIGN.md link 蓝),
+   * 返回 undefined 则纯文本。台账页用它把叶科目链到业务记录筛选视图。
+   */
+  subjectHref?: (node: LedgerNode) => string | undefined;
 }
 
 /** 金额 → 千分位两位小数字符串(仅展示,不做风险色)。 */
@@ -109,7 +115,7 @@ const TOGGLE_COLUMNS: { id: string; label: string; group: '总预算' | '年度'
  *        总占用 / 结余 / 执行率。金额列右对齐两位小数;结余负数走 MoneyText 风险色。
  * 顶部「列设置」控制各金额列显隐(科目列固定)。
  */
-export function BudgetTreeTable({ nodes }: Props) {
+export function BudgetTreeTable({ nodes, subjectHref }: Props) {
   const treeData = useMemo(() => buildTree(nodes), [nodes]);
 
   // 列显隐(TanStack columnVisibility);科目列固定不参与。
@@ -153,10 +159,25 @@ export function BudgetTreeTable({ nodes }: Props) {
             ) : (
               <span className="size-4" />
             )}
-            {/* 仅显示科目名称,不展示编码(对齐原实现)。 */}
-            <span className={cn(row.original.isLeaf ? undefined : 'font-medium')}>
-              {row.original.name}
-            </span>
+            {/* 仅显示科目名称,不展示编码(对齐原实现);有 href 时渲染为链接。 */}
+            {(() => {
+              const href = subjectHref?.(row.original);
+              if (href) {
+                return (
+                  <Link
+                    href={href}
+                    className="text-link underline-offset-4 transition-colors outline-none hover:text-link-deep hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
+                    {row.original.name}
+                  </Link>
+                );
+              }
+              return (
+                <span className={cn(row.original.isLeaf ? undefined : 'font-medium')}>
+                  {row.original.name}
+                </span>
+              );
+            })()}
           </span>
         ),
       },
@@ -187,7 +208,7 @@ export function BudgetTreeTable({ nodes }: Props) {
         ),
       },
     ];
-  }, []);
+  }, [subjectHref]);
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。
   // eslint-disable-next-line react-hooks/incompatible-library

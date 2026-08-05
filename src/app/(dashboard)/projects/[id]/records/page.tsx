@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { ChevronDown, Plus } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -193,8 +193,9 @@ type RecordFormValues = z.infer<typeof recordSchema>;
 /** Select 的"全部"哨兵值(radix SelectItem 不允许空串)。 */
 const ALL = '__all__';
 
-export default function BusinessRecordsPage() {
+function BusinessRecordsPageInner() {
   const params = useParams<{ id: string }>();
+  const search = useSearchParams();
   const projectId = params.id;
 
   // 项目标题(仅用于错误态;标题由项目壳承载)。
@@ -203,9 +204,15 @@ export default function BusinessRecordsPage() {
   const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
   // 业务记录列表。
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
-  // 筛选状态。
-  const [yearFilter, setYearFilter] = useState<number | undefined>(undefined);
-  const [subjectFilter, setSubjectFilter] = useState<string | undefined>(undefined);
+  // 筛选状态。初始值来自 URL(台账页叶科目跳转:?subjectId=xx&year=yyyy),仍可手动改/清除。
+  const [yearFilter, setYearFilter] = useState<number | undefined>(() => {
+    const y = search.get('year');
+    const n = y ? Number(y) : NaN;
+    return Number.isInteger(n) && n >= 1900 && n <= 9999 ? n : undefined;
+  });
+  const [subjectFilter, setSubjectFilter] = useState<string | undefined>(
+    () => search.get('subjectId') ?? undefined,
+  );
   const [statusFilter, setStatusFilter] = useState<BusinessStatus | undefined>(undefined);
   const [includeVoid, setIncludeVoid] = useState(false);
   // 加载/错误。
@@ -1012,5 +1019,21 @@ export default function BusinessRecordsPage() {
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+export default function BusinessRecordsPage() {
+  // useSearchParams 需在 Suspense 边界内(台账页叶科目跳转带入 ?subjectId=&year= 初值)。
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-3">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      }
+    >
+      <BusinessRecordsPageInner />
+    </Suspense>
   );
 }
