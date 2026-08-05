@@ -17,7 +17,7 @@ interface ProjectMeta {
 
 const TABS = [
   { segment: '', label: '概览' },
-  { segment: 'initial-budget', label: '年初预算' },
+  { segment: 'initial-budget', label: '初始预算编制' },
   { segment: 'records', label: '业务记录' },
   { segment: 'adjustments', label: '预算调整' },
   { segment: 'ledger', label: '执行台账' },

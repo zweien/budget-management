@@ -322,6 +322,22 @@ export default function InitialBudgetPage() {
     setDirty(false); // 回填是服务端状态,不算未保存修改。
   }, []);
 
+  /**
+   * 新编制(无草稿)的默认起点:预设科目模板 + 一行当年年度预算(金额留空)。
+   * 不标脏——这是默认状态而非用户修改;保存后才产生草稿。
+   */
+  const applyNewBudgetDefaults = useCallback(() => {
+    const rows = DEFAULT_SUBJECT_TEMPLATE.map((t) => ({
+      key: genKey(),
+      code: t.code,
+      name: t.name,
+      parentCode: t.parentCode,
+    }));
+    setSubjectRows(rows);
+    setAnnualRows([{ key: genKey(), year: new Date().getFullYear(), amount: '' }]);
+    setExpanded(true);
+  }, []);
+
   /** 加载项目头 + 编制草稿(仅一次)。 */
   useEffect(() => {
     let cancelled = false;
@@ -346,6 +362,10 @@ export default function InitialBudgetPage() {
           setDraft(draftResult);
           // 预填表单(无论状态,只读态展示也复用同一份数据)。
           hydrateForm(draftResult);
+        } else {
+          // 新编制(无草稿):默认套用预设科目模板 + 当年年度行。
+          // 这是默认起点而非用户修改,不标脏。
+          applyNewBudgetDefaults();
         }
       } catch (e) {
         if (!cancelled) {
@@ -360,7 +380,7 @@ export default function InitialBudgetPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, hydrateForm]);
+  }, [projectId, hydrateForm, applyNewBudgetDefaults]);
 
   const status = draft?.status;
 
@@ -455,6 +475,12 @@ export default function InitialBudgetPage() {
     setSubjectRows(rows);
     setExpanded(true);
     toast.success(`已套用预设模板(${DEFAULT_SUBJECT_TEMPLATE.length} 个科目),可在其上继续编辑`);
+  };
+
+  /** 清空科目树(从零自定义的出口,带确认)。 */
+  const clearSubjects = () => {
+    markDirty();
+    setSubjectRows([]);
   };
 
   const declaredYears = useMemo(() => annualRows.map((r) => r.year), [annualRows]);
@@ -1212,6 +1238,23 @@ export default function InitialBudgetPage() {
                 >
                   套用预设模板
                 </Button>
+                {subjectRows.length > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-error-deep hover:bg-error-soft"
+                    onClick={() =>
+                      setConfirm({
+                        title: '清空全部科目?',
+                        description:
+                          '将移除当前科目树(不影响已保存内容,下次保存后生效),可重新「套用预设模板」或从零新增。',
+                        action: clearSubjects,
+                      })
+                    }
+                  >
+                    清空科目
+                  </Button>
+                ) : null}
               </>
             )}
           </div>
