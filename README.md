@@ -9,8 +9,9 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://www.typescriptlang.org/)
 [![Prisma](https://img.shields.io/badge/Prisma-5-2D3748?logo=prisma)](https://www.prisma.io/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://www.postgresql.org/)
-[![Ant Design](https://img.shields.io/badge/Ant_Design-5-0170FE?logo=antdesign)](https://ant.design/)
-[![Tests](https://img.shields.io/badge/tests-129%20passed-brightgreen)](#测试)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-38BDF8?logo=tailwindcss)](https://tailwindcss.com/)
+[![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-Radix-000000)](https://ui.shadcn.com/)
+[![Tests](https://img.shields.io/badge/tests-132%20passed-brightgreen)](#测试)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 </div>
@@ -29,6 +30,8 @@
 - 🔒 **预算锁机制** —— 调减额度在提交时即锁定，防止多张调整单累计超额
 - 📥 **Excel 批量导入** —— 三段式预览（有效 / 错误 / 疑似重复），原子化确认防并发
 - 📤 **台账导出** —— 一键导出年度执行台账为 Excel
+- 🎨 **Vercel 设计语言** —— 按 DESIGN.md token 体系落地 shadcn/ui 界面，亮 / 暗双主题
+- 🔗 **台账联动查询** —— 执行台账点击叶科目直达业务记录筛选视图
 - 🎯 **精确金额运算** —— 全链路 `decimal.js` 处理，杜绝浮点误差
 
 ## 🧭 预算管理闭环
@@ -46,14 +49,18 @@ flowchart LR
 
 ## 🛠️ 技术栈
 
-| 层           | 技术                                                                      |
-| ------------ | ------------------------------------------------------------------------- |
-| **前端**     | Next.js 16 (App Router) · React 19 · TypeScript 5 (strict) · Ant Design 5 |
-| **后端**     | Next.js Route Handlers · Prisma 5 ORM · Zod 校验                          |
-| **数据库**   | PostgreSQL 16                                                             |
-| **金额运算** | decimal.js（全链路字符串传输，杜绝浮点误差）                              |
-| **测试**     | Vitest（129 项集成测试，直连真实 PG）                                     |
-| **工程化**   | ESLint · Prettier · Husky · commitlint · lint-staged                      |
+| 层           | 技术                                                                                                             |
+| ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| **前端**     | Next.js 16 (App Router) · React 19 · TypeScript 5 (strict) · Tailwind CSS 4 · shadcn/ui (Radix) · TanStack Table |
+| **后端**     | Next.js Route Handlers · Prisma 5 ORM · Zod 校验                                                                 |
+| **数据库**   | PostgreSQL 16                                                                                                    |
+| **金额运算** | decimal.js（全链路字符串传输，杜绝浮点误差）                                                                     |
+| **测试**     | Vitest（132 项集成测试，直连真实 PG）                                                                            |
+| **工程化**   | ESLint · Prettier · Husky · commitlint · lint-staged                                                             |
+
+### UI 设计体系
+
+界面遵循 [DESIGN.md](./DESIGN.md)（Vercel 设计语言）token 体系：canvas 分层底色、hairline 边框、ink 主按钮、link 蓝、display 负字距字阶、L1-L5 堆叠阴影；亮 / 暗双主题（next-themes），Geist + Geist Mono 字体（系统中文回落）。表单用 react-hook-form + zod，树表用 TanStack Table，反馈用 sonner toast。
 
 ## 🚀 快速开始
 
@@ -111,19 +118,19 @@ npm run dev                   # http://localhost:3000
 
 ## 📖 主要功能
 
-| 模块           | 说明                                                           |
-| -------------- | -------------------------------------------------------------- |
-| **项目管理**   | 立项、起止时间、级别、归档                                     |
-| **预算编制**   | 树形科目编辑器、预设模板、单位×数量×单价自动算金额、父节点汇总 |
-| **预算审批**   | 提交 / 审批 / 驳回 / 撤回，审批中心统一待办                    |
-| **预算调整**   | 双维度（总预算 + 年度）联动表单，收支平衡校验，可调额度锁定    |
-| **业务记录**   | 逐笔登记支出（登记占位 / 合同 / 财务审批 / 已支出），实时占用  |
-| **执行台账**   | 树形展示各科目预算/占用/结余/执行率，支持列显示控制与导出      |
-| **到账流水**   | 登记项目到账资金                                               |
-| **Excel 导入** | 批量导入业务记录，三段式预览 + 防并发确认                      |
-| **年度结转**   | 跨年结转未完成业务记录                                         |
-| **统计分析**   | 执行率、超预算预警、按月汇总                                   |
-| **操作日志**   | 全量审计，前后快照留痕                                         |
+| 模块           | 说明                                                                              |
+| -------------- | --------------------------------------------------------------------------------- |
+| **项目管理**   | 立项、起止时间、级别、归档                                                        |
+| **预算编制**   | 树形科目编辑器、新编制默认预设模板、单位×数量×单价自动算金额、父节点汇总          |
+| **预算审批**   | 提交 / 审批 / 驳回 / 撤回，审批中心统一待办                                       |
+| **预算调整**   | 双维度（总预算 + 年度）联动表单，收支平衡校验，可调额度锁定                       |
+| **业务记录**   | 逐笔登记支出（登记占位 / 合同 / 财务审批 / 已支出），实时占用，支持连续录入       |
+| **执行台账**   | 树形展示各科目预算/占用/结余/执行率，列显示控制、导出，叶科目点击直达业务记录筛选 |
+| **到账流水**   | 登记项目到账资金                                                                  |
+| **Excel 导入** | 批量导入业务记录，三段式预览 + 防并发确认                                         |
+| **年度结转**   | 跨年结转未完成业务记录                                                            |
+| **统计分析**   | 执行率、超预算预警、按月汇总                                                      |
+| **操作日志**   | 全量审计，前后快照留痕                                                            |
 
 ## 🏗️ 项目结构
 
@@ -137,7 +144,7 @@ budget-management/
 │   ├── app/
 │   │   ├── (dashboard)/       # 页面(项目/台账/记录/调整/审批/统计...)
 │   │   └── api/               # 41 个 Route Handler
-│   ├── components/            # 复用组件(树形台账表、金额输入/展示...)
+│   ├── components/            # shadcn/ui 组件集、布局壳(侧边栏/顶栏/项目 Tab)、树形台账表、金额输入/展示
 │   ├── lib/                   # 预算公式库(占用/可调额度/汇总)、decimal、鉴权
 │   └── server/
 │       └── services/          # 业务服务(编制/记录/调整/台账/导出/统计...)
@@ -172,7 +179,7 @@ budget-management/
 ## 🧪 测试
 
 ```bash
-npm test                       # 129 项集成测试(直连真实 PostgreSQL)
+npm test                       # 132 项集成测试(直连真实 PostgreSQL)
 ```
 
 覆盖：编制审批、业务记录、双维度调整（含 §7.4/§7.5 可调额度与安全护栏）、台账上卷、Excel 导入、年度结转、统计、审计快照等。
