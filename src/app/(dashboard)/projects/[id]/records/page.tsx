@@ -25,6 +25,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
+import type { DateRange } from 'react-day-picker';
 import {
   Dialog,
   DialogContent,
@@ -141,8 +143,8 @@ interface ProjectDetail {
   id: string;
   code: string;
   name: string;
-  /** 服务端随详情下发:当前用户是否可编辑该项目(决定新增/修改/状态/作废入口)。 */
-  canEdit?: boolean;
+  /** 服务端随详情下发:是否可录入/维护业务记录(OWNER/HANDLER;决定新增/修改/状态/作废入口)。 */
+  canWriteRecords?: boolean;
 }
 
 interface LedgerResponse {
@@ -195,6 +197,35 @@ type RecordFormValues = z.infer<typeof recordSchema>;
 /** Select 的"全部"哨兵值(radix SelectItem 不允许空串)。 */
 const ALL = '__all__';
 
+/**
+ * 文本筛选输入:非受控 + Enter/失焦应用(key 随外部值重置)。
+ * 避免逐击键触发列表刷新与骨架闪烁。
+ */
+function FilterTextInput({
+  value,
+  onApply,
+  placeholder,
+}: {
+  value: string;
+  onApply: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <Input
+      key={value}
+      defaultValue={value}
+      placeholder={placeholder}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onApply(e.currentTarget.value.trim());
+      }}
+      onBlur={(e) => {
+        const v = e.target.value.trim();
+        if (v !== value) onApply(v);
+      }}
+    />
+  );
+}
+
 function BusinessRecordsPageInner() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
@@ -217,6 +248,10 @@ function BusinessRecordsPageInner() {
   );
   const [statusFilter, setStatusFilter] = useState<BusinessStatus | undefined>(undefined);
   const [includeVoid, setIncludeVoid] = useState(false);
+  // 扩展筛选(§8):经办人/摘要(包含匹配,Enter 或失焦应用)、业务日期范围。
+  const [handlerFilter, setHandlerFilter] = useState('');
+  const [summaryFilter, setSummaryFilter] = useState('');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   // 加载/错误。
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingMeta, setLoadingMeta] = useState(true);
@@ -285,33 +320,6 @@ function BusinessRecordsPageInner() {
     };
   }, [projectId]);
 
-  // 拉取业务记录(随筛选变化重拉)。
-  // loading 重置放在筛选事件处理器里(事件驱动),effect 内只发请求 + 异步落结果。
-  useEffect(() => {
-    let cancelled = false;
-    const qs = new URLSearchParams();
-    if (yearFilter !== undefined) qs.set('year', String(yearFilter));
-    if (subjectFilter) qs.set('subjectId', subjectFilter);
-    if (statusFilter) qs.set('status', statusFilter);
-    if (includeVoid) qs.set('includeVoid', '1');
-    const suffix = qs.toString();
-    apiFetch<{ records: BusinessRecordRow[] }>(
-      `/api/projects/${projectId}/records${suffix ? `?${suffix}` : ''}`,
-    )
-      .then((data) => {
-        if (!cancelled) setRecords(data.records ?? []);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) toast.error(e.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingRecords(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, yearFilter, subjectFilter, statusFilter, includeVoid]);
-
   /** 在变更(新增/修改/作废/状态切换)后重新拉取列表。 */
   const reloadRecords = useCallback(async () => {
     setLoadingRecords(true);
@@ -321,6 +329,10 @@ function BusinessRecordsPageInner() {
       if (subjectFilter) qs.set('subjectId', subjectFilter);
       if (statusFilter) qs.set('status', statusFilter);
       if (includeVoid) qs.set('includeVoid', '1');
+      if (handlerFilter) qs.set('handler', handlerFilter);
+      if (summaryFilter) qs.set('summary', summaryFilter);
+      if (dateRange?.from) qs.set('businessDateFrom', format(dateRange.from, 'yyyy-MM-dd'));
+      if (dateRange?.to) qs.set('businessDateTo', format(dateRange.to, 'yyyy-MM-dd'));
       const suffix = qs.toString();
       const data = await apiFetch<{ records: BusinessRecordRow[] }>(
         `/api/projects/${projectId}/records${suffix ? `?${suffix}` : ''}`,
@@ -331,7 +343,23 @@ function BusinessRecordsPageInner() {
     } finally {
       setLoadingRecords(false);
     }
-  }, [projectId, yearFilter, subjectFilter, statusFilter, includeVoid]);
+  }, [
+    projectId,
+    yearFilter,
+    subjectFilter,
+    statusFilter,
+    includeVoid,
+    handlerFilter,
+    summaryFilter,
+    dateRange,
+  ]);
+
+  // 拉取业务记录(随筛选变化重拉;筛选事件已重置 loading,此处只发请求)。
+  useEffect(() => {
+    // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中。禁用误报(仓库约定)。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void reloadRecords();
+  }, [reloadRecords]);
 
   /** 打开"新增"Dialog。 */
   const openCreate = () => {
@@ -577,7 +605,34 @@ function BusinessRecordsPageInner() {
             包含作废
           </label>
         </div>
-        {project?.canEdit ? (
+        {/* 第二行:文本/日期筛选(Enter 或失焦应用,避免逐击键刷新) */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid w-36 gap-1.5">
+            <Label>经办人</Label>
+            <FilterTextInput
+              value={handlerFilter}
+              placeholder="包含匹配"
+              onApply={(v) => applyFilter(setHandlerFilter, v)}
+            />
+          </div>
+          <div className="grid w-48 gap-1.5">
+            <Label>摘要关键词</Label>
+            <FilterTextInput
+              value={summaryFilter}
+              placeholder="包含匹配"
+              onApply={(v) => applyFilter(setSummaryFilter, v)}
+            />
+          </div>
+          <div className="grid w-64 gap-1.5">
+            <Label>业务日期</Label>
+            <DateRangePicker
+              value={dateRange}
+              onChange={(r) => applyFilter(setDateRange, r)}
+              placeholder="全部日期"
+            />
+          </div>
+        </div>
+        {project?.canWriteRecords ? (
           <Button onClick={openCreate}>
             <Plus />
             新增
@@ -648,7 +703,7 @@ function BusinessRecordsPageInner() {
                   <TableCell>
                     <div className="flex gap-1">
                       {/* 编辑类操作仅项目编辑者可见;历史为只读,全员可见。 */}
-                      {project?.canEdit ? (
+                      {project?.canWriteRecords ? (
                         <>
                           <Button
                             variant="ghost"

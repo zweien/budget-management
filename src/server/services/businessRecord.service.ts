@@ -47,6 +47,13 @@ export interface ListRecordsFilters {
   subjectId?: string;
   status?: BusinessStatus;
   includeVoid?: boolean;
+  /** 经办人(包含匹配,忽略大小写)。 */
+  handler?: string;
+  /** 摘要关键词(包含匹配,忽略大小写)。 */
+  summary?: string;
+  /** 业务发生日期范围(yyyy-mm-dd,闭区间)。 */
+  businessDateFrom?: string;
+  businessDateTo?: string;
 }
 
 /** §8.4 超预算预警的返回结构:createRecord 与 updateRecord 均带 overBudget 标志。 */
@@ -268,6 +275,21 @@ export async function listRecords(
   }
   if (!filters.includeVoid) {
     where.isVoid = false;
+  }
+  if (filters.handler) {
+    where.handler = { contains: filters.handler, mode: 'insensitive' };
+  }
+  if (filters.summary) {
+    where.summary = { contains: filters.summary, mode: 'insensitive' };
+  }
+  if (filters.businessDateFrom || filters.businessDateTo) {
+    where.businessDate = {};
+    if (filters.businessDateFrom) {
+      where.businessDate.gte = parseBusinessDate(filters.businessDateFrom);
+    }
+    if (filters.businessDateTo) {
+      where.businessDate.lte = parseBusinessDate(filters.businessDateTo);
+    }
   }
 
   return prisma.businessRecord.findMany({

@@ -426,4 +426,72 @@ describe('businessRecord.service (integration, real PG)', () => {
     );
     expect(contract.length).toBe(0);
   });
+
+  it('listRecords 扩展筛选:handler/summary 包含匹配 + 业务日期范围', async () => {
+    const { project, leafA } = await seedApprovedProject('FILTER');
+
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '10.00',
+        businessDate: '2026-03-05',
+        handler: '张三',
+        summary: '采购实验材料',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '20.00',
+        businessDate: '2026-06-20',
+        handler: '李四',
+        summary: '差旅报销',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // handler 包含匹配(忽略大小写)。
+    const byZhang = await listRecords(project.id, { handler: '张' }, adminUser());
+    expect(byZhang.length).toBe(1);
+    expect(byZhang[0].handler).toBe('张三');
+
+    // summary 关键词包含匹配。
+    const bySummary = await listRecords(project.id, { summary: '材料' }, adminUser());
+    expect(bySummary.length).toBe(1);
+    expect(bySummary[0].summary).toBe('采购实验材料');
+
+    // 日期闭区间:仅 3 月。
+    const march = await listRecords(
+      project.id,
+      { businessDateFrom: '2026-03-01', businessDateTo: '2026-03-31' },
+      adminUser(),
+    );
+    expect(march.length).toBe(1);
+    expect(march[0].handler).toBe('张三');
+
+    // 仅下界:两条都 ≥ 2026-03-01;仅上界到 3 月底 → 1 条。
+    const fromMarch = await listRecords(
+      project.id,
+      { businessDateFrom: '2026-03-01' },
+      adminUser(),
+    );
+    expect(fromMarch.length).toBe(2);
+    const toMarch = await listRecords(project.id, { businessDateTo: '2026-03-31' }, adminUser());
+    expect(toMarch.length).toBe(1);
+
+    // 组合:handler + 日期范围 → 0 条(李四在 6 月)。
+    const combo = await listRecords(
+      project.id,
+      { handler: '李四', businessDateFrom: '2026-03-01', businessDateTo: '2026-03-31' },
+      adminUser(),
+    );
+    expect(combo.length).toBe(0);
+  });
 });
