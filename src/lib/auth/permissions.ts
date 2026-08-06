@@ -24,18 +24,21 @@ export type Action =
   | 'user:list' // 列出全部用户(仅管理员;成员管理选择器数据源)
   | 'member:manage'; // 管理项目成员/设定负责人(仅管理员)
 
-/** 项目级编辑动作:除全局矩阵外,还要求该项目 OWNER 成员身份(管理员豁免)。 */
-const EDIT_ACTIONS = new Set<Action>([
+/** 仅 OWNER 成员可执行的项目级编辑动作(预算/项目维护类;管理员豁免)。 */
+const OWNER_EDIT_ACTIONS = new Set<Action>([
   'project:edit',
   'budget:editInitial',
   'budget:editSubjectTree',
   'budget:adjust',
   'budget:changeSubject',
-  'record:create',
-  'record:edit',
-  'record:void',
   'record:import',
 ]);
+
+/** 业务记录写动作:OWNER 与 HANDLER 成员均可(录入人员=HANDLER;管理员豁免)。 */
+const RECORD_WRITE_ACTIONS = new Set<Action>(['record:create', 'record:edit', 'record:void']);
+
+/** 兼容旧引用:全部项目级编辑动作(OWNER_EDIT ∪ RECORD_WRITE)。 */
+const EDIT_ACTIONS = new Set<Action>([...OWNER_EDIT_ACTIONS, ...RECORD_WRITE_ACTIONS]);
 
 const ADMIN_ACTIONS = new Set<Action>([
   'project:view',
@@ -74,7 +77,7 @@ export function isEditAction(action: Action): boolean {
 }
 
 /**
- * 用户在某项目上是否有编辑权:管理员恒真;否则需该项目 OWNER 成员。
+ * 用户在某项目上是否有编辑权(预算/项目维护):管理员恒真;否则需该项目 OWNER 成员。
  * UI 门控与服务端 requirePermission 共用同一真相源。
  */
 export async function canEditProject(
@@ -90,23 +93,48 @@ export async function canEditProject(
 }
 
 /**
+ * 用户在某项目上是否可录入/维护业务记录:管理员恒真;
+ * 否则需该项目 OWNER 或 HANDLER 成员(HANDLER=录入人员)。
+ */
+export async function canWriteRecords(
+  user: { id: string; role: UserRole },
+  projectId: string,
+): Promise<boolean> {
+  if (user.role === 'ADMIN') return true;
+  const member = await prisma.projectMember.findUnique({
+    where: { projectId_userId: { projectId, userId: user.id } },
+    select: { memberRole: true },
+  });
+  return member?.memberRole === 'OWNER' || member?.memberRole === 'HANDLER';
+}
+
+/**
  * 要求用户具备某动作权限:
- *  - 项目级编辑动作(EDIT_ACTIONS):不看全局矩阵,由"管理员 或 该项目 OWNER 成员"决定
- *    (USER 角色的项目负责人在其项目内可编辑);必须携带 projectId。
+ *  - 预算/项目维护类(OWNER_EDIT_ACTIONS):管理员 或 该项目 OWNER 成员。
+ *  - 业务记录写动作(RECORD_WRITE_ACTIONS):管理员 或 该项目 OWNER/HANDLER 成员。
  *  - 其余动作:全局角色矩阵校验(查看类 USER 也有;审批/管理类仅 ADMIN)。
- * 服务端权限再校验(§15.3)。
+ * 项目级动作均须携带 projectId。服务端权限再校验(§15.3)。
  */
 export async function requirePermission(
   user: { id: string; role: UserRole },
   action: Action,
   projectId?: string,
 ): Promise<void> {
-  if (EDIT_ACTIONS.has(action)) {
+  if (OWNER_EDIT_ACTIONS.has(action)) {
     if (!projectId) {
       throw new HTTPError(403, `操作 ${action} 需要指定项目`);
     }
     if (!(await canEditProject(user, projectId))) {
       throw new HTTPError(403, '仅项目负责人在该项目内可执行此操作');
+    }
+    return;
+  }
+  if (RECORD_WRITE_ACTIONS.has(action)) {
+    if (!projectId) {
+      throw new HTTPError(403, `操作 ${action} 需要指定项目`);
+    }
+    if (!(await canWriteRecords(user, projectId))) {
+      throw new HTTPError(403, '仅项目成员(负责人/录入成员)在该项目内可执行此操作');
     }
     return;
   }

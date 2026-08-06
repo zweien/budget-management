@@ -3,6 +3,23 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与[语义化版本](https://semver.org/lang/zh-CN/)。
 版本发布流程见 [AGENTS.md](./AGENTS.md)。
 
+## [0.4.0] - 2026-08-06
+
+### 新增
+
+- **统一业务录入页**(`/records`，侧边栏「业务录入」)：跨项目录入卡片（项目 → 叶科目级联，支持连续录入）+ 全局记录列表（默认"我可录入的项目"，可切全部只读），行内修改/作废
+- 新增 `GET /api/me/projects`：全部项目 + 当前用户权限标记（统一页数据源）
+- 成员管理与级联选择改可搜索 Combobox（新增 cmdk Command/Combobox 组件）
+
+### 变更
+
+- **HANDLER 成员开放业务记录写权限**(`record:create/edit/void`；录入人员=HANDLER)：预算编制/调整/导入仍为 OWNER 专属；项目详情随下发 `canWriteRecords`
+- 业务记录列表扩展筛选：经办人（包含）/ 摘要关键词（包含）/ 业务日期范围（服务端 + 页面）
+
+### 修复
+
+- 业务记录页筛选与变更刷新共用同一查询（修掉筛选变化后列表卡加载态）
+
 ## [0.3.0] - 2026-08-05
 
 ### 新增

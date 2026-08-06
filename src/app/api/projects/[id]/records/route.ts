@@ -13,7 +13,8 @@ const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
 
 /**
  * GET /api/projects/:id/records — 列出业务记录(§8)。
- * Query:year, subjectId, status, includeVoid(0/1)。
+ * Query:year, subjectId, status, includeVoid(0/1),
+ *       handler(包含), summary(包含), businessDateFrom/To(yyyy-mm-dd 闭区间)。
  * 默认不含作废记录。
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -43,6 +44,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const includeVoidParam = sp.get('includeVoid');
     if (includeVoidParam === '1' || includeVoidParam === 'true') {
       filters.includeVoid = true;
+    }
+    const handler = sp.get('handler')?.trim();
+    if (handler) filters.handler = handler;
+    const summary = sp.get('summary')?.trim();
+    if (summary) filters.summary = summary;
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+    const dateFrom = sp.get('businessDateFrom');
+    if (dateFrom) {
+      if (!DATE_RE.test(dateFrom)) {
+        return NextResponse.json(
+          { error: 'businessDateFrom 格式应为 yyyy-mm-dd' },
+          { status: 400 },
+        );
+      }
+      filters.businessDateFrom = dateFrom;
+    }
+    const dateTo = sp.get('businessDateTo');
+    if (dateTo) {
+      if (!DATE_RE.test(dateTo)) {
+        return NextResponse.json({ error: 'businessDateTo 格式应为 yyyy-mm-dd' }, { status: 400 });
+      }
+      filters.businessDateTo = dateTo;
     }
 
     const records = await listRecords(id, filters, user);

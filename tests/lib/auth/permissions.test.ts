@@ -57,6 +57,7 @@ describe('RBAC matrix(v0.3.0 两级角色)', () => {
 describe('requirePermission 项目级编辑权(集成,真实 PG)', () => {
   let adminId: string;
   let ownerUserId: string;
+  let handlerUserId: string;
   let outsiderId: string;
   let projectId: string;
 
@@ -64,26 +65,26 @@ describe('requirePermission 项目级编辑权(集成,真实 PG)', () => {
     await prisma.$connect();
     adminId = uuidv7();
     ownerUserId = uuidv7();
+    handlerUserId = uuidv7();
     outsiderId = uuidv7();
     projectId = uuidv7();
     await prisma.user.createMany({
       data: [
         { id: adminId, name: 'perm-admin', role: UserRole.ADMIN },
         { id: ownerUserId, name: 'perm-owner', role: UserRole.USER },
+        { id: handlerUserId, name: 'perm-handler', role: UserRole.USER },
         { id: outsiderId, name: 'perm-outsider', role: UserRole.USER },
       ],
     });
     await prisma.project.create({
       data: { id: projectId, code: `PERM-${uuidv7().slice(0, 8)}`, name: 'perm', ownerId: adminId },
     });
-    // ownerUser 是该项目 OWNER 成员;outsider 无任何成员关系。
-    await prisma.projectMember.create({
-      data: {
-        id: uuidv7(),
-        projectId,
-        userId: ownerUserId,
-        memberRole: 'OWNER',
-      },
+    // ownerUser 是该项目 OWNER 成员;handlerUser 是 HANDLER(录入成员);outsider 无成员关系。
+    await prisma.projectMember.createMany({
+      data: [
+        { id: uuidv7(), projectId, userId: ownerUserId, memberRole: 'OWNER' },
+        { id: uuidv7(), projectId, userId: handlerUserId, memberRole: 'HANDLER' },
+      ],
     });
   });
 
@@ -91,27 +92,40 @@ describe('requirePermission 项目级编辑权(集成,真实 PG)', () => {
     await prisma.projectMember.deleteMany({ where: { projectId } }).catch(() => {});
     await prisma.project.delete({ where: { id: projectId } }).catch(() => {});
     await prisma.user
-      .deleteMany({ where: { id: { in: [adminId, ownerUserId, outsiderId] } } })
+      .deleteMany({ where: { id: { in: [adminId, ownerUserId, handlerUserId, outsiderId] } } })
       .catch(() => {});
     await prisma.$disconnect();
   });
 
   const admin = () => ({ id: adminId, role: UserRole.ADMIN });
   const owner = () => ({ id: ownerUserId, role: UserRole.USER });
+  const handler = () => ({ id: handlerUserId, role: UserRole.USER });
   const outsider = () => ({ id: outsiderId, role: UserRole.USER });
 
-  it('canEditProject:管理员恒真;OWNER 成员真;非成员假', async () => {
+  it('canEditProject:管理员恒真;OWNER 成员真;HANDLER/非成员假', async () => {
     await expect(canEditProject(admin(), projectId)).resolves.toBe(true);
     await expect(canEditProject(owner(), projectId)).resolves.toBe(true);
+    await expect(canEditProject(handler(), projectId)).resolves.toBe(false);
     await expect(canEditProject(outsider(), projectId)).resolves.toBe(false);
   });
 
-  it('编辑类动作:OWNER 成员放行,非成员 403,管理员豁免成员检查', async () => {
-    await expect(requirePermission(owner(), 'record:create', projectId)).resolves.toBeUndefined();
-    await expect(requirePermission(outsider(), 'record:create', projectId)).rejects.toMatchObject({
-      status: 403,
-    });
-    await expect(requirePermission(admin(), 'record:create', projectId)).resolves.toBeUndefined();
+  it('业务记录写动作:OWNER 与 HANDLER 放行,非成员 403', async () => {
+    for (const a of ['record:create', 'record:edit', 'record:void'] as Action[]) {
+      await expect(requirePermission(owner(), a, projectId)).resolves.toBeUndefined();
+      await expect(requirePermission(handler(), a, projectId)).resolves.toBeUndefined();
+      await expect(requirePermission(outsider(), a, projectId)).rejects.toMatchObject({
+        status: 403,
+      });
+      await expect(requirePermission(admin(), a, projectId)).resolves.toBeUndefined();
+    }
+  });
+
+  it('预算/项目维护类:HANDLER 仍 403(仅 OWNER)', async () => {
+    for (const a of ['budget:adjust', 'budget:editInitial', 'record:import'] as Action[]) {
+      await expect(requirePermission(handler(), a, projectId)).rejects.toMatchObject({
+        status: 403,
+      });
+    }
   });
 
   it('查看类动作:所有登录用户对任意项目放行(全局只读)', async () => {

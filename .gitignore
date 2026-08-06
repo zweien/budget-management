@@ -54,3 +54,6 @@ Thumbs.db
 
 # Python venv(docx 导出用)
 .venv/
+
+# mimosa 安全扫描产物
+.mimosa/

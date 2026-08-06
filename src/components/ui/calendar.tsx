@@ -31,7 +31,7 @@ function Calendar({
         month: 'flex w-full flex-col gap-4',
         month_caption: 'relative flex h-7 items-center justify-center',
         caption_label: 'text-sm font-medium',
-        nav: 'absolute inset-x-0 top-0 flex h-7 items-center justify-between',
+        nav: 'absolute inset-x-0 top-0 z-10 flex h-7 items-center justify-between',
         button_previous: cn(
           buttonVariants({ variant: 'outline', size: 'sm' }),
           'size-7 bg-transparent p-0 opacity-60 hover:opacity-100',

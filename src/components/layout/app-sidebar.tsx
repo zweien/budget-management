@@ -8,6 +8,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ClipboardCheck,
+  ClipboardPlus,
   FolderKanban,
   LayoutDashboard,
   NotebookText,
@@ -22,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 const NAV_ITEMS = [
   { href: '/', label: '工作台', icon: LayoutDashboard },
   { href: '/projects', label: '项目管理', icon: FolderKanban },
+  { href: '/records', label: '业务录入', icon: ClipboardPlus },
   { href: '/approvals', label: '审批中心', icon: ClipboardCheck },
   { href: '/statistics', label: '统计分析', icon: ChartColumn },
   { href: '/audit-logs', label: '操作日志', icon: ScrollText },
