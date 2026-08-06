@@ -199,6 +199,14 @@ function ValuesFilter<TData>({
           variant="ghost"
           size="sm"
           className="h-6 px-1.5 text-xs"
+          onClick={() => apply(new Set())}
+        >
+          取消全选
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-1.5 text-xs"
           onClick={() => column.setFilterValue(undefined)}
         >
           清除筛选
