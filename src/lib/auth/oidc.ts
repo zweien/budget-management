@@ -54,6 +54,15 @@ export const SESSION_TTL_SECONDS = 8 * 60 * 60;
 /** OIDC 流程 cookie 时长:10 分钟(完成一次登录跳转足够)。 */
 export const OIDC_FLOW_TTL_SECONDS = 10 * 60;
 
+/**
+ * cookie 的 Secure 标记按对外 URL 协议推导(而非 NODE_ENV):
+ * 生产环境也可能以 http 部署(内网/反代终止 TLS 前的场景),此时 Secure cookie
+ * 不会被浏览器回传,登录流程直接断链(codex PR#3 P1)。
+ */
+export function secureCookies(): boolean {
+  return env.APP_BASE_URL.startsWith('https://');
+}
+
 export interface OidcFlowState {
   state: string;
   nonce: string;

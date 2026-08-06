@@ -11,6 +11,7 @@ import {
   OIDC_FLOW_COOKIE,
   AUTH_MODE_COOKIE,
   SESSION_COOKIE,
+  secureCookies,
   SESSION_TTL_SECONDS,
   type OidcFlowState,
 } from '@/lib/auth/oidc';
@@ -74,14 +75,14 @@ export async function GET(req: NextRequest) {
     res.cookies.set(SESSION_COOKIE, sessionJwt, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure: secureCookies(),
       maxAge: SESSION_TTL_SECONDS,
       path: '/',
     });
     // 非 HttpOnly 模式标记:客户端 apiFetch 据此跳过 mock bootstrap 探测。
     res.cookies.set(AUTH_MODE_COOKIE, 'sso', {
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure: secureCookies(),
       maxAge: SESSION_TTL_SECONDS,
       path: '/',
     });

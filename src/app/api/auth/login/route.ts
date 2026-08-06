@@ -6,6 +6,7 @@ import {
   getOidcConfig,
   oidcRedirectUri,
   sanitizeReturnTo,
+  secureCookies,
   OIDC_FLOW_COOKIE,
   OIDC_FLOW_TTL_SECONDS,
   type OidcFlowState,
@@ -55,7 +56,7 @@ export async function GET(req: NextRequest) {
   res.cookies.set(OIDC_FLOW_COOKIE, JSON.stringify(flow), {
     httpOnly: true,
     sameSite: 'lax',
-    secure: env.NODE_ENV === 'production',
+    secure: secureCookies(),
     maxAge: OIDC_FLOW_TTL_SECONDS,
     path: '/',
   });
