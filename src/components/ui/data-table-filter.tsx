@@ -3,14 +3,27 @@
 import * as React from 'react';
 import type { Column } from '@tanstack/react-table';
 import type { DateRange } from 'react-day-picker';
+import {
+  startOfDay,
+  startOfWeek,
+  startOfMonth,
+  startOfQuarter,
+  startOfYear,
+  subDays,
+  endOfDay,
+  endOfWeek,
+  endOfMonth,
+  endOfQuarter,
+  endOfYear,
+} from 'date-fns';
 import { Funnel } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
 import type { NumberRangeValue } from '@/lib/table/filter-fns';
 
 export type ColumnFilterType = 'values' | 'text' | 'range' | 'dateRange';
@@ -235,12 +248,99 @@ function RangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
   );
 }
 
+/** 日期预设(基于"今天"动态计算闭区间)。 */
+interface DatePreset {
+  label: string;
+  get: () => DateRange;
+}
+
+function useDatePresets(): DatePreset[] {
+  return React.useMemo(() => {
+    const today = new Date();
+    return [
+      { label: '今天', get: () => ({ from: startOfDay(today), to: endOfDay(today) }) },
+      {
+        label: '最近 7 天',
+        get: () => ({ from: startOfDay(subDays(today, 6)), to: endOfDay(today) }),
+      },
+      {
+        label: '最近 30 天',
+        get: () => ({ from: startOfDay(subDays(today, 29)), to: endOfDay(today) }),
+      },
+      {
+        label: '本周',
+        get: () => ({
+          from: startOfWeek(today, { weekStartsOn: 1 }),
+          to: endOfWeek(today, { weekStartsOn: 1 }),
+        }),
+      },
+      { label: '本月', get: () => ({ from: startOfMonth(today), to: endOfMonth(today) }) },
+      {
+        label: '本季度',
+        get: () => ({ from: startOfQuarter(today), to: endOfQuarter(today) }),
+      },
+      { label: '本年', get: () => ({ from: startOfYear(today), to: endOfYear(today) }) },
+    ];
+  }, []);
+}
+
+/** 两个 DateRange 是否代表同一天区间。 */
+function sameRange(a?: DateRange, b?: DateRange): boolean {
+  const fa = a?.from ? a.from.getTime() : 0;
+  const ta = a?.to ? a.to.getTime() : 0;
+  const fb = b?.from ? b.from.getTime() : 0;
+  const tb = b?.to ? b.to.getTime() : 0;
+  return fa === fb && ta === tb;
+}
+
 function DateRangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
+  const value = column.getFilterValue() as DateRange | undefined;
+  const presets = useDatePresets();
+
+  const apply = (r: DateRange | undefined) => {
+    column.setFilterValue(r?.from || r?.to ? r : undefined);
+  };
+
   return (
-    <DateRangePicker
-      value={column.getFilterValue() as DateRange | undefined}
-      onChange={(r) => column.setFilterValue(r?.from || r?.to ? r : undefined)}
-      placeholder="全部日期"
-    />
+    <div className="flex gap-2">
+      {/* 快捷预设 */}
+      <div className="flex w-32 shrink-0 flex-col gap-0.5 border-r border-border pr-2">
+        <button
+          type="button"
+          onClick={() => apply(undefined)}
+          className={cn(
+            'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
+            !value ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
+          )}
+        >
+          全部
+        </button>
+        {presets.map((p) => {
+          const r = p.get();
+          const active = sameRange(value, r);
+          return (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => apply(r)}
+              className={cn(
+                'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
+                active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
+              )}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+      {/* 自定义日历选范围 */}
+      <Calendar
+        mode="range"
+        selected={value}
+        onSelect={apply}
+        numberOfMonths={1}
+        className="border-0 p-0"
+      />
+    </div>
   );
 }
