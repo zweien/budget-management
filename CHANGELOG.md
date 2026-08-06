@@ -3,46 +3,36 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与[语义化版本](https://semver.org/lang/zh-CN/)。
 版本发布流程见 [AGENTS.md](./AGENTS.md)。
 
-## [0.4.0] - 2026-08-06
+## [0.3.0] - 2026-08-06
 
 ### 新增
 
-- **统一业务录入页**(`/records`，侧边栏「业务录入」)：跨项目录入卡片（项目 → 叶科目级联，支持连续录入）+ 全局记录列表（默认"我可录入的项目"，可切全部只读），行内修改/作废
-- 新增 `GET /api/me/projects`：全部项目 + 当前用户权限标记（统一页数据源）
-- 成员管理与级联选择改可搜索 Combobox（新增 cmdk Command/Combobox 组件）
+- **Authentik SSO 登录**:登录页 + OIDC 授权码流程(PKCE/state/nonce),`openid-client` + `jose` 手写集成,会话为 HttpOnly JWT cookie(8h)
+- 首次 SSO 登录自动建档(JIT,默认普通用户);`npm run make-admin -- <用户名>` 提升首个管理员
+- 项目成员管理:管理员在项目概览页增删成员、调整角色(负责人=全部权限 / 成员=可录入),全程审计留痕
+- 新建项目可指定负责人(自动获得 OWNER 成员编辑权)
+- 顶栏用户菜单(姓名 + 角色 + 退出登录,联动 Authentik end-session)
+- **统一业务录入页**(`/records`,侧边栏「业务录入」):跨项目录入卡片(项目 → 叶科目级联,连续录入)+ 全局记录列表(默认可录入项目,可切全部只读),行内修改/作废
+- 新增 `GET /api/me/projects`:全部项目 + 当前用户权限标记(统一页数据源)
+- 成员管理与级联选择改可搜索 Combobox(新增 cmdk Command/Combobox 组件)
+- **业务记录 Excel 式表头筛选**(两页):每列表头漏斗(值清单勾选 / 文本包含 / 金额范围 / 日期范围);日期筛选含快捷预设(今天/最近7天/本月/本季度/本年等)+ 起止日期输入框 + 日历拖选
 
 ### 变更
 
-- **HANDLER 成员开放业务记录写权限**(`record:create/edit/void`；录入人员=HANDLER)：预算编制/调整/导入仍为 OWNER 专属；项目详情随下发 `canWriteRecords`
-- 业务记录列表扩展筛选：经办人（包含）/ 摘要关键词（包含）/ 业务日期范围（服务端 + 页面）
-
-### 修复
-
-- 业务记录页筛选与变更刷新共用同一查询（修掉筛选变化后列表卡加载态）
-
-## [0.3.0] - 2026-08-05
-
-### 新增
-
-- **Authentik SSO 登录**：登录页 + OIDC 授权码流程（PKCE/state/nonce),`openid-client` + `jose` 手写集成，会话为 HttpOnly JWT cookie(8h)
-- 首次 SSO 登录自动建档（JIT，默认普通用户）;`npm run make-admin -- <用户名>` 提升首个管理员
-- 项目成员管理：管理员在项目概览页增删成员、调整角色（负责人=可编辑 / 成员=只读），全程审计留痕
-- 新建项目可指定负责人（自动获得 OWNER 成员编辑权）
-- 顶栏用户菜单（姓名 + 角色 + 退出登录，联动 Authentik end-session)
-
-### 变更
-
-- **角色模型收敛（破坏性）**：全局角色改为 `ADMIN` / `USER` 两级；项目编辑权改由 `ProjectMember(OWNER)` 驱动——存量 `PROJECT_OWNER` / `AUTHORIZED_HANDLER` 用户迁移为 `USER`，并按 `Project.ownerId` 自动回填 OWNER 成员行
-- **普通用户全局只读**：全部项目的台账/记录/统计/审计日志可见（跨项目统计与导出同步开放），编辑动作服务端 403
-- HANDLER 成员语义降级为只读成员（历史存量保留，不再拥有编辑权）
-- 查看态 UI 门控：无编辑权时隐藏/禁用新建项目、新增记录、发起调整、保存、导入等入口
-- `MOCK_AUTH` 开关保留：本地开发/测试继续用 mock 身份；`false` 时启用 SSO 并强制要求 OIDC 环境变量
-- `/api/users` 在 SSO 模式下仅管理员可用（`user:list`);`excel-template` 下载补充登录校验
+- **角色模型收敛(破坏性)**:全局角色改为 `ADMIN` / `USER` 两级;项目编辑权改由 `ProjectMember(OWNER)` 驱动——存量 `PROJECT_OWNER` / `AUTHORIZED_HANDLER` 用户迁移为 `USER`,并按 `Project.ownerId` 自动回填 OWNER 成员行
+- **HANDLER 成员可录入**:`record:create/edit/void` 对 OWNER+HANDLER 放行(录入人员=HANDLER);预算编制/调整/导入仍 OWNER 专属;项目详情随下发 `canEdit` + `canWriteRecords`
+- **普通用户全局只读**:全部项目的台账/记录/统计/审计日志可见,编辑动作服务端 403
+- 查看态 UI 门控:无编辑权时隐藏/禁用新建项目、新增记录、发起调整、保存、导入等入口
+- `MOCK_AUTH` 开关保留:本地开发/测试继续用 mock 身份;`false` 时启用 SSO 并强制要求 OIDC 环境变量
+- `/api/users` 在 SSO 模式下仅管理员可用(`user:list`);`excel-template` 下载补充登录校验
 
 ### 修复
 
 - 审批待办接口由原始角色比较改为权限矩阵校验
-- 调整草稿编辑/删除补齐项目级权限校验（此前只查全局角色）
+- 调整草稿编辑/删除补齐项目级权限校验(此前只查全局角色)
+- 业务记录页筛选与变更刷新共用同一查询(修掉筛选变化后列表卡加载态)
+- 日历月份切换箭头被网格覆盖(加 z-10)
+- cookie Secure 标记按 APP_BASE_URL 协议推导(修 http 生产部署登录断链)
 
 ## [0.2.0] - 2026-08-05
 
