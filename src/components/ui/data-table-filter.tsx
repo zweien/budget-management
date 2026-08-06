@@ -300,6 +300,26 @@ function sameRange(a?: DateRange, b?: DateRange): boolean {
   return fa === fb && ta === tb;
 }
 
+/** Date → "YYYY-MM-DD"(供原生 date input 的 value)。 */
+function toDateInput(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** "YYYY-MM-DD" → Date(本地午夜,避免时区漂移);非法返回 undefined。 */
+function parseDateInput(s: string): Date | undefined {
+  const parts = s.trim().split('-');
+  if (parts.length !== 3) return undefined;
+  const y = Number(parts[0]);
+  const mo = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d)) return undefined;
+  const date = new Date(y, mo - 1, d);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 function DateRangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
   const value = column.getFilterValue() as DateRange | undefined;
   const presets = useDatePresets();
@@ -340,14 +360,47 @@ function DateRangeFilter<TData>({ column }: { column: Column<TData, unknown> }) 
           );
         })}
       </div>
-      {/* 自定义日历选范围 */}
-      <Calendar
-        mode="range"
-        selected={value}
-        onSelect={apply}
-        numberOfMonths={1}
-        className="border-0 p-0"
-      />
+      {/* 右栏:起止日期输入 + 日历选范围 */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            value={value?.from ? toDateInput(value.from) : ''}
+            onChange={(e) => {
+              const from = parseDateInput(e.target.value);
+              if (from) {
+                apply({ from, to: value?.to ?? from });
+              } else {
+                apply(undefined);
+              }
+            }}
+            aria-label="起始日期"
+            className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+          <span className="text-mute">—</span>
+          <input
+            type="date"
+            value={value?.to ? toDateInput(value.to) : ''}
+            onChange={(e) => {
+              const to = parseDateInput(e.target.value);
+              if (to) {
+                apply({ from: value?.from ?? to, to });
+              } else {
+                apply(undefined);
+              }
+            }}
+            aria-label="结束日期"
+            className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+        </div>
+        <Calendar
+          mode="range"
+          selected={value}
+          onSelect={apply}
+          numberOfMonths={1}
+          className="border-0 p-0"
+        />
+      </div>
     </div>
   );
 }
