@@ -87,13 +87,13 @@ describe('excelImport.service (integration, real PG)', () => {
   const createdProjectIds: string[] = [];
   const createdUserIds: string[] = [];
   let adminId: string;
-  const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
 
   beforeAll(async () => {
     await prisma.$connect();
     adminId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-excel', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-excel', role: UserRole.ADMIN },
     });
     createdUserIds.push(adminId);
   });
@@ -109,7 +109,10 @@ describe('excelImport.service (integration, real PG)', () => {
   /** 建项目 + 直接插入科目(含一个非叶父科目 100 与一个叶科目 101)。返回 { project, leafCode, parentCode }。 */
   async function seedProject(suffix: string) {
     const code = `XI-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `excel ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `excel ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const parentId = uuidv7();
@@ -422,7 +425,7 @@ describe('excelImport.service (integration, real PG)', () => {
     const { project, leafCode } = await seedProject('PERM');
     const outsiderId = uuidv7();
     await prisma.user.create({
-      data: { id: outsiderId, name: 'outsider-excel', role: UserRole.AUTHORIZED_HANDLER },
+      data: { id: outsiderId, name: 'outsider-excel', role: UserRole.USER },
     });
     createdUserIds.push(outsiderId);
 
@@ -441,7 +444,7 @@ describe('excelImport.service (integration, real PG)', () => {
     await expect(
       parseAndValidate(buf, project.id, {
         id: outsiderId,
-        role: UserRole.AUTHORIZED_HANDLER,
+        role: UserRole.USER,
       }),
     ).rejects.toMatchObject({ status: 403 });
   });

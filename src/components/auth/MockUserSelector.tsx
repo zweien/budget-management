@@ -22,16 +22,14 @@ interface UserOption {
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  PROJECT_OWNER: '项目负责人',
-  AUTHORIZED_HANDLER: '经办人',
-  BUDGET_ADMIN: '预算管理员',
+  ADMIN: '预算管理员',
+  USER: '普通用户',
 };
 
-/** Badge 语义色遵循 DESIGN.md:蓝=link/success、琥珀=warning、ink=primary。 */
-const ROLE_BADGE: Record<string, 'success' | 'warning' | 'default'> = {
-  PROJECT_OWNER: 'success',
-  AUTHORIZED_HANDLER: 'warning',
-  BUDGET_ADMIN: 'default',
+/** Badge 语义色遵循 DESIGN.md:ink=primary(管理员)、琥珀=warning(普通用户)。 */
+const ROLE_BADGE: Record<string, 'warning' | 'default'> = {
+  ADMIN: 'default',
+  USER: 'warning',
 };
 
 /**

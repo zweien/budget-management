@@ -8,7 +8,7 @@ import {
 
 /**
  * GET /api/statistics/cross-project — 跨项目统计(§11.5)。
- * 仅 BUDGET_ADMIN 可用(其余角色由服务层返回 403)。
+ * 所有登录用户可用(全局只读,§2.2 v0.3.0)。
  * 可选 query: year(占用按年度过滤)。
  * 返回 { projects: [{projectId, name, currentBudget, totalOccupied, paid, balance, executionRate}] }。
  */

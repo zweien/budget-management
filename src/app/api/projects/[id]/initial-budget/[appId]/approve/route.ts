@@ -5,7 +5,7 @@ import { approveApplication } from '@/server/services/initialBudget.service';
 
 /**
  * POST /api/projects/:id/initial-budget/:appId/approve — 审批生效(§6.3 整体生效)。
- * body 可选 { opinion }。仅 BUDGET_ADMIN 有 budget:approve 权限。
+ * body 可选 { opinion }。仅 ADMIN 有 budget:approve 权限。
  */
 export async function POST(
   req: NextRequest,

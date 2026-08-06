@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/layout/empty-state';
+import { MembersCard } from '@/components/projects/members-card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -34,6 +35,15 @@ interface ProjectDetail {
   ownerId: string;
   remark: string | null;
   createdAt: string;
+  /** 服务端随详情下发:当前用户是否可编辑该项目(ADMIN 或 OWNER 成员)。 */
+  canEdit: boolean;
+}
+
+/** /api/me 当前用户。 */
+interface CurrentUser {
+  id: string;
+  name: string;
+  role: 'ADMIN' | 'USER';
 }
 
 /** 初始预算编制单状态。 */
@@ -98,6 +108,7 @@ export default function ProjectDetailPage() {
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [budget, setBudget] = useState<InitialBudgetState | null>(null);
+  const [me, setMe] = useState<CurrentUser | null>(null);
   // 初始即为 true,避免 mount effect 内同步 setState(react-hooks/set-state-in-effect)。
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -114,9 +125,10 @@ export default function ProjectDetailPage() {
     let cancelled = false;
     const load = async () => {
       try {
-        const [p, b] = await Promise.allSettled([
+        const [p, b, m] = await Promise.allSettled([
           apiFetch<ProjectDetail>(`/api/projects/${projectId}`),
           apiFetch<InitialBudgetState | null>(`/api/projects/${projectId}/initial-budget`),
+          apiFetch<CurrentUser>('/api/me'),
         ]);
         if (cancelled) return;
         if (p.status === 'fulfilled') {
@@ -128,6 +140,9 @@ export default function ProjectDetailPage() {
         }
         if (b.status === 'fulfilled' && b.value) {
           setBudget(b.value);
+        }
+        if (m.status === 'fulfilled') {
+          setMe(m.value);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -204,16 +219,18 @@ export default function ProjectDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold tracking-[-0.3px]">项目信息</h2>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setCarryoverResult(null);
-            setCarryoverError(null);
-            setCarryoverOpen(true);
-          }}
-        >
-          跨年结转
-        </Button>
+        {project.canEdit ? (
+          <Button
+            variant="outline"
+            onClick={() => {
+              setCarryoverResult(null);
+              setCarryoverError(null);
+              setCarryoverOpen(true);
+            }}
+          >
+            跨年结转
+          </Button>
+        ) : null}
       </div>
 
       {/* 描述网格:hairline 网格线,替代 antd Descriptions bordered */}
@@ -246,6 +263,9 @@ export default function ProjectDetailPage() {
           {project.remark ?? '—'}
         </DescCell>
       </dl>
+
+      {/* 成员管理:仅管理员可见(服务端 member:manage 二次拦截)。 */}
+      {me?.role === 'ADMIN' ? <MembersCard projectId={project.id} /> : null}
 
       {isEffective ? (
         <Alert variant="success">

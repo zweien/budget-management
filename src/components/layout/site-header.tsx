@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { SidebarBrand, SidebarFooter, SidebarNav } from '@/components/layout/app-sidebar';
 import { ThemeToggle } from '@/components/layout/theme-toggle';
-import { MockUserSelector } from '@/components/auth/MockUserSelector';
+import { AuthWidget } from '@/components/auth/AuthWidget';
 
 /** DESIGN.md nav-bar 规格:64px 高、canvas 面、hairline 底边。 */
 export function SiteHeader({ version }: { version: string }) {
@@ -37,7 +37,7 @@ export function SiteHeader({ version }: { version: string }) {
       </Sheet>
 
       <div className="ml-auto flex items-center gap-2">
-        <MockUserSelector />
+        <AuthWidget />
         <ThemeToggle />
       </div>
     </header>

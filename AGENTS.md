@@ -6,6 +6,25 @@
 
 科研项目预算管理系统：Next.js 16(App Router)+ React 19 + Prisma + PostgreSQL,前端 shadcn/ui + Tailwind CSS 4(DESIGN.md token 体系)。常用命令:`npm run dev` / `npm test` / `npm run check-types` / `npm run lint` / `npm run build`。
 
+## 认证与权限(v0.3.0 起)
+
+### 两种模式(`MOCK_AUTH` 切换)
+
+- **`MOCK_AUTH=true`(本地开发/测试默认)**:无登录页;顶栏「模拟用户选择器」切换身份,经 `x-mock-user-id` header 注入,`getCurrentUser()` 读 header。
+- **`MOCK_AUTH=false`(SSO)**:Authentik OIDC 授权码流程(`/api/auth/login|callback|logout`),会话为 HttpOnly JWT cookie(`bm_session`,8h,jose HS256);`getCurrentUser()` 验签后**实时查库**(改角色/停用即时生效)。
+
+### 角色模型
+
+- 全局角色只有两级:**`ADMIN`**(全部权限)/ **`USER`**(全局只读:所有项目的台账/记录/统计/审计可见)。
+- **项目编辑权由 `ProjectMember` 驱动**:OWNER=可编辑,HANDLER=只读成员;与全局角色正交(USER 成为某项目 OWNER 后即可编辑该项目)。
+- 管理入口:项目概览页「成员管理」卡片(仅 ADMIN 可见);API 层由 `requirePermission(user, action, projectId)` 统一拦截(编辑类动作查成员表,其余查全局矩阵)。
+- **首次启用 SSO 的管理员引导**:先用 Authentik 账号登录一次(JIT 自动建档为 USER),再 `npm run make-admin -- <用户名>` 提升 ADMIN。
+
+### SSO 环境变量(`MOCK_AUTH=false` 时必填,env.ts 启动校验)
+
+`AUTHENTIK_ISSUER` / `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` / `AUTH_SECRET`(`openssl rand -base64 32`)/ `APP_BASE_URL`。
+Authentik 侧:建 OAuth2 Provider(Confidential,Redirect URI `<APP_BASE_URL>/api/auth/callback`,Subject mode=User ID)+ Application(slug 与 ISSUER 路径一致)。
+
 ## 版本发布流程(确保版本号唯一)
 
 **唯一事实源:`package.json` 的 `version` 字段;git tag `vX.Y.Z` 与其一一对应。**

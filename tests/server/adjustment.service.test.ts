@@ -97,13 +97,13 @@ async function expectHTTP(fn: () => Promise<unknown>, status: number): Promise<H
 describe('adjustment.service (integration, real PG) — 双维度调整', () => {
   const createdProjectIds: string[] = [];
   let adminId: string;
-  const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
 
   beforeAll(async () => {
     await prisma.$connect();
     adminId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-adj', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-adj', role: UserRole.ADMIN },
     });
   });
 
@@ -118,7 +118,10 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
   /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB }。 */
   async function seedApprovedProject(suffix: string) {
     const code = `ADJ-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `adj ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `adj ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validBudgetPayload(), adminUser());

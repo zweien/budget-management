@@ -2,8 +2,7 @@ import { Prisma, Project, User, MemberRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
-import { requirePermission } from '@/lib/auth/permissions';
-import { getAccessibleProjectIds } from '@/lib/auth/projects';
+import { requirePermission, canEditProject } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { recordAudit } from '@/server/audit/interceptor';
 
@@ -32,13 +31,15 @@ export interface UpdateProjectInput {
 }
 
 /**
- * 新建项目(§16.1):校验 code 系统内唯一 → 事务内建 Project + ProjectBudget(初始/当前均为 0)
- * + 把 owner 加为 ProjectMember(OWNER 角色)+ 审计 create。code 冲突 → HTTPError 409。
+ * 新建项目(§16.1):仅管理员(project:create)→ 校验 code 系统内唯一 →
+ * 事务内建 Project + ProjectBudget(初始/当前均为 0)
+ * + 把 owner 加为 ProjectMember(OWNER 角色,获得该项目编辑权)+ 审计 create。code 冲突 → HTTPError 409。
  */
 export async function createProject(
   input: CreateProjectInput,
-  user: Pick<User, 'id'>,
+  user: Pick<User, 'id' | 'role'>,
 ): Promise<Project> {
+  await requirePermission(user, 'project:create');
   const ownerId = input.ownerId ?? user.id;
   const projectId = uuidv7();
 
@@ -103,19 +104,14 @@ export async function createProject(
 }
 
 /**
- * 列出项目:预算管理员看全部;其余角色按 getAccessibleProjectIds 过滤。
+ * 列出项目。
+ * v0.3.0 起普通用户全局只读 → 所有登录用户看到全部(未归档)项目;
+ * 编辑权不在此处区分(由 canEditProject / requirePermission 在编辑动作上拦截)。
  */
 export async function listProjects(user: { id: string; role: User['role'] }): Promise<Project[]> {
-  if (user.role === 'BUDGET_ADMIN') {
-    return prisma.project.findMany({
-      where: { archivedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-  const ids = await getAccessibleProjectIds(user);
-  if (ids.length === 0) return [];
+  void user; // 签名保持兼容;查看范围已与角色无关。
   return prisma.project.findMany({
-    where: { id: { in: ids }, archivedAt: null },
+    where: { archivedAt: null },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -124,11 +120,13 @@ export async function listProjects(user: { id: string; role: User['role'] }): Pr
 export async function getProject(
   id: string,
   user: { id: string; role: User['role'] },
-): Promise<Project> {
+): Promise<Project & { canEdit: boolean }> {
   await requirePermission(user, 'project:view', id);
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) throw new HTTPError(404, '项目不存在');
-  return project;
+  // 编辑权随详情下发,供前端门控编辑入口(仅项目 OWNER 成员/管理员为 true)。
+  const canEdit = await canEditProject(user, id);
+  return { ...project, canEdit };
 }
 
 /** 更新项目:权限校验后更新可改字段并审计。 */

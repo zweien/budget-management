@@ -1,4 +1,4 @@
-import { BusinessStatus, Prisma, User, UserRole } from '@prisma/client';
+import { BusinessStatus, Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
@@ -23,7 +23,7 @@ import { computeOccupancy, executionRate } from '@/lib/budget';
 
 /** §11.3 自定义统计组合筛选条件。 */
 export interface CustomStatisticsFilters {
-  /** 项目 ID(指定后走 project:view + 项目范围;否则仅 BUDGET_ADMIN 可跨项目查询)。 */
+  /** 项目 ID(指定后按该项目过滤;否则跨项目,所有登录用户可查)。 */
   projectId?: string;
   /** 预算年度。 */
   budgetYear?: number;
@@ -72,7 +72,7 @@ export interface CustomStatisticsResult {
  *
  * 权限:
  * - 若指定 projectId:`requirePermission(user, 'project:view', projectId)`(含项目范围)。
- * - 否则(跨项目查询):仅 BUDGET_ADMIN 可执行,其余角色 403。
+ * - 否则(跨项目查询):v0.3.0 起所有登录用户可查(全局只读)。
  *
  * 实现:
  * - 按 filters 构建 Prisma where 查询 business_records(按 businessDate desc 排序)。
@@ -85,12 +85,9 @@ export async function customStatistics(
   filters: CustomStatisticsFilters,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<CustomStatisticsResult> {
-  // 1) 权限。
+  // 1) 权限:v0.3.0 起普通用户全局只读,跨项目查询对所有登录用户开放。
   if (filters.projectId) {
     await requirePermission(user, 'project:view', filters.projectId);
-  } else if (user.role !== UserRole.BUDGET_ADMIN) {
-    // 跨项目查询仅 BUDGET_ADMIN 可执行。
-    throw new HTTPError(403, '跨项目统计仅预算管理员可执行');
   }
 
   // 2) 构建 business_records 查询条件。
@@ -237,7 +234,7 @@ export interface CrossProjectStatisticsResult {
 /**
  * §11.5 跨项目统计。
  *
- * - 权限:仅 BUDGET_ADMIN,其余角色 403。
+ * - 权限:所有登录用户(全局只读)。
  * - 对管理员可见的全部项目(非归档)逐项汇总:
  *   - 总预算 = ProjectBudget.currentAmount(项目层面,§11.5)。
  *   - 总占用 = 项目有效记录(可按 year 过滤)的占用合计。
@@ -248,11 +245,10 @@ export async function crossProjectStatistics(
   filters: CrossProjectStatisticsFilters,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<CrossProjectStatisticsResult> {
-  if (user.role !== UserRole.BUDGET_ADMIN) {
-    throw new HTTPError(403, '跨项目统计仅预算管理员可执行');
-  }
+  // v0.3.0 起普通用户全局只读 → 跨项目统计对所有登录用户开放(只读聚合)。
+  await requirePermission(user, 'project:view');
 
-  // 1) 管理员可见全部项目(非归档)。
+  // 1) 全部项目(非归档)逐项汇总。
   const projects = await prisma.project.findMany({
     where: { archivedAt: null },
     orderBy: { createdAt: 'desc' },

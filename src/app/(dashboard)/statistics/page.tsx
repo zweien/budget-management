@@ -8,7 +8,7 @@ import type { DateRange } from 'react-day-picker';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
 import { PageHeader } from '@/components/layout/page-header';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -63,12 +63,6 @@ interface ProjectOption {
   name: string;
 }
 
-interface CurrentUser {
-  id: string;
-  name: string;
-  role: string;
-}
-
 /** 叶科目(从 ledger nodes isLeaf=true 取得)。 */
 interface LeafSubject {
   subjectId: string;
@@ -107,39 +101,7 @@ const ALL = '__all__';
 // 主组件
 // ============================================================
 export default function StatisticsPage() {
-  // 拉取当前用户(用于跨项目 tab 鉴权判定)。
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch<CurrentUser>('/api/me')
-      .then((u) => {
-        if (!cancelled) setCurrentUser(u);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) toast.error(e.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingUser(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (loadingUser) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
-  }
-
-  const isAdmin = currentUser?.role === 'BUDGET_ADMIN';
-
+  // v0.3.0 起普通用户全局只读:三个统计 tab 对所有登录用户开放,无需角色门控。
   return (
     <div className="space-y-6">
       <PageHeader
@@ -161,7 +123,7 @@ export default function StatisticsPage() {
           <MonthlyHistoryTab />
         </TabsContent>
         <TabsContent value="cross">
-          <CrossProjectTab isAdmin={isAdmin} />
+          <CrossProjectTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -787,9 +749,9 @@ interface CrossProjectResult {
   projects: CrossProjectRow[];
 }
 
-function CrossProjectTab({ isAdmin }: { isAdmin: boolean }) {
+function CrossProjectTab() {
   const [result, setResult] = useState<CrossProjectResult | null>(null);
-  // 初始即 true(admin 挂载自动查询),避免 mount effect 内同步 setState。
+  // 初始即 true(挂载自动查询),避免 mount effect 内同步 setState。
   const [loading, setLoading] = useState(true);
   const [hasQueried, setHasQueried] = useState(false);
 
@@ -806,9 +768,8 @@ function CrossProjectTab({ isAdmin }: { isAdmin: boolean }) {
     }
   }, []);
 
-  // 仅管理员首次挂载自动查询一次(loading 已为 true)。
+  // 首次挂载自动查询一次(loading 已为 true)。
   useEffect(() => {
-    if (!isAdmin) return;
     let cancelled = false;
     apiFetch<CrossProjectResult>('/api/statistics/cross-project')
       .then((data) => {
@@ -826,21 +787,12 @@ function CrossProjectTab({ isAdmin }: { isAdmin: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin]);
+  }, []);
 
   const handleRefresh = () => {
     setLoading(true);
     void runQuery();
   };
-
-  if (!isAdmin) {
-    return (
-      <Alert variant="warning">
-        <AlertTitle>仅预算管理员可访问</AlertTitle>
-        <AlertDescription>跨项目统计(§11.5)仅 BUDGET_ADMIN 可执行。</AlertDescription>
-      </Alert>
-    );
-  }
 
   return (
     <div className="space-y-4">

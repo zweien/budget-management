@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:seed": "tsx prisma/seed.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "make-admin": "tsx scripts/make-admin.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -48,10 +49,12 @@
     "date-fns": "^4.4.0",
     "decimal.js": "^10.6.0",
     "exceljs": "^4.4.0",
+    "jose": "^6.2.8",
     "jszip": "^3.10.1",
     "lucide-react": "^1.28.0",
     "next": "16.2.12",
     "next-themes": "^0.4.6",
+    "openid-client": "^6.8.4",
     "react": "19.2.4",
     "react-day-picker": "^10.0.1",
     "react-dom": "19.2.4",

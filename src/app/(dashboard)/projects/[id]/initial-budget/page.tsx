@@ -72,6 +72,8 @@ interface ProjectDetail {
   id: string;
   code: string;
   name: string;
+  /** 服务端随详情下发:当前用户是否可编辑该项目(查看态门控)。 */
+  canEdit?: boolean;
 }
 
 /** §6 getDraft 返回结构(见 InitialBudgetDraftView)。 */
@@ -400,8 +402,12 @@ export default function InitialBudgetPage() {
 
   const status = draft?.status;
 
-  // 可编辑态:无草稿、或草稿处于 DRAFT/REJECTED/WITHDRAWN。
-  const editable = !draft || status === 'DRAFT' || status === 'REJECTED' || status === 'WITHDRAWN';
+  // 可编辑态:(无草稿、或草稿处于 DRAFT/REJECTED/WITHDRAWN)且当前用户有该项目编辑权。
+  // project.canEdit 由服务端随详情下发(ADMIN 或 OWNER 成员);未取到时保守按可编辑,
+  // 服务端 requirePermission 二次拦截兜底。
+  const statusEditable =
+    !draft || status === 'DRAFT' || status === 'REJECTED' || status === 'WITHDRAWN';
+  const editable = statusEditable && project?.canEdit !== false;
 
   // 已生效(APPROVED)态:拉取台账数据,以树形表(与 ledger 页一致)展示。
   const approvedYear = draft?.annualBudgets?.[0]?.year ?? new Date().getFullYear();
@@ -1080,6 +1086,13 @@ export default function InitialBudgetPage() {
       {status === 'WITHDRAWN' && (
         <Alert variant="warning">
           <AlertDescription>该编制单已撤回,可继续编辑后重新提交。</AlertDescription>
+        </Alert>
+      )}
+      {statusEditable && project?.canEdit === false && (
+        <Alert variant="info">
+          <AlertDescription>
+            你只有查看权限,编辑器为只读。如需编辑,请联系管理员将你设为该项目负责人。
+          </AlertDescription>
         </Alert>
       )}
 

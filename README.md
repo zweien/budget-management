@@ -11,7 +11,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://www.postgresql.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-38BDF8?logo=tailwindcss)](https://tailwindcss.com/)
 [![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-Radix-000000)](https://ui.shadcn.com/)
-[![Tests](https://img.shields.io/badge/tests-132%20passed-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-152%20passed-brightgreen)](#测试)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 </div>
@@ -23,6 +23,7 @@
 ## ✨ 核心特性
 
 - 🔁 **全闭环预算管理** —— 从立项编制到结项统计，覆盖预算的完整生命周期
+- 🔐 **Authentik SSO + 三级权限** —— 管理员（全局）/ 普通用户（全局只读）/ 项目负责人（项目级可编辑，成员表驱动）
 - 🌳 **树形科目体系** —— 直接费 / 间接费多级科目树，支持自定义科目与预设模板（PRD 附录 A）
 - 📊 **实时占用聚合** —— 台账按 `已支出 + 应付未付` 实时计算占用、结余与执行率，无需手动结转
 - ⚖️ **双维度预算调整** —— 一次调整同时处理「科目总预算」与「年度预算」两个维度，收支平衡校验 + 可调额度锁定
@@ -55,7 +56,7 @@ flowchart LR
 | **后端**     | Next.js Route Handlers · Prisma 5 ORM · Zod 校验                                                                 |
 | **数据库**   | PostgreSQL 16                                                                                                    |
 | **金额运算** | decimal.js（全链路字符串传输，杜绝浮点误差）                                                                     |
-| **测试**     | Vitest（132 项集成测试，直连真实 PG）                                                                            |
+| **测试**     | Vitest（152 项集成测试，直连真实 PG）                                                                            |
 | **工程化**   | ESLint · Prettier · Husky · commitlint · lint-staged                                                             |
 
 ### UI 设计体系
@@ -110,17 +111,21 @@ npm run dev                   # http://localhost:3000
 
 > 仓库另附 `scripts/gen_adjustment_docx.py` 作为 Python（python-docx）实现的可选参考，默认未启用。
 
-> 默认账号（V1 mock 鉴权，可在顶部切换身份）：
+### 7.（可选）接入 Authentik SSO
+
+默认 `MOCK_AUTH=true`（本地开发用模拟身份）。接入 SSO：在 Authentik 建 OAuth2 Provider(Confidential,Redirect URI `http://localhost:3000/api/auth/callback`)+ Application(slug 建议 `budget`),把凭据填入 `.env` 并设 `MOCK_AUTH=false`，详见 [AGENTS.md](./AGENTS.md) 认证体系小节。首个管理员：`npm run make-admin -- <用户名>`。
+
+> 默认账号（mock 模式，可在顶部切换身份）：
 >
-> - **张管理**（预算管理员 BUDGET_ADMIN）
-> - **李负责人**（项目负责人 PROJECT_OWNER）
-> - **王经办人**（经办人 AUTHORIZED_HANDLER）
+> - **张管理**（预算管理员 ADMIN)
+> - **李负责人**（普通用户 USER)
+> - **王经办人**（普通用户 USER)
 
 ## 📖 主要功能
 
 | 模块           | 说明                                                                              |
 | -------------- | --------------------------------------------------------------------------------- |
-| **项目管理**   | 立项、起止时间、级别、归档                                                        |
+| **项目管理**   | 立项、起止时间、级别、归档；管理员可指定/调整项目负责人（成员管理）               |
 | **预算编制**   | 树形科目编辑器、新编制默认预设模板、单位×数量×单价自动算金额、父节点汇总          |
 | **预算审批**   | 提交 / 审批 / 驳回 / 撤回，审批中心统一待办                                       |
 | **预算调整**   | 双维度（总预算 + 年度）联动表单，收支平衡校验，可调额度锁定                       |
@@ -179,7 +184,7 @@ budget-management/
 ## 🧪 测试
 
 ```bash
-npm test                       # 132 项集成测试(直连真实 PostgreSQL)
+npm test                       # 152 项集成测试(直连真实 PostgreSQL)
 ```
 
 覆盖：编制审批、业务记录、双维度调整（含 §7.4/§7.5 可调额度与安全护栏）、台账上卷、Excel 导入、年度结转、统计、审计快照等。

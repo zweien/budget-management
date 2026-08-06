@@ -73,7 +73,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     await prisma.$connect();
     adminId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-t3', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-t3', role: UserRole.ADMIN },
     });
   });
 
@@ -87,12 +87,15 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('createDraft: 事务内建 application(DRAFT)+ 科目树 + 叶/年度预算 + ProjectBudget.initialAmount,current = 0(§6.3 审批生效才置位)', async () => {
     const code = `T3-OK-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 ok' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 ok' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
 
     // application 状态 DRAFT。
@@ -167,7 +170,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     // getDraft 回填结构正确。
     const draft = await getDraft(project.id, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     expect(draft.id).toBe(appId);
     expect(draft.projectTotal).toBe('1000.00');
@@ -179,7 +182,10 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('createDraft: §6.4 叶节点合计 > 年度 → HTTPError 422', async () => {
     const code = `T3-VIO-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 viol' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 viol' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const bad = validPayload();
@@ -188,7 +194,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     // (subjectBudgets 沿用 validPayload:6×100=600 + 4×100=400)
 
     await expect(
-      createDraft(project.id, bad, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+      createDraft(project.id, bad, { id: adminId, role: UserRole.ADMIN }),
     ).rejects.toMatchObject({ status: 422 });
 
     // 校验失败不应留下任何编制数据。
@@ -200,7 +206,10 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('createDraft: §enhance3 金额由 service 端以 数量×单价 重算(忽略客户端 amount),并落库 unit/quantity/unitPrice', async () => {
     const code = `T3-CALC-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 calc' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 calc' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const p = validPayload();
@@ -233,7 +242,7 @@ describe('initialBudget.service (integration, real PG)', () => {
 
     const { appId } = await createDraft(project.id, p, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     expect(appId).toBeDefined();
 
@@ -256,7 +265,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     expect(sbA!.unitPrice!.toFixed(2)).toBe('100.00');
 
     // getDraft 回填明细。
-    const draft = await getDraft(project.id, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    const draft = await getDraft(project.id, { id: adminId, role: UserRole.ADMIN });
     const sbAView = draft.subjectBudgets.find((sb) => sb.subjectCode === 'A')!;
     expect(sbAView.amount).toBe('700.00');
     expect(sbAView.unit).toBe('台');
@@ -266,7 +275,10 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('createDraft: §enhance3 缺计量单位 → HTTPError 422', async () => {
     const code = `T3-NOUNIT-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 nounit' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 nounit' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const bad = validPayload();
@@ -274,13 +286,16 @@ describe('initialBudget.service (integration, real PG)', () => {
     bad.subjectBudgets[0]!.unit = '';
 
     await expect(
-      createDraft(project.id, bad, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+      createDraft(project.id, bad, { id: adminId, role: UserRole.ADMIN }),
     ).rejects.toMatchObject({ status: 422 });
   });
 
   it('createDraft: §B 规则1 — 叶科目跨年度总预算合计 > 项目总预算 → HTTPError 422', async () => {
     const code = `T3-ST1-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 st1' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 st1' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const bad = validPayload();
@@ -310,7 +325,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     // 总预算合计仍 1000 > 900 → 规则1 触发。每个科目分配 ≤ 自己总预算(规则3 通过)。
 
     await expect(
-      createDraft(project.id, bad, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+      createDraft(project.id, bad, { id: adminId, role: UserRole.ADMIN }),
     ).rejects.toMatchObject({ status: 422 });
 
     const apps = await prisma.initialBudgetApplication.findMany({
@@ -321,7 +336,10 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('createDraft: §B 规则3 — 单个叶科目跨年度分配合计 > 其总预算 → HTTPError 422', async () => {
     const code = `T3-ST3-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 st3' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 st3' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const bad = validPayload();
@@ -362,7 +380,7 @@ describe('initialBudget.service (integration, real PG)', () => {
     // 规则1:总预算合计 600+400=1000 ≤ 2000(通过)。
 
     await expect(
-      createDraft(project.id, bad, { id: adminId, role: UserRole.BUDGET_ADMIN }),
+      createDraft(project.id, bad, { id: adminId, role: UserRole.ADMIN }),
     ).rejects.toMatchObject({ status: 422 });
 
     const apps = await prisma.initialBudgetApplication.findMany({
@@ -373,7 +391,10 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('createDraft: §B 留余额允许 — 分配合计 < 总预算(规则3 通过,不抛错)', async () => {
     const code = `T3-STOK-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 stok' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 stok' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const ok = validPayload();
@@ -388,7 +409,7 @@ describe('initialBudget.service (integration, real PG)', () => {
 
     const { appId } = await createDraft(project.id, ok, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     expect(appId).toBeDefined();
 
@@ -400,34 +421,40 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('createDraft: 重复编制(同一项目再创建)→ HTTPError 409', async () => {
     const code = `T3-DUP-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 dup' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 dup' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
 
     await expect(
       createDraft(project.id, validPayload(), {
         id: adminId,
-        role: UserRole.BUDGET_ADMIN,
+        role: UserRole.ADMIN,
       }),
     ).rejects.toMatchObject({ status: 409 });
   });
 
   it('submitDraft: DRAFT → PENDING,submittedAt 置位,审计 submit', async () => {
     const code = `T3-SUB-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 sub' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 sub' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
 
     const before = new Date();
-    const result = await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    const result = await submitDraft(appId, { id: adminId, role: UserRole.ADMIN });
     expect(result.status).toBe(ApprovalStatus.PENDING);
 
     const app = await prisma.initialBudgetApplication.findUnique({
@@ -445,27 +472,33 @@ describe('initialBudget.service (integration, real PG)', () => {
 
   it('submitDraft: 非 DRAFT 状态(已 PENDING)再提交 → HTTPError 409', async () => {
     const code = `T3-RESUB-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 't3 resub' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 't3 resub' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
-    await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await submitDraft(appId, { id: adminId, role: UserRole.ADMIN });
 
-    await expect(
-      submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN }),
-    ).rejects.toMatchObject({ status: 409 });
+    await expect(submitDraft(appId, { id: adminId, role: UserRole.ADMIN })).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it('updateDraft: 修改 DRAFT 草稿(重建科目/预算),current 仍为 0;PENDING 不可改→409', async () => {
     const code = `UPD-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'upd' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'upd' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
     const { appId } = await createDraft(project.id, validPayload(), {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
 
     // 修改:总预算改 2000,叶 A 改 1000(仍满足 §6.4)。
@@ -501,7 +534,7 @@ describe('initialBudget.service (integration, real PG)', () => {
         { subjectCode: 'C', amount: '1000.00' },
       ],
     };
-    const res = await updateDraft(appId, updated, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    const res = await updateDraft(appId, updated, { id: adminId, role: UserRole.ADMIN });
     expect(res.appId).toBe(appId);
 
     // 重建后:B 应被删除,C 应存在;A=1000;current 仍为 0(§6.3)。
@@ -518,9 +551,9 @@ describe('initialBudget.service (integration, real PG)', () => {
     expect(app?.status).toBe(ApprovalStatus.DRAFT);
 
     // PENDING 不可改 → 提交后 updateDraft 应 409。
-    await submitDraft(appId, { id: adminId, role: UserRole.BUDGET_ADMIN });
+    await submitDraft(appId, { id: adminId, role: UserRole.ADMIN });
     await expect(
-      updateDraft(appId, validPayload(), { id: adminId, role: UserRole.BUDGET_ADMIN }),
+      updateDraft(appId, validPayload(), { id: adminId, role: UserRole.ADMIN }),
     ).rejects.toMatchObject({ status: 409 });
   });
 });

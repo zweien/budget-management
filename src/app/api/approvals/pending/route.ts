@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 
-import { ApprovalStatus, UserRole } from '@prisma/client';
+import { ApprovalStatus } from '@prisma/client';
 
 import { HTTPError, requireUser } from '@/lib/auth/session';
+import { can } from '@/lib/auth/permissions';
 import { prisma } from '@/lib/prisma';
 
 /**
@@ -14,12 +15,12 @@ import { prisma } from '@/lib/prisma';
  *   因 BudgetAdjustment 无 applicant 关系,只存 applicantId)
  * - subjectChanges: SubjectChangeApplication status=PENDING
  *
- * 仅 BUDGET_ADMIN 可调用(审批权 budget:approve 仅 admin 拥有,§2.2)。
+ * 仅 ADMIN 可调用(审批权 budget:approve 仅 ADMIN 拥有,走权限矩阵)。
  */
 export async function GET() {
   try {
     const user = await requireUser();
-    if (user.role !== UserRole.BUDGET_ADMIN) {
+    if (!can(user, 'budget:approve')) {
       throw new HTTPError(403, '审批中心仅预算管理员可用');
     }
 

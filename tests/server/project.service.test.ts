@@ -25,13 +25,13 @@ describe('project.service (integration, real PG)', () => {
     adminId = uuidv7();
     outsiderId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-t1', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-t1', role: UserRole.ADMIN },
     });
     await prisma.user.create({
       data: {
         id: outsiderId,
         name: 'outsider-t1',
-        role: UserRole.AUTHORIZED_HANDLER,
+        role: UserRole.USER,
       },
     });
   });
@@ -51,7 +51,7 @@ describe('project.service (integration, real PG)', () => {
     const code = `T1-${uuidv7().slice(0, 8)}`;
     const project = await createProject(
       { code, name: '集成测试项目', remark: 't1' },
-      { id: adminId },
+      { id: adminId, role: UserRole.ADMIN },
     );
     createdProjectIds.push(project.id);
 
@@ -83,10 +83,15 @@ describe('project.service (integration, real PG)', () => {
 
   it('createProject: code 冲突抛 HTTPError 409', async () => {
     const code = `DUP-${uuidv7().slice(0, 8)}`;
-    const first = await createProject({ code, name: 'first' }, { id: adminId });
+    const first = await createProject(
+      { code, name: 'first' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(first.id);
 
-    await expect(createProject({ code, name: 'second' }, { id: adminId })).rejects.toMatchObject({
+    await expect(
+      createProject({ code, name: 'second' }, { id: adminId, role: UserRole.ADMIN }),
+    ).rejects.toMatchObject({
       status: 409,
     });
     expect.assertions(1);
@@ -94,47 +99,65 @@ describe('project.service (integration, real PG)', () => {
 
   it('listProjects: admin 返回全部(含本测试创建的项目)', async () => {
     const code = `LST-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'list test' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'list test' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
-    const list = await listProjects({ id: adminId, role: UserRole.BUDGET_ADMIN });
+    const list = await listProjects({ id: adminId, role: UserRole.ADMIN });
     expect(list.map((p) => p.id)).toContain(project.id);
   });
 
-  it('listProjects: 无项目权限的非管理员看不到他人项目', async () => {
+  it('listProjects: 普通用户可见全部项目(v0.3.0 全局只读)', async () => {
     const code = `LST2-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'admin only' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'admin only' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const list = await listProjects({
       id: outsiderId,
-      role: UserRole.AUTHORIZED_HANDLER,
+      role: UserRole.USER,
     });
-    expect(list.map((p) => p.id)).not.toContain(project.id);
+    expect(list.map((p) => p.id)).toContain(project.id);
   });
 
-  it('getProject: 越权访问他人项目抛 HTTPError 403', async () => {
+  it('getProject: 普通用户可查看任意项目详情(只读)', async () => {
     const code = `VIP-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'admin private' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'admin private' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
+    const got = await getProject(project.id, {
+      id: outsiderId,
+      role: UserRole.USER,
+    });
+    expect(got.id).toBe(project.id);
+  });
+
+  it('createProject: 普通用户无权新建项目(403)', async () => {
+    const code = `NOPERM-${uuidv7().slice(0, 8)}`;
     await expect(
-      getProject(project.id, {
-        id: outsiderId,
-        role: UserRole.AUTHORIZED_HANDLER,
-      }),
+      createProject({ code, name: 'forbidden' }, { id: outsiderId, role: UserRole.USER }),
     ).rejects.toMatchObject({ status: 403 });
     expect.assertions(1);
   });
 
   it('getProject: 有权限(admin)可正常取回', async () => {
     const code = `OK-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: 'visible' }, { id: adminId });
+    const project = await createProject(
+      { code, name: 'visible' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const got = await getProject(project.id, {
       id: adminId,
-      role: UserRole.BUDGET_ADMIN,
+      role: UserRole.ADMIN,
     });
     expect(got.id).toBe(project.id);
   });

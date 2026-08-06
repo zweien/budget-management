@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireUser, HTTPError } from '@/lib/auth/session';
 import { createProject, listProjects } from '@/server/services/project.service';
 
-/** GET /api/projects — 列出当前用户可访问的项目。 */
+/** GET /api/projects — 列出全部项目(v0.3.0 起普通用户全局只读)。 */
 export async function GET() {
   try {
     const user = await requireUser();

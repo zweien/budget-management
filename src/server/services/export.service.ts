@@ -161,7 +161,7 @@ function ledgerNodeRow(node: LedgerNode): (string | number)[] {
 /**
  * §10.5 导出自定义统计结果。
  *
- * 权限:复用 customStatistics 内部逻辑(指定 projectId 走 project:view;否则仅 BUDGET_ADMIN)。
+ * 权限:复用 customStatistics 内部逻辑(所有登录用户可查)。
  *
  * xlsx 结构:
  * - 元信息:筛选条件(键值对描述)/ 导出时间 / 操作人。

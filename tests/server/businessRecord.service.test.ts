@@ -81,13 +81,13 @@ function validPayload(): InitialBudgetPayload {
 describe('businessRecord.service (integration, real PG)', () => {
   const createdProjectIds: string[] = [];
   let adminId: string;
-  const adminUser = () => ({ id: adminId, role: UserRole.BUDGET_ADMIN });
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
 
   beforeAll(async () => {
     await prisma.$connect();
     adminId = uuidv7();
     await prisma.user.create({
-      data: { id: adminId, name: 'admin-t6', role: UserRole.BUDGET_ADMIN },
+      data: { id: adminId, name: 'admin-t6', role: UserRole.ADMIN },
     });
   });
 
@@ -102,7 +102,10 @@ describe('businessRecord.service (integration, real PG)', () => {
   /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB, root }。 */
   async function seedApprovedProject(suffix: string) {
     const code = `T6-${suffix}-${uuidv7().slice(0, 8)}`;
-    const project = await createProject({ code, name: `t6 ${suffix}` }, { id: adminId });
+    const project = await createProject(
+      { code, name: `t6 ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
     createdProjectIds.push(project.id);
 
     const { appId } = await createDraft(project.id, validPayload(), adminUser());

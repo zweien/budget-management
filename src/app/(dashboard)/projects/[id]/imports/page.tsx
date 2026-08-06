@@ -208,6 +208,21 @@ function ImportPageInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // 编辑权门控:undefined=未加载;false=只读(隐藏上传/确认入口)。
+  const [canEdit, setCanEdit] = useState<boolean | undefined>(undefined);
+
+  // 拉取项目详情拿 canEdit(只读用户隐藏导入入口;服务端 record:import 二次拦截)。
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ canEdit?: boolean }>(`/api/projects/${projectId}`)
+      .then((p) => {
+        if (!cancelled) setCanEdit(p.canEdit ?? false);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   // 首次/批次切换时拉取预览;effect 体内不调用 setState(全部在 Promise 回调中)。
   useEffect(() => {
@@ -409,11 +424,17 @@ function ImportPageInner() {
         </Card>
 
         {!confirmed ? (
-          <div className="flex justify-end">
-            <Button disabled={selected.size === 0 || confirming} onClick={handleConfirm}>
-              {confirming ? '导入中…' : `确认导入(${selected.size} 行)`}
-            </Button>
-          </div>
+          canEdit ? (
+            <div className="flex justify-end">
+              <Button disabled={selected.size === 0 || confirming} onClick={handleConfirm}>
+                {confirming ? '导入中…' : `确认导入(${selected.size} 行)`}
+              </Button>
+            </div>
+          ) : (
+            <Alert variant="info">
+              <AlertTitle>你只有查看权限,无法确认导入。</AlertTitle>
+            </Alert>
+          )
         ) : (
           <Alert variant="success">
             <AlertTitle>该批次已确认入库。</AlertTitle>
@@ -424,6 +445,20 @@ function ImportPageInner() {
   }
 
   // ---- 上传模式 ----
+  if (canEdit === false) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-base font-semibold tracking-[-0.3px]">Excel 批量导入</h2>
+        <Alert variant="info">
+          <AlertTitle>你只有查看权限</AlertTitle>
+          <AlertDescription>
+            导入业务记录需要该项目的编辑权限(项目负责人在项目详情页设定,或联系管理员)。
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
