@@ -642,8 +642,7 @@ function BusinessRecordsPageInner() {
         cell: ({ row }) => <RowActions row={row.original} />,
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subjectLabels],
+    [subjectLabels, yearOptions],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。

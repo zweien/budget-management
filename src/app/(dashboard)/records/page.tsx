@@ -103,20 +103,20 @@ interface UnifiedRecordRow {
   subject: { id: string; code: string; name: string } | null;
 }
 
-const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVED', 'PAID'] as const;
+const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] as const;
 type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
 const STATUS_LABEL: Record<string, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同签订',
-  FINANCE_APPROVED: '财务审批',
+  FINANCE_APPROVAL: '财务系统审批',
   PAID: '已支出',
 };
 
 const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'outline'> = {
   PLACEHOLDER: 'secondary',
   CONTRACT: 'warning',
-  FINANCE_APPROVED: 'outline',
+  FINANCE_APPROVAL: 'outline',
   PAID: 'success',
 };
 
@@ -124,7 +124,7 @@ const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'outlin
 const STATUS_FILTER_LABELS: Record<string, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同签订',
-  FINANCE_APPROVED: '财务审批',
+  FINANCE_APPROVAL: '财务系统审批',
   PAID: '已支出',
   __void__: '已作废',
 };
@@ -238,7 +238,10 @@ export default function UnifiedRecordsPage() {
   const reloadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const data = await apiFetch<{ records: UnifiedRecordRow[] }>('/api/statistics/custom');
+      // 含作废记录:状态列默认排除已作废,但勾选「已作废」后需能看到;作废可见性由客户端筛选控制。
+      const data = await apiFetch<{ records: UnifiedRecordRow[] }>(
+        '/api/statistics/custom?includeVoid=1',
+      );
       setRecords(data.records ?? []);
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
