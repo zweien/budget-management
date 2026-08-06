@@ -2,7 +2,11 @@ import { Prisma, Project, User, MemberRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
-import { requirePermission, canEditProject } from '@/lib/auth/permissions';
+import {
+  requirePermission,
+  canEditProject,
+  canWriteRecords as canWriteRecordsFn,
+} from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { recordAudit } from '@/server/audit/interceptor';
 
@@ -116,17 +120,63 @@ export async function listProjects(user: { id: string; role: User['role'] }): Pr
   });
 }
 
+/** 项目 + 当前用户权限标记(统一录入页的数据源)。 */
+export interface ProjectWithPermissions {
+  id: string;
+  code: string;
+  name: string;
+  /** 预算/项目维护权(OWNER 或管理员)。 */
+  canEdit: boolean;
+  /** 业务记录录入权(OWNER/HANDLER 或管理员)。 */
+  canWriteRecords: boolean;
+}
+
+/**
+ * 列出全部(未归档)项目并附带当前用户的权限标记。
+ * 查看本身全员开放;标记供统一录入页做项目选择与行级门控。
+ */
+export async function listProjectsWithPermissions(user: {
+  id: string;
+  role: User['role'];
+}): Promise<ProjectWithPermissions[]> {
+  const projects = await prisma.project.findMany({
+    where: { archivedAt: null },
+    orderBy: { code: 'asc' },
+    select: { id: true, code: true, name: true },
+  });
+  if (user.role === 'ADMIN') {
+    return projects.map((p) => ({ ...p, canEdit: true, canWriteRecords: true }));
+  }
+  const memberships = await prisma.projectMember.findMany({
+    where: { userId: user.id },
+    select: { projectId: true, memberRole: true },
+  });
+  const roleByProject = new Map(memberships.map((m) => [m.projectId, m.memberRole]));
+  return projects.map((p) => {
+    const role = roleByProject.get(p.id);
+    return {
+      ...p,
+      canEdit: role === 'OWNER',
+      canWriteRecords: role === 'OWNER' || role === 'HANDLER',
+    };
+  });
+}
+
 /** 取项目详情:先做 project:view 权限校验(含项目范围)。 */
 export async function getProject(
   id: string,
   user: { id: string; role: User['role'] },
-): Promise<Project & { canEdit: boolean }> {
+): Promise<Project & { canEdit: boolean; canWriteRecords: boolean }> {
   await requirePermission(user, 'project:view', id);
   const project = await prisma.project.findUnique({ where: { id } });
   if (!project) throw new HTTPError(404, '项目不存在');
-  // 编辑权随详情下发,供前端门控编辑入口(仅项目 OWNER 成员/管理员为 true)。
-  const canEdit = await canEditProject(user, id);
-  return { ...project, canEdit };
+  // 编辑权随详情下发,供前端门控:
+  // canEdit=预算/项目维护(OWNER);canWriteRecords=业务记录录入(OWNER/HANDLER)。
+  const [canEdit, canWriteRecords] = await Promise.all([
+    canEditProject(user, id),
+    canWriteRecordsFn(user, id),
+  ]);
+  return { ...project, canEdit, canWriteRecords };
 }
 
 /** 更新项目:权限校验后更新可改字段并审计。 */

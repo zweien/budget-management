@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Combobox } from '@/components/ui/combobox';
 import {
   Select,
   SelectContent,
@@ -30,8 +31,8 @@ interface UserOption {
 }
 
 const MEMBER_ROLE_LABEL: Record<string, string> = {
-  OWNER: '负责人(可编辑)',
-  HANDLER: '成员(只读)',
+  OWNER: '负责人(全部权限)',
+  HANDLER: '成员(可录入)',
 };
 
 /**
@@ -84,7 +85,7 @@ export function MembersCard({ projectId }: { projectId: string }) {
       <CardHeader>
         <CardTitle className="text-base">成员管理</CardTitle>
         <p className="text-xs text-muted-foreground">
-          负责人(OWNER)可编辑该项目预算与业务记录;普通成员只读。
+          负责人(OWNER)拥有该项目全部编辑权限;成员(HANDLER)可录入/维护业务记录。
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -150,18 +151,16 @@ export function MembersCard({ projectId }: { projectId: string }) {
         )}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={pickUser} onValueChange={setPickUser} disabled={busy}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="选择用户" />
-            </SelectTrigger>
-            <SelectContent>
-              {candidates.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Combobox
+            options={candidates.map((u) => ({ value: u.id, label: u.name }))}
+            value={pickUser}
+            onChange={setPickUser}
+            placeholder="选择用户"
+            searchPlaceholder="搜索用户名…"
+            emptyText="无匹配用户"
+            disabled={busy}
+            className="w-44"
+          />
           <Select
             value={pickRole}
             onValueChange={(v) => setPickRole(v as 'OWNER' | 'HANDLER')}
