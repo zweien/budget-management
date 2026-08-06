@@ -3,14 +3,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { ClipboardPlus, History, Search } from 'lucide-react';
+import { ClipboardPlus, Funnel, History } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import type { DateRange } from 'react-day-picker';
+
+import {
+  flexRender,
+  getCoreRowModel,
+  getFacetedRowModel,
+  getFacetedUniqueValues,
+  getFilteredRowModel,
+  useReactTable,
+  type ColumnDef,
+  type ColumnFiltersState,
+} from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { HeaderFilter } from '@/components/ui/data-table-filter';
+import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +30,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Combobox } from '@/components/ui/combobox';
 import { DatePicker } from '@/components/ui/date-picker';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
 import {
   Dialog,
   DialogContent,
@@ -109,6 +120,15 @@ const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'outlin
   PAID: 'success',
 };
 
+/** 状态筛选清单的展示映射(含作废哨兵)。 */
+const STATUS_FILTER_LABELS: Record<string, string> = {
+  PLACEHOLDER: '登记占位',
+  CONTRACT: '合同签订',
+  FINANCE_APPROVED: '财务审批',
+  PAID: '已支出',
+  __void__: '已作废',
+};
+
 /** 录入/编辑表单(schema 与项目内记录页一致)。 */
 const recordSchema = z.object({
   budgetYear: z.coerce.number().int('年度须为整数').min(1900).max(9999),
@@ -124,8 +144,6 @@ const recordSchema = z.object({
   remark: z.string().trim(),
 });
 type RecordFormValues = z.infer<typeof recordSchema>;
-
-const ALL = '__all__';
 
 // ============================================================
 // 页面
@@ -150,10 +168,8 @@ export default function UnifiedRecordsPage() {
   const [scope, setScope] = useState<'writable' | 'all'>('writable');
   const [records, setRecords] = useState<UnifiedRecordRow[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(true);
-  const [projectFilter, setProjectFilter] = useState<string>(ALL);
-  const [handlerFilter, setHandlerFilter] = useState('');
-  const [summaryFilter, setSummaryFilter] = useState('');
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  // Excel 式表头筛选(TanStack columnFilters;空数组=不过滤)。
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 
   // ---- 编辑/作废 ----
   const [editing, setEditing] = useState<UnifiedRecordRow | null>(null);
@@ -218,43 +234,184 @@ export default function UnifiedRecordsPage() {
     };
   }, []);
 
-  /** 列表重拉:服务端按 handler/日期范围过滤,其余在客户端。 */
+  /** 列表重拉:全量拉取(表头筛选全部在客户端进行,Excel 式即时过滤)。 */
   const reloadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const qs = new URLSearchParams();
-      if (handlerFilter) qs.set('handler', handlerFilter);
-      if (dateRange?.from) qs.set('businessDateFrom', format(dateRange.from, 'yyyy-MM-dd'));
-      if (dateRange?.to) qs.set('businessDateTo', format(dateRange.to, 'yyyy-MM-dd'));
-      const suffix = qs.toString();
-      const data = await apiFetch<{ records: UnifiedRecordRow[] }>(
-        `/api/statistics/custom${suffix ? `?${suffix}` : ''}`,
-      );
+      const data = await apiFetch<{ records: UnifiedRecordRow[] }>('/api/statistics/custom');
       setRecords(data.records ?? []);
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
     } finally {
       setLoadingRecords(false);
     }
-  }, [handlerFilter, dateRange]);
+  }, []);
 
   useEffect(() => {
-    // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中(异步)。禁用误报(仓库约定)。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中(异步)。
     void reloadRecords();
   }, [reloadRecords]);
 
-  /** 客户端组合过滤:范围(可录入/全部)+ 项目 + 摘要关键词。 */
-  const visibleRecords = useMemo(() => {
-    let rows = records;
-    if (scope === 'writable') rows = rows.filter((r) => writableIds.has(r.projectId));
-    if (projectFilter !== ALL) rows = rows.filter((r) => r.projectId === projectFilter);
-    if (summaryFilter) {
-      const kw = summaryFilter.toLowerCase();
-      rows = rows.filter((r) => r.summary.toLowerCase().includes(kw));
-    }
-    return rows;
-  }, [records, scope, writableIds, projectFilter, summaryFilter]);
+  /** 范围过滤(权限范围,非数据筛选):可录入项目 或 全部(只读)。 */
+  const tableData = useMemo(
+    () => (scope === 'writable' ? records.filter((r) => writableIds.has(r.projectId)) : records),
+    [records, scope, writableIds],
+  );
+
+  /** 项目列的稳定候选(不受本列筛选影响)。 */
+  const projectOptions = useMemo(() => Array.from(projectName.values()), [projectName]);
+
+  // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
+  const columns = useMemo<ColumnDef<UnifiedRecordRow>[]>(
+    () => [
+      {
+        id: 'project',
+        accessorFn: (row) => projectName.get(row.projectId) ?? row.projectId,
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="项目" type="values" options={projectOptions} />
+        ),
+        cell: ({ row }) => (
+          <Link
+            href={`/projects/${row.original.projectId}/records`}
+            className="text-link underline-offset-4 hover:underline"
+          >
+            <span className="block max-w-44 truncate">
+              {projectName.get(row.original.projectId) ?? row.original.projectId.slice(0, 8)}
+            </span>
+          </Link>
+        ),
+        filterFn: multiSelect<UnifiedRecordRow>(),
+      },
+      {
+        id: 'budgetYear',
+        accessorKey: 'budgetYear',
+        header: ({ column }) => <HeaderFilter column={column} title="年度" type="values" />,
+        cell: ({ row }) => <span className="tabular-nums">{row.original.budgetYear}</span>,
+        filterFn: multiSelect<UnifiedRecordRow>(),
+      },
+      {
+        id: 'subject',
+        accessorFn: (row) => row.subject?.name ?? '—',
+        header: ({ column }) => <HeaderFilter column={column} title="科目" type="values" />,
+        filterFn: multiSelect<UnifiedRecordRow>(),
+      },
+      {
+        id: 'amount',
+        accessorKey: 'amount',
+        header: ({ column }) => (
+          <span className="block text-right">
+            <HeaderFilter column={column} title="金额" type="range" />
+          </span>
+        ),
+        cell: ({ row }) => <MoneyText value={row.original.amount} riskOnNegative={false} />,
+        filterFn: numberRange<UnifiedRecordRow>(),
+      },
+      {
+        id: 'businessDate',
+        accessorKey: 'businessDate',
+        header: ({ column }) => <HeaderFilter column={column} title="业务日期" type="dateRange" />,
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {format(new Date(row.original.businessDate), 'yyyy-MM-dd')}
+          </span>
+        ),
+        filterFn: dateRange<UnifiedRecordRow>(),
+      },
+      {
+        id: 'status',
+        accessorFn: (row) => (row.isVoid ? '__void__' : row.status),
+        header: ({ column }) => (
+          <HeaderFilter
+            column={column}
+            title="状态"
+            type="values"
+            valueLabels={STATUS_FILTER_LABELS}
+          />
+        ),
+        cell: ({ row }) =>
+          row.original.isVoid ? (
+            <Badge variant="error">已作废</Badge>
+          ) : (
+            <Badge variant={STATUS_BADGE[row.original.status] ?? 'secondary'}>
+              {STATUS_LABEL[row.original.status] ?? row.original.status}
+            </Badge>
+          ),
+        filterFn: multiSelect<UnifiedRecordRow>(),
+      },
+      {
+        id: 'handler',
+        accessorKey: 'handler',
+        header: ({ column }) => <HeaderFilter column={column} title="经办人" type="values" />,
+        filterFn: multiSelect<UnifiedRecordRow>(),
+      },
+      {
+        id: 'summary',
+        accessorKey: 'summary',
+        header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" />,
+        cell: ({ row }) => (
+          <span className="block max-w-40 truncate" title={row.original.summary}>
+            {row.original.summary}
+          </span>
+        ),
+        filterFn: textContains<UnifiedRecordRow>(),
+      },
+      {
+        id: 'actions',
+        header: () => '操作',
+        enableColumnFilter: false,
+        cell: ({ row }) => <RowActions row={row.original} />,
+      },
+    ],
+    // RowActions 闭包内引用稳定函数;projectName 随项目元数据变化。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectName],
+  );
+
+  // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
+  const table = useReactTable({
+    data: tableData,
+    columns,
+    state: { columnFilters },
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getFacetedRowModel: getFacetedRowModel(),
+    getFacetedUniqueValues: getFacetedUniqueValues(),
+  });
+
+  /** 行内操作(修改/作废/查看;修改与作废仅可写项目且未作废)。 */
+  function RowActions({ row }: { row: UnifiedRecordRow }) {
+    const writable = writableIds.has(row.projectId);
+    return (
+      <div className="flex gap-1">
+        {writable && !row.isVoid ? (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => void openEdit(row)}>
+              修改
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-error-deep hover:bg-error-soft"
+              onClick={() => {
+                setVoidTarget(row);
+                setVoidReason('');
+                setVoidError(null);
+              }}
+            >
+              作废
+            </Button>
+          </>
+        ) : null}
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}`}>
+            <History />
+            查看
+          </Link>
+        </Button>
+      </div>
+    );
+  }
 
   /** 录入提交;连续录入时保留项目/科目/经办人。 */
   const onEntrySubmit = entryForm.handleSubmit(async (values) => {
@@ -544,86 +701,55 @@ export default function UnifiedRecordsPage() {
         </CardContent>
       </Card>
 
-      {/* ===== 记录列表 ===== */}
+      {/* ===== 记录列表(Excel 式表头筛选) ===== */}
       <div className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="grid w-40 gap-1.5">
-              <Label>范围</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as 'writable' | 'all')}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="writable">我可录入的项目</SelectItem>
-                  <SelectItem value="all">全部项目(只读)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid w-56 gap-1.5">
-              <Label>项目</Label>
-              <Select value={projectFilter} onValueChange={setProjectFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>全部项目</SelectItem>
-                  {(projects ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.code} {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid w-36 gap-1.5">
-              <Label>经办人</Label>
-              <Input
-                key={handlerFilter}
-                defaultValue={handlerFilter}
-                placeholder="包含匹配"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') setHandlerFilter(e.currentTarget.value.trim());
-                }}
-                onBlur={(e) => {
-                  if (e.target.value.trim() !== handlerFilter)
-                    setHandlerFilter(e.target.value.trim());
-                }}
-              />
-            </div>
-            <div className="grid w-44 gap-1.5">
-              <Label>摘要关键词</Label>
-              <Input
-                value={summaryFilter}
-                placeholder="即时过滤"
-                onChange={(e) => setSummaryFilter(e.target.value.trim())}
-              />
-            </div>
-            <div className="grid w-64 gap-1.5">
-              <Label>业务日期</Label>
-              <DateRangePicker value={dateRange} onChange={setDateRange} placeholder="全部日期" />
-            </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            点击表头 <Funnel className="inline size-3.5" /> 可按任意列筛选(勾选清单/文本/范围)。
+          </p>
+          <div className="flex items-center gap-2">
+            <Select value={scope} onValueChange={(v) => setScope(v as 'writable' | 'all')}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="writable">我可录入的项目</SelectItem>
+                <SelectItem value="all">全部项目(只读)</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              onClick={() => void reloadRecords()}
+              disabled={loadingRecords}
+            >
+              刷新
+            </Button>
           </div>
-          <Button variant="outline" onClick={() => void reloadRecords()} disabled={loadingRecords}>
-            <Search />
-            刷新
-          </Button>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>项目</TableHead>
-                <TableHead className="w-20">年度</TableHead>
-                <TableHead>科目</TableHead>
-                <TableHead className="w-32 text-right">金额</TableHead>
-                <TableHead className="w-32">业务日期</TableHead>
-                <TableHead className="w-28">状态</TableHead>
-                <TableHead className="w-24">经办人</TableHead>
-                <TableHead>摘要</TableHead>
-                <TableHead className="w-44">操作</TableHead>
-              </TableRow>
+              {table.getHeaderGroups().map((hg) => (
+                <TableRow key={hg.id} className="hover:bg-transparent">
+                  {hg.headers.map((header) => (
+                    <TableHead
+                      key={header.id}
+                      className={
+                        header.column.id === 'amount'
+                          ? 'w-32 text-right'
+                          : header.column.id === 'actions'
+                            ? 'w-44'
+                            : undefined
+                      }
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
             </TableHeader>
             <TableBody>
               {loadingRecords ? (
@@ -636,89 +762,29 @@ export default function UnifiedRecordsPage() {
                     ))}
                   </TableRow>
                 ))
-              ) : visibleRecords.length === 0 ? (
+              ) : table.getRowModel().rows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
                     暂无匹配记录
                   </TableCell>
                 </TableRow>
               ) : (
-                visibleRecords.map((row) => {
-                  const writable = writableIds.has(row.projectId);
-                  return (
-                    <TableRow key={row.id}>
-                      <TableCell
-                        className="max-w-44 truncate"
-                        title={projectName.get(row.projectId)}
-                      >
-                        <Link
-                          href={`/projects/${row.projectId}/records`}
-                          className="text-link underline-offset-4 hover:underline"
-                        >
-                          {projectName.get(row.projectId) ?? row.projectId.slice(0, 8)}
-                        </Link>
+                table.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id}>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
-                      <TableCell className="tabular-nums">{row.budgetYear}</TableCell>
-                      <TableCell>{row.subject?.name ?? '—'}</TableCell>
-                      <TableCell>
-                        <MoneyText value={row.amount} riskOnNegative={false} />
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {format(new Date(row.businessDate), 'yyyy-MM-dd')}
-                      </TableCell>
-                      <TableCell>
-                        {row.isVoid ? (
-                          <Badge variant="error">已作废</Badge>
-                        ) : (
-                          <Badge variant={STATUS_BADGE[row.status] ?? 'secondary'}>
-                            {STATUS_LABEL[row.status] ?? row.status}
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>{row.handler}</TableCell>
-                      <TableCell className="max-w-40 truncate" title={row.summary}>
-                        {row.summary}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {writable && !row.isVoid ? (
-                            <>
-                              <Button variant="ghost" size="sm" onClick={() => void openEdit(row)}>
-                                修改
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-error-deep hover:bg-error-soft"
-                                onClick={() => {
-                                  setVoidTarget(row);
-                                  setVoidReason('');
-                                  setVoidError(null);
-                                }}
-                              >
-                                作废
-                              </Button>
-                            </>
-                          ) : null}
-                          <Button variant="ghost" size="sm" asChild>
-                            <Link
-                              href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}`}
-                            >
-                              <History />
-                              查看
-                            </Link>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
+                    ))}
+                  </TableRow>
+                ))
               )}
             </TableBody>
           </Table>
-          {!loadingRecords && visibleRecords.length > 0 ? (
+          {!loadingRecords && table.getRowModel().rows.length > 0 ? (
             <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-              共 {visibleRecords.length} 条记录
+              共 {table.getRowModel().rows.length} 条记录
+              {columnFilters.length > 0 ? '(已应用表头筛选)' : ''}
             </div>
           ) : null}
         </div>

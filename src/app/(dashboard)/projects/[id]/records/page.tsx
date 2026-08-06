@@ -3,13 +3,26 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { ChevronDown, Plus } from 'lucide-react';
+import { ChevronDown, Funnel, Plus } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
+import {
+  flexRender,
+  getCoreRowModel,
+  getFacetedRowModel,
+  getFacetedUniqueValues,
+  getFilteredRowModel,
+  useReactTable,
+  type ColumnDef,
+  type ColumnFiltersState,
+} from '@tanstack/react-table';
+
 import { apiFetch } from '@/lib/api/client';
+import { HeaderFilter } from '@/components/ui/data-table-filter';
+import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,10 +36,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
-import type { DateRange } from 'react-day-picker';
 import {
   Dialog,
   DialogContent,
@@ -87,6 +97,15 @@ const STATUS_BADGE: Record<BusinessStatus, 'secondary' | 'outline' | 'warning' |
   CONTRACT: 'outline',
   FINANCE_APPROVAL: 'warning',
   PAID: 'success',
+};
+
+/** 状态筛选清单的展示映射(含作废哨兵)。 */
+const STATUS_FILTER_LABELS: Record<string, string> = {
+  PLACEHOLDER: STATUS_LABEL.PLACEHOLDER,
+  CONTRACT: STATUS_LABEL.CONTRACT,
+  FINANCE_APPROVAL: STATUS_LABEL.FINANCE_APPROVAL,
+  PAID: STATUS_LABEL.PAID,
+  __void__: '已作废',
 };
 
 /** §17.7 history.action 的中文展示。 */
@@ -157,12 +176,6 @@ interface LedgerResponse {
   }>;
 }
 
-/** 生成最近 5 年的年度选项(含当前年,按降序)。 */
-function yearOptions(): number[] {
-  const now = new Date().getFullYear();
-  return [now, now - 1, now - 2, now - 3, now - 4];
-}
-
 /** 把 BusinessRecord.businessDate(可能是 ISO 或带 T 的字符串)统一为 YYYY-MM-DD 展示。 */
 function formatDate(s: string | null): string {
   if (!s) return '—';
@@ -195,36 +208,6 @@ const recordSchema = z.object({
 type RecordFormValues = z.infer<typeof recordSchema>;
 
 /** Select 的"全部"哨兵值(radix SelectItem 不允许空串)。 */
-const ALL = '__all__';
-
-/**
- * 文本筛选输入:非受控 + Enter/失焦应用(key 随外部值重置)。
- * 避免逐击键触发列表刷新与骨架闪烁。
- */
-function FilterTextInput({
-  value,
-  onApply,
-  placeholder,
-}: {
-  value: string;
-  onApply: (v: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <Input
-      key={value}
-      defaultValue={value}
-      placeholder={placeholder}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') onApply(e.currentTarget.value.trim());
-      }}
-      onBlur={(e) => {
-        const v = e.target.value.trim();
-        if (v !== value) onApply(v);
-      }}
-    />
-  );
-}
 
 function BusinessRecordsPageInner() {
   const params = useParams<{ id: string }>();
@@ -237,21 +220,19 @@ function BusinessRecordsPageInner() {
   const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
   // 业务记录列表。
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
-  // 筛选状态。初始值来自 URL(台账页叶科目跳转:?subjectId=xx&year=yyyy),仍可手动改/清除。
-  const [yearFilter, setYearFilter] = useState<number | undefined>(() => {
+  // Excel 式表头筛选(TanStack columnFilters)。
+  // 初始值:状态默认排除已作废 + URL 深链(台账叶科目跳转:?subjectId=xx&year=yyyy)。
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(() => {
+    const init: ColumnFiltersState = [
+      { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVED', 'PAID'] },
+    ];
+    const sid = search.get('subjectId');
+    if (sid) init.push({ id: 'subjectId', value: [sid] });
     const y = search.get('year');
     const n = y ? Number(y) : NaN;
-    return Number.isInteger(n) && n >= 1900 && n <= 9999 ? n : undefined;
+    if (Number.isInteger(n) && n >= 1900 && n <= 9999) init.push({ id: 'budgetYear', value: [n] });
+    return init;
   });
-  const [subjectFilter, setSubjectFilter] = useState<string | undefined>(
-    () => search.get('subjectId') ?? undefined,
-  );
-  const [statusFilter, setStatusFilter] = useState<BusinessStatus | undefined>(undefined);
-  const [includeVoid, setIncludeVoid] = useState(false);
-  // 扩展筛选(§8):经办人/摘要(包含匹配,Enter 或失焦应用)、业务日期范围。
-  const [handlerFilter, setHandlerFilter] = useState('');
-  const [summaryFilter, setSummaryFilter] = useState('');
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   // 加载/错误。
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingMeta, setLoadingMeta] = useState(true);
@@ -320,22 +301,12 @@ function BusinessRecordsPageInner() {
     };
   }, [projectId]);
 
-  /** 在变更(新增/修改/作废/状态切换)后重新拉取列表。 */
+  /** 全量拉取(含作废;表头筛选全部在客户端,Excel 式即时过滤)。 */
   const reloadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const qs = new URLSearchParams();
-      if (yearFilter !== undefined) qs.set('year', String(yearFilter));
-      if (subjectFilter) qs.set('subjectId', subjectFilter);
-      if (statusFilter) qs.set('status', statusFilter);
-      if (includeVoid) qs.set('includeVoid', '1');
-      if (handlerFilter) qs.set('handler', handlerFilter);
-      if (summaryFilter) qs.set('summary', summaryFilter);
-      if (dateRange?.from) qs.set('businessDateFrom', format(dateRange.from, 'yyyy-MM-dd'));
-      if (dateRange?.to) qs.set('businessDateTo', format(dateRange.to, 'yyyy-MM-dd'));
-      const suffix = qs.toString();
       const data = await apiFetch<{ records: BusinessRecordRow[] }>(
-        `/api/projects/${projectId}/records${suffix ? `?${suffix}` : ''}`,
+        `/api/projects/${projectId}/records?includeVoid=1`,
       );
       setRecords(data.records ?? []);
     } catch (e) {
@@ -343,21 +314,11 @@ function BusinessRecordsPageInner() {
     } finally {
       setLoadingRecords(false);
     }
-  }, [
-    projectId,
-    yearFilter,
-    subjectFilter,
-    statusFilter,
-    includeVoid,
-    handlerFilter,
-    summaryFilter,
-    dateRange,
-  ]);
+  }, [projectId]);
 
   // 拉取业务记录(随筛选变化重拉;筛选事件已重置 loading,此处只发请求)。
   useEffect(() => {
-    // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中。禁用误报(仓库约定)。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中。
     void reloadRecords();
   }, [reloadRecords]);
 
@@ -477,12 +438,6 @@ function BusinessRecordsPageInner() {
     }
   };
 
-  /** 筛选变化:同步重置 loading,随后由 effect 重拉数据。 */
-  const applyFilter = <K,>(setter: (v: K) => void, value: K) => {
-    setLoadingRecords(true);
-    setter(value);
-  };
-
   /** 切换状态(下拉菜单触发)。 */
   const switchStatus = async (row: BusinessRecordRow, next: BusinessStatus) => {
     if (next === row.status) return;
@@ -515,6 +470,195 @@ function BusinessRecordsPageInner() {
     }
   };
 
+  // subjectMap 同步更新为 HeaderFilter 的 valueLabels(subjectId → 科目名)。
+  const subjectLabels = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const s of leafSubjects) m[s.subjectId] = s.name;
+    return m;
+  }, [leafSubjects]);
+
+  /** 科目/年度列的稳定候选(不受本列筛选影响)。 */
+  const subjectOptions = useMemo(() => leafSubjects.map((s) => s.subjectId), [leafSubjects]);
+  const yearOptions = useMemo(
+    () => Array.from(new Set(records.map((r) => r.budgetYear))).sort((a, b) => b - a),
+    [records],
+  );
+
+  /** 行内操作:修改/状态切换/作废(可录入者且未作废);历史全员可见。 */
+  function RowActions({ row }: { row: BusinessRecordRow }) {
+    return (
+      <div className="flex gap-1">
+        {project?.canWriteRecords ? (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => openEdit(row)} disabled={row.isVoid}>
+              修改
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" disabled={row.isVoid}>
+                  状态
+                  <ChevronDown />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
+                  <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
+                    切换为:{STATUS_LABEL[s]}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-error-deep hover:bg-error-soft"
+              onClick={() => {
+                setVoidTarget(row);
+                setVoidReason('');
+                setVoidError(null);
+              }}
+              disabled={row.isVoid}
+            >
+              作废
+            </Button>
+          </>
+        ) : null}
+        <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
+          历史
+        </Button>
+      </div>
+    );
+  }
+
+  // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
+  const columns = useMemo<ColumnDef<BusinessRecordRow>[]>(
+    () => [
+      {
+        id: 'budgetYear',
+        accessorKey: 'budgetYear',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="年度" type="values" options={yearOptions} />
+        ),
+        cell: ({ row }) => <span className="tabular-nums">{row.original.budgetYear}</span>,
+        filterFn: multiSelect<BusinessRecordRow>(),
+      },
+      {
+        id: 'subjectId',
+        accessorKey: 'subjectId',
+        header: ({ column }) => (
+          <HeaderFilter
+            column={column}
+            title="科目"
+            type="values"
+            valueLabels={subjectLabels}
+            options={subjectOptions}
+          />
+        ),
+        cell: ({ row }) => {
+          const sub = subjectMap.get(row.original.subjectId);
+          return sub ? (
+            sub.name
+          ) : (
+            <span className="font-mono text-xs text-mute">
+              {row.original.subjectId.slice(0, 8)}
+            </span>
+          );
+        },
+        filterFn: multiSelect<BusinessRecordRow>(),
+      },
+      {
+        id: 'amount',
+        accessorKey: 'amount',
+        header: ({ column }) => (
+          <span className="block text-right">
+            <HeaderFilter column={column} title="金额" type="range" />
+          </span>
+        ),
+        cell: ({ row }) => <MoneyText value={row.original.amount} riskOnNegative={false} />,
+        filterFn: numberRange<BusinessRecordRow>(),
+      },
+      {
+        id: 'businessDate',
+        accessorKey: 'businessDate',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="业务发生日期" type="dateRange" />
+        ),
+        cell: ({ row }) => (
+          <span className="tabular-nums">{formatDate(row.original.businessDate)}</span>
+        ),
+        filterFn: dateRange<BusinessRecordRow>(),
+      },
+      {
+        id: 'status',
+        accessorFn: (row) => (row.isVoid ? '__void__' : row.status),
+        header: ({ column }) => (
+          <HeaderFilter
+            column={column}
+            title="状态"
+            type="values"
+            valueLabels={STATUS_FILTER_LABELS}
+          />
+        ),
+        cell: ({ row }) =>
+          row.original.isVoid ? (
+            <Badge variant="error">已作废</Badge>
+          ) : (
+            <Badge variant={STATUS_BADGE[row.original.status] ?? 'secondary'}>
+              {STATUS_LABEL[row.original.status] ?? row.original.status}
+            </Badge>
+          ),
+        filterFn: multiSelect<BusinessRecordRow>(),
+      },
+      {
+        id: 'handler',
+        accessorKey: 'handler',
+        header: ({ column }) => <HeaderFilter column={column} title="经办人" type="values" />,
+        filterFn: multiSelect<BusinessRecordRow>(),
+      },
+      {
+        id: 'summary',
+        accessorKey: 'summary',
+        header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" />,
+        cell: ({ row }) => (
+          <span className="block max-w-40 truncate" title={row.original.summary}>
+            {row.original.summary}
+          </span>
+        ),
+        filterFn: textContains<BusinessRecordRow>(),
+      },
+      {
+        id: 'enteredAt',
+        accessorKey: 'enteredAt',
+        header: ({ column }) => <HeaderFilter column={column} title="录入时间" type="dateRange" />,
+        cell: ({ row }) => (
+          <span className="tabular-nums">{formatDateTime(row.original.enteredAt)}</span>
+        ),
+        filterFn: dateRange<BusinessRecordRow>(),
+      },
+      {
+        id: 'actions',
+        header: () => '操作',
+        enableColumnFilter: false,
+        cell: ({ row }) => <RowActions row={row.original} />,
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [subjectLabels],
+  );
+
+  // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    data: records,
+    columns,
+    state: { columnFilters },
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getFacetedRowModel: getFacetedRowModel(),
+    getFacetedUniqueValues: getFacetedUniqueValues(),
+  });
+
   if (loadingMeta) {
     return (
       <div className="space-y-3">
@@ -535,103 +679,11 @@ function BusinessRecordsPageInner() {
 
   return (
     <div className="space-y-4">
-      {/* 筛选行 + 新增 */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="grid w-32 gap-1.5">
-            <Label>年度</Label>
-            <Select
-              value={yearFilter !== undefined ? String(yearFilter) : ALL}
-              onValueChange={(v) => applyFilter(setYearFilter, v === ALL ? undefined : Number(v))}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="全部年度" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>全部年度</SelectItem>
-                {yearOptions().map((y) => (
-                  <SelectItem key={y} value={String(y)}>
-                    {y} 年
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid w-52 gap-1.5">
-            <Label>科目</Label>
-            <Select
-              value={subjectFilter ?? ALL}
-              onValueChange={(v) => applyFilter(setSubjectFilter, v === ALL ? undefined : v)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="全部科目" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>全部科目</SelectItem>
-                {leafSubjects.map((s) => (
-                  <SelectItem key={s.subjectId} value={s.subjectId}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid w-36 gap-1.5">
-            <Label>状态</Label>
-            <Select
-              value={statusFilter ?? ALL}
-              onValueChange={(v) =>
-                applyFilter(setStatusFilter, v === ALL ? undefined : (v as BusinessStatus))
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="全部状态" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>全部状态</SelectItem>
-                {BUSINESS_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_LABEL[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <label className="flex h-8 cursor-pointer items-center gap-2 text-sm">
-            <Checkbox
-              checked={includeVoid}
-              onCheckedChange={(checked) => applyFilter(setIncludeVoid, checked === true)}
-            />
-            包含作废
-          </label>
-        </div>
-        {/* 第二行:文本/日期筛选(Enter 或失焦应用,避免逐击键刷新) */}
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="grid w-36 gap-1.5">
-            <Label>经办人</Label>
-            <FilterTextInput
-              value={handlerFilter}
-              placeholder="包含匹配"
-              onApply={(v) => applyFilter(setHandlerFilter, v)}
-            />
-          </div>
-          <div className="grid w-48 gap-1.5">
-            <Label>摘要关键词</Label>
-            <FilterTextInput
-              value={summaryFilter}
-              placeholder="包含匹配"
-              onApply={(v) => applyFilter(setSummaryFilter, v)}
-            />
-          </div>
-          <div className="grid w-64 gap-1.5">
-            <Label>业务日期</Label>
-            <DateRangePicker
-              value={dateRange}
-              onChange={(r) => applyFilter(setDateRange, r)}
-              placeholder="全部日期"
-            />
-          </div>
-        </div>
+      {/* 工具行:表头筛选说明 + 新增入口(可录入者) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          点击表头 <Funnel className="inline size-3.5" /> 可按任意列筛选(勾选清单/文本/范围)。
+        </p>
         {project?.canWriteRecords ? (
           <Button onClick={openCreate}>
             <Plus />
@@ -640,21 +692,30 @@ function BusinessRecordsPageInner() {
         ) : null}
       </div>
 
-      {/* 记录表 */}
+      {/* 记录表(Excel 式表头筛选) */}
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-20">年度</TableHead>
-              <TableHead>科目</TableHead>
-              <TableHead className="w-32 text-right">金额</TableHead>
-              <TableHead className="w-32">业务发生日期</TableHead>
-              <TableHead className="w-32">状态</TableHead>
-              <TableHead className="w-24">经办人</TableHead>
-              <TableHead>摘要</TableHead>
-              <TableHead className="w-40">录入时间</TableHead>
-              <TableHead className="w-60">操作</TableHead>
-            </TableRow>
+            {table.getHeaderGroups().map((hg) => (
+              <TableRow key={hg.id} className="hover:bg-transparent">
+                {hg.headers.map((header) => (
+                  <TableHead
+                    key={header.id}
+                    className={
+                      header.column.id === 'amount'
+                        ? 'w-32 text-right'
+                        : header.column.id === 'actions'
+                          ? 'w-60'
+                          : undefined
+                    }
+                  >
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
           </TableHeader>
           <TableBody>
             {loadingRecords ? (
@@ -665,97 +726,29 @@ function BusinessRecordsPageInner() {
                   </TableCell>
                 </TableRow>
               ))
-            ) : records.length === 0 ? (
+            ) : table.getRowModel().rows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
                   暂无业务记录
                 </TableCell>
               </TableRow>
             ) : (
-              records.map((row) => (
+              table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell className="tabular-nums">{row.budgetYear}</TableCell>
-                  <TableCell>
-                    {subjectMap.get(row.subjectId)?.name ?? (
-                      <span className="font-mono text-xs text-mute">
-                        {row.subjectId.slice(0, 8)}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <MoneyText value={row.amount} riskOnNegative={false} />
-                  </TableCell>
-                  <TableCell className="tabular-nums">{formatDate(row.businessDate)}</TableCell>
-                  <TableCell>
-                    {row.isVoid ? (
-                      <Badge variant="error">已作废</Badge>
-                    ) : (
-                      <Badge variant={STATUS_BADGE[row.status] ?? 'secondary'}>
-                        {STATUS_LABEL[row.status] ?? row.status}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{row.handler}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={row.summary}>
-                    {row.summary}
-                  </TableCell>
-                  <TableCell className="tabular-nums">{formatDateTime(row.enteredAt)}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      {/* 编辑类操作仅项目编辑者可见;历史为只读,全员可见。 */}
-                      {project?.canWriteRecords ? (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEdit(row)}
-                            disabled={row.isVoid}
-                          >
-                            修改
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" disabled={row.isVoid}>
-                                状态
-                                <ChevronDown />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
-                                <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
-                                  切换为:{STATUS_LABEL[s]}
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-error-deep hover:bg-error-soft"
-                            onClick={() => {
-                              setVoidTarget(row);
-                              setVoidReason('');
-                              setVoidError(null);
-                            }}
-                            disabled={row.isVoid}
-                          >
-                            作废
-                          </Button>
-                        </>
-                      ) : null}
-                      <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
-                        历史
-                      </Button>
-                    </div>
-                  </TableCell>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             )}
           </TableBody>
         </Table>
-        {!loadingRecords && records.length > 0 ? (
+        {!loadingRecords && table.getRowModel().rows.length > 0 ? (
           <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-            共 {records.length} 条记录
+            共 {table.getRowModel().rows.length} 条记录
+            {columnFilters.length > 0 ? '(已应用表头筛选)' : ''}
           </div>
         ) : null}
       </div>
