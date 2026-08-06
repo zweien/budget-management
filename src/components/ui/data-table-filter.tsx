@@ -87,7 +87,14 @@ export function HeaderFilter<TData>({
             <Funnel className="size-3.5" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-64 p-2">
+        <PopoverContent
+          align="start"
+          className={cn(
+            'p-2',
+            // 日期筛选:预设栏 + 日历并排,需更宽(日历自身 ~240px + 预设 128px + 内边距)。
+            type === 'dateRange' ? 'w-auto' : 'w-64',
+          )}
+        >
           {type === 'values' ? (
             <ValuesFilter column={column} valueLabels={valueLabels} options={options} />
           ) : null}
