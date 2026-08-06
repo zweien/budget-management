@@ -144,10 +144,11 @@ function ValuesFilter<TData>({
   }, [allValues, search, valueLabels]);
 
   const apply = (next: Set<unknown>) => {
-    // 全量勾选等同于不过滤(undefined),避免"全选"也产生筛选语义。
-    if (next.size === 0 || next.size === allValues.length) {
+    if (next.size === allValues.length) {
+      // 全量勾选 = 不过滤(全部可见)。
       column.setFilterValue(undefined);
     } else {
+      // 部分勾选或空集:设为显式数组(空数组 = 不显示任何行)。
       column.setFilterValue(Array.from(next));
     }
   };
