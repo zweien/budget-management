@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { ChevronDown, Funnel, Plus } from 'lucide-react';
+import { ChevronDown, Funnel, Paperclip, Package, Plus } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -21,7 +21,9 @@ import {
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
+import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
 import {
   AlertDialog,
@@ -252,6 +254,10 @@ function BusinessRecordsPageInner() {
   const [historyTarget, setHistoryTarget] = useState<BusinessRecordRow | null>(null);
   const [historyRows, setHistoryRows] = useState<BusinessRecordHistoryRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // 报销凭证附件 Sheet(Task 9 集成)。
+  const [attachmentTarget, setAttachmentTarget] = useState<BusinessRecordRow | null>(null);
+  // 表单内待上传附件(Task 10:不进 zod schema,业务保存成功后循环上传)。
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   const form = useForm<RecordFormValues>({
     resolver: zodResolver(recordSchema),
@@ -325,6 +331,7 @@ function BusinessRecordsPageInner() {
   /** 打开"新增"Dialog。 */
   const openCreate = () => {
     setEditing(null);
+    setPendingFiles([]);
     form.reset({
       budgetYear: new Date().getFullYear(),
       subjectId: undefined,
@@ -341,6 +348,7 @@ function BusinessRecordsPageInner() {
   /** 打开"修改"Dialog,预填当前行。 */
   const openEdit = (row: BusinessRecordRow) => {
     setEditing(row);
+    setPendingFiles([]);
     form.reset({
       budgetYear: row.budgetYear,
       subjectId: row.subjectId,
@@ -373,6 +381,7 @@ function BusinessRecordsPageInner() {
       };
       setSubmitting(true);
       try {
+        let savedRecordId = editing?.id ?? '';
         if (editing) {
           const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
             `/api/projects/${projectId}/records/${editing.id}`,
@@ -388,6 +397,7 @@ function BusinessRecordsPageInner() {
           );
           toast.success('已新增业务记录');
           if (res.overBudget) setOverBudgetOpen(true);
+          savedRecordId = res.record.id;
           if (keepOpen) {
             form.reset({
               budgetYear: values.budgetYear,
@@ -404,6 +414,27 @@ function BusinessRecordsPageInner() {
             setFormOpen(false);
           }
         }
+
+        // —— 附件:业务已保存成功后,循环上传 pendingFiles。失败不回滚业务(解耦)。 ——
+        if (pendingFiles.length > 0 && savedRecordId) {
+          const failed: string[] = [];
+          for (const file of pendingFiles) {
+            try {
+              await uploadAttachment(projectId, savedRecordId, file);
+            } catch {
+              failed.push(file.name);
+            }
+          }
+          if (failed.length === 0) {
+            toast.success(`已上传 ${pendingFiles.length} 个附件`);
+          } else {
+            toast.error(
+              `业务已保存,但 ${failed.length} 个附件上传失败:${failed.join(', ')}(可在附件抽屉重试)`,
+            );
+          }
+          setPendingFiles([]);
+        }
+
         await reloadRecords();
       } catch (e) {
         if (e instanceof Error) toast.error(e.message);
@@ -483,6 +514,23 @@ function BusinessRecordsPageInner() {
     () => Array.from(new Set(records.map((r) => r.budgetYear))).sort((a, b) => b - a),
     [records],
   );
+
+  /**
+   * 从 TanStack columnFilters 派生当前生效的年度/科目筛选(用于"导出附件 zip",
+   * 让导出与表头所见一致)。表头筛选是清单形态(number[]/string[]),导出 API 只接受
+   * 单值,故仅在「恰好选中一个」时取该值传入;多选或未选时传 undefined,
+   * 导出 API 收到 undefined 即回退为「全部年度/全部科目」(不限筛选)。
+   */
+  const activeYear = (() => {
+    const f = columnFilters.find((c) => c.id === 'budgetYear');
+    const v = f?.value;
+    return Array.isArray(v) && v.length === 1 ? Number(v[0]) : undefined;
+  })();
+  const activeSubjectId = (() => {
+    const f = columnFilters.find((c) => c.id === 'subjectId');
+    const v = f?.value;
+    return Array.isArray(v) && v.length === 1 ? String(v[0]) : undefined;
+  })();
 
   /** 行内操作:修改/状态切换/作废(可录入者且未作废);历史全员可见。 */
   function RowActions({ row }: { row: BusinessRecordRow }) {
@@ -636,6 +684,24 @@ function BusinessRecordsPageInner() {
         filterFn: dateRange<BusinessRecordRow>(),
       },
       {
+        id: 'attachments',
+        header: () => '附件',
+        enableColumnFilter: false,
+        cell: ({ row }) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-mute"
+            onClick={() => setAttachmentTarget(row.original)}
+            aria-label="查看报销凭证"
+          >
+            <Paperclip className="size-4" />
+          </Button>
+        ),
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
         id: 'actions',
         header: () => '操作',
         enableColumnFilter: false,
@@ -678,17 +744,32 @@ function BusinessRecordsPageInner() {
 
   return (
     <div className="space-y-4">
-      {/* 工具行:表头筛选说明 + 新增入口(可录入者) */}
+      {/* 工具行:表头筛选说明 + 导出附件 + 新增入口(可录入者) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           点击表头 <Funnel className="inline size-3.5" /> 可按任意列筛选(勾选清单/文本/范围)。
         </p>
-        {project?.canWriteRecords ? (
-          <Button onClick={openCreate}>
-            <Plus />
-            新增
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportAttachmentsZip(projectId, {
+                budgetYear: activeYear,
+                subjectId: activeSubjectId,
+              }).catch((e: unknown) => toast.error(e instanceof Error ? e.message : '导出失败'))
+            }
+          >
+            <Package className="size-4" />
+            导出附件(zip)
           </Button>
-        ) : null}
+          {project?.canWriteRecords ? (
+            <Button onClick={openCreate}>
+              <Plus />
+              新增
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {/* 记录表(Excel 式表头筛选) */}
@@ -720,14 +801,14 @@ function BusinessRecordsPageInner() {
             {loadingRecords ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="hover:bg-transparent">
-                  <TableCell colSpan={9}>
+                  <TableCell colSpan={10}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
                   暂无业务记录
                 </TableCell>
               </TableRow>
@@ -888,6 +969,56 @@ function BusinessRecordsPageInner() {
                   </FormItem>
                 )}
               />
+              {/* 报销凭证(可选):表单提交成功后一并上传;不参与 zod 校验。 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <FormLabel>报销凭证(可选)</FormLabel>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const el = document.createElement('input');
+                      el.type = 'file';
+                      el.multiple = true;
+                      el.accept =
+                        '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
+                      el.onchange = () => {
+                        if (el.files)
+                          setPendingFiles((prev) => [...prev, ...Array.from(el.files!)]);
+                      };
+                      el.click();
+                    }}
+                  >
+                    选择文件
+                  </Button>
+                </div>
+                {pendingFiles.length === 0 ? (
+                  <p className="text-xs text-mute">未选择附件;保存业务后将一并上传</p>
+                ) : (
+                  <ul className="space-y-1 rounded-md border border-hairline bg-card p-2">
+                    {pendingFiles.map((f, i) => (
+                      <li key={`${f.name}-${i}`} className="flex items-center gap-2 text-sm">
+                        <Paperclip className="size-3.5 shrink-0 text-mute" />
+                        <span className="flex-1 truncate" title={f.name}>
+                          {f.name}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-6"
+                          onClick={() =>
+                            setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))
+                          }
+                        >
+                          ×
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <DialogFooter>
                 <Button
                   type="button"
@@ -1074,6 +1205,26 @@ function BusinessRecordsPageInner() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      {/* 报销凭证附件 Sheet(Task 9 集成) */}
+      <AttachmentSheet
+        projectId={projectId}
+        record={
+          attachmentTarget
+            ? {
+                id: attachmentTarget.id,
+                summary: attachmentTarget.summary,
+                handler: attachmentTarget.handler,
+                amount: attachmentTarget.amount,
+                businessDate: attachmentTarget.businessDate,
+                isVoid: attachmentTarget.isVoid,
+              }
+            : null
+        }
+        canWrite={!!project?.canWriteRecords}
+        open={!!attachmentTarget}
+        onOpenChange={(o) => !o && setAttachmentTarget(null)}
+      />
     </div>
   );
 }

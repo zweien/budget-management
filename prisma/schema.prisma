@@ -57,6 +57,7 @@ model User {
   auditLogs         AuditLog[]
   approvalLogs      ApprovalLog[]
   receipts          ReceiptRecord[]
+  uploadedAttachments RecordAttachment[] @relation("AttachmentUploader")
 
   @@map("users")
 }
@@ -320,6 +321,7 @@ model BusinessRecord {
   createdBy  User            @relation("RecordCreator", fields: [createdById], references: [id])
   modifiedBy User?           @relation("RecordModifier", fields: [modifiedById], references: [id])
   history    BusinessRecordHistory[]
+  attachments RecordAttachment[]
 
   @@index([projectId, budgetYear, subjectId, isVoid])
   @@index([projectId, budgetYear])
@@ -420,4 +422,21 @@ model AuditLog {
   @@index([objectType, objectId])
   @@index([projectId])
   @@map("audit_logs")
+}
+
+model RecordAttachment {
+  id            String   @id @db.Uuid
+  recordId      String   @map("record_id") @db.Uuid
+  fileName      String   @map("file_name")
+  contentType   String   @map("content_type")
+  sizeBytes     Int      @map("size_bytes")
+  data          Bytes
+  uploadedById  String   @map("uploaded_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  record       BusinessRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  uploadedBy   User           @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@index([recordId])
+  @@map("record_attachments")
 }
