@@ -212,7 +212,7 @@ describe('recordAttachment.service (integration, real PG)', () => {
       { name: 'r.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
       adminUser(),
     );
-    const { data } = await getAttachmentData(meta.id, adminUser());
+    const { data } = await getAttachmentData(meta.id, record.id, adminUser());
     expect(Buffer.isBuffer(data)).toBe(true);
     expect(data.equals(buf)).toBe(true);
   });
@@ -224,13 +224,48 @@ describe('recordAttachment.service (integration, real PG)', () => {
       { name: 'd.pdf', type: 'application/pdf', size: 10, buffer: samplePdf() },
       adminUser(),
     );
-    await deleteAttachment(meta.id, adminUser());
+    await deleteAttachment(meta.id, record.id, adminUser());
     const still = await prisma.recordAttachment.findUnique({ where: { id: meta.id } });
     expect(still).toBeNull();
     const audit = await prisma.auditLog.findFirst({
       where: { objectId: meta.id, action: 'record_attachment_delete' },
     });
     expect(audit).not.toBeNull();
+  });
+
+  it('IDOR 防护:recordId 不匹配 → get/delete 均 404(正确 recordId 仍可用)', async () => {
+    // R1:附件真正归属的记录;R2:另一个不同记录(用于模拟伪造 URL 的越权请求)。
+    const { record: r1 } = await seedRecord('IDOR-R1');
+    const { record: r2 } = await seedRecord('IDOR-R2');
+    const buf = Buffer.from('IDOR-CONTENT');
+    const meta = await createAttachment(
+      r1.id,
+      { name: 'idor.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+      adminUser(),
+    );
+
+    // 1) 用错误的 recordId(R2)读取/删除,均应 404,不泄露附件存在性。
+    await expect(getAttachmentData(meta.id, r2.id, adminUser())).rejects.toMatchObject({
+      status: 404,
+      message: '附件不存在',
+    });
+    await expect(deleteAttachment(meta.id, r2.id, adminUser())).rejects.toMatchObject({
+      status: 404,
+      message: '附件不存在',
+    });
+
+    // 2) 删除失败后附件仍存在(确认 404 没有副作用)。
+    const still = await prisma.recordAttachment.findUnique({ where: { id: meta.id } });
+    expect(still).not.toBeNull();
+
+    // 3) 用正确的 recordId(R1)读取正常返回,且字节一致。
+    const { data } = await getAttachmentData(meta.id, r1.id, adminUser());
+    expect(data.equals(buf)).toBe(true);
+
+    // 4) 用不存在的随机 recordId 也应 404(而非越权读取)。
+    await expect(getAttachmentData(meta.id, uuidv7(), adminUser())).rejects.toMatchObject({
+      status: 404,
+    });
   });
 
   it('权限:非成员 createAttachment → 403;但可 listAttachments(全局只读)', async () => {

@@ -83,11 +83,14 @@ export async function listAttachments(
 
 /**
  * 取单个附件的二进制(下载用)。
- * 权限:project:view。
+ * 权限:project:view(基于附件实际归属的 projectId)。
+ * 防护:recordId 必须与附件实际归属的记录一致(否则 404),
+ * 防止用户用合法 recordId 的 URL 访问另一记录/项目的附件(IDOR)。
  * 返回 { meta, data },meta 含文件名/类型供路由拼 Content-Disposition。
  */
 export async function getAttachmentData(
   id: string,
+  recordId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<{ meta: AttachmentMeta; data: Buffer }> {
   const row = await prisma.recordAttachment.findUnique({
@@ -98,7 +101,8 @@ export async function getAttachmentData(
     },
   });
 
-  if (!row) throw new HTTPError(404, '附件不存在');
+  // 用 404(非 403)统一"不存在/不属于本记录",避免泄露附件是否存在。
+  if (!row || row.recordId !== recordId) throw new HTTPError(404, '附件不存在');
   await requirePermission(user, 'project:view', row.record.projectId);
   const { record, ...rest } = row;
   void record;
@@ -157,14 +161,21 @@ export async function createAttachment(
 
 /**
  * 物理删除附件 + 审计。
- * 权限:record:edit。
+ * 权限:record:edit(基于附件实际归属的 projectId)。
+ * 防护:recordId 必须与附件实际归属的记录一致(否则 404),
+ * 防止跨记录/项目删除(IDOR)。
  */
-export async function deleteAttachment(id: string, user: Pick<User, 'id' | 'role'>): Promise<void> {
+export async function deleteAttachment(
+  id: string,
+  recordId: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<void> {
   const row = await prisma.recordAttachment.findUnique({
     where: { id },
     select: { id: true, recordId: true, fileName: true, record: { select: { projectId: true } } },
   });
-  if (!row) throw new HTTPError(404, '附件不存在');
+  // 用 404(非 403)统一"不存在/不属于本记录",避免泄露附件是否存在。
+  if (!row || row.recordId !== recordId) throw new HTTPError(404, '附件不存在');
   await requirePermission(user, 'record:edit', row.record.projectId);
 
   await prisma.$transaction(async (tx) => {

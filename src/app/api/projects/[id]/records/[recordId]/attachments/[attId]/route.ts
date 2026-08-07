@@ -13,8 +13,8 @@ export async function GET(
 ) {
   try {
     const user = await requireUser();
-    const { attId } = await params;
-    const { meta, data } = await getAttachmentData(attId, user);
+    const { recordId, attId } = await params;
+    const { meta, data } = await getAttachmentData(attId, recordId, user);
     // RFC 5987 编码中文文件名。
     const encoded = encodeURIComponent(meta.fileName)
       .replace(/['()]/g, escape)
@@ -51,8 +51,8 @@ export async function DELETE(
 ) {
   try {
     const user = await requireUser();
-    const { attId } = await params;
-    await deleteAttachment(attId, user);
+    const { recordId, attId } = await params;
+    await deleteAttachment(attId, recordId, user);
     return new NextResponse(null, { status: 204 });
   } catch (e) {
     if (e instanceof HTTPError)

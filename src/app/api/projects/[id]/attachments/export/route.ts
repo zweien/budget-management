@@ -6,9 +6,17 @@ import { HTTPError, requireUser } from '@/lib/auth/session';
 import { listForExport } from '@/server/services/recordAttachment.service';
 
 /**
+ * 导出附件数量硬上限:防止 listForExport 把全部 bytea 读进内存 + zip.generateAsync
+ * 再生成一整个 nodebuffer,大量 50MB 附件会把 Node 堆打爆(OOM-kill)。
+ * 超过即拒绝(413),提示缩小筛选范围;服务层 listForExport 保持通用查询语义,不限流。
+ */
+const EXPORT_MAX_ATTACHMENTS = 500;
+
+/**
  * GET /api/projects/:id/attachments/export?budgetYear=&subjectId= — 批量打包导出附件 zip。
  * 沿用记录页筛选(年度/科目)。zip 内文件名:`<业务日期>_<摘要>_<原文件名>`(冲突追加序号)。
- * 无附件 → 404。权限:project:view(全局只读 USER 也可导出查阅)。
+ * 无附件 → 404;附件数超 EXPORT_MAX_ATTACHMENTS → 413(避免堆耗尽)。
+ * 权限:project:view(全局只读 USER 也可导出查阅)。
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -23,6 +31,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const rows = await listForExport(projectId, { budgetYear, subjectId }, user);
     if (rows.length === 0) {
       return NextResponse.json({ error: '所选范围内无附件' }, { status: 404 });
+    }
+    // 堆保护:附件过多则拒绝(在 materialize 全部 bytea 之后、构建 zip 之前切断)。
+    if (rows.length > EXPORT_MAX_ATTACHMENTS) {
+      return NextResponse.json(
+        { error: `导出附件过多(上限 ${EXPORT_MAX_ATTACHMENTS} 个),请缩小筛选范围` },
+        { status: 413 },
+      );
     }
 
     const project = await prisma.project.findUnique({

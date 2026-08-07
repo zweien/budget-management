@@ -44,7 +44,6 @@ interface PendingItem {
   message?: string;
 }
 
-const MAX_CLIENT_BYTES = 50 * 1024 * 1024; // 客户端预拦截(与服务端一致)
 const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
 
 export function AttachmentSheet({
@@ -86,12 +85,9 @@ export function AttachmentSheet({
   const handleFiles = async (files: FileList | File[]) => {
     if (!record || readonly) return;
     const arr = Array.from(files);
-    // 客户端预校验:超 50MB 直接拦截。
-    const tooBig = arr.find((f) => f.size > MAX_CLIENT_BYTES);
-    if (tooBig) {
-      toast.error(`文件过大(上限 50MB):${tooBig.name}`);
-      return;
-    }
+    // 大小上限以服务端为准(env.MAX_ATTACHMENT_BYTES):超限服务端返回 413,
+    // uploadAttachment 的失败分支会把服务端文案(含真实上限 humanFileSize)经 toast 透出。
+    // 不在客户端做硬编码预拦截,避免与 env 漂移。
     setPending((prev) => [
       ...prev,
       ...arr.map<PendingItem>((f) => ({ file: f, status: 'uploading' })),
@@ -161,7 +157,7 @@ export function AttachmentSheet({
           >
             <Plus className="size-6 text-mute" />
             <p className="text-sm">点击或拖拽文件到此处上传</p>
-            <p className="text-xs text-mute">支持图片 / PDF / Office 文档,单文件 ≤ 50MB</p>
+            <p className="text-xs text-mute">支持图片 / PDF / Office 文档</p>
             <input
               type="file"
               accept={ACCEPT}
