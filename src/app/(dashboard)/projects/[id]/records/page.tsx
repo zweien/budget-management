@@ -21,7 +21,7 @@ import {
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
-import { exportAttachmentsZip } from '@/lib/api/attachments';
+import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
@@ -256,6 +256,8 @@ function BusinessRecordsPageInner() {
   const [historyLoading, setHistoryLoading] = useState(false);
   // 报销凭证附件 Sheet(Task 9 集成)。
   const [attachmentTarget, setAttachmentTarget] = useState<BusinessRecordRow | null>(null);
+  // 表单内待上传附件(Task 10:不进 zod schema,业务保存成功后循环上传)。
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   const form = useForm<RecordFormValues>({
     resolver: zodResolver(recordSchema),
@@ -329,6 +331,7 @@ function BusinessRecordsPageInner() {
   /** 打开"新增"Dialog。 */
   const openCreate = () => {
     setEditing(null);
+    setPendingFiles([]);
     form.reset({
       budgetYear: new Date().getFullYear(),
       subjectId: undefined,
@@ -345,6 +348,7 @@ function BusinessRecordsPageInner() {
   /** 打开"修改"Dialog,预填当前行。 */
   const openEdit = (row: BusinessRecordRow) => {
     setEditing(row);
+    setPendingFiles([]);
     form.reset({
       budgetYear: row.budgetYear,
       subjectId: row.subjectId,
@@ -377,6 +381,7 @@ function BusinessRecordsPageInner() {
       };
       setSubmitting(true);
       try {
+        let savedRecordId = editing?.id ?? '';
         if (editing) {
           const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
             `/api/projects/${projectId}/records/${editing.id}`,
@@ -392,6 +397,7 @@ function BusinessRecordsPageInner() {
           );
           toast.success('已新增业务记录');
           if (res.overBudget) setOverBudgetOpen(true);
+          savedRecordId = res.record.id;
           if (keepOpen) {
             form.reset({
               budgetYear: values.budgetYear,
@@ -408,6 +414,27 @@ function BusinessRecordsPageInner() {
             setFormOpen(false);
           }
         }
+
+        // —— 附件:业务已保存成功后,循环上传 pendingFiles。失败不回滚业务(解耦)。 ——
+        if (pendingFiles.length > 0 && savedRecordId) {
+          const failed: string[] = [];
+          for (const file of pendingFiles) {
+            try {
+              await uploadAttachment(projectId, savedRecordId, file);
+            } catch {
+              failed.push(file.name);
+            }
+          }
+          if (failed.length === 0) {
+            toast.success(`已上传 ${pendingFiles.length} 个附件`);
+          } else {
+            toast.error(
+              `业务已保存,但 ${failed.length} 个附件上传失败:${failed.join(', ')}(可在附件抽屉重试)`,
+            );
+          }
+          setPendingFiles([]);
+        }
+
         await reloadRecords();
       } catch (e) {
         if (e instanceof Error) toast.error(e.message);
@@ -941,6 +968,56 @@ function BusinessRecordsPageInner() {
                   </FormItem>
                 )}
               />
+              {/* 报销凭证(可选):表单提交成功后一并上传;不参与 zod 校验。 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <FormLabel>报销凭证(可选)</FormLabel>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const el = document.createElement('input');
+                      el.type = 'file';
+                      el.multiple = true;
+                      el.accept =
+                        '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
+                      el.onchange = () => {
+                        if (el.files)
+                          setPendingFiles((prev) => [...prev, ...Array.from(el.files!)]);
+                      };
+                      el.click();
+                    }}
+                  >
+                    选择文件
+                  </Button>
+                </div>
+                {pendingFiles.length === 0 ? (
+                  <p className="text-xs text-mute">未选择附件;保存业务后将一并上传</p>
+                ) : (
+                  <ul className="space-y-1 rounded-md border border-hairline bg-card p-2">
+                    {pendingFiles.map((f, i) => (
+                      <li key={`${f.name}-${i}`} className="flex items-center gap-2 text-sm">
+                        <Paperclip className="size-3.5 shrink-0 text-mute" />
+                        <span className="flex-1 truncate" title={f.name}>
+                          {f.name}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-6"
+                          onClick={() =>
+                            setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))
+                          }
+                        >
+                          ×
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <DialogFooter>
                 <Button
                   type="button"
