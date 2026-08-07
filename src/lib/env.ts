@@ -18,6 +18,12 @@ const envSchema = z
     AUTH_SECRET: z.string().min(32).optional(),
     /** 对外基础 URL,用于拼 OIDC redirect_uri / 登出回跳。 */
     APP_BASE_URL: z.string().url().default('http://localhost:3000'),
+    /** 附件单文件大小上限(字节,默认 50MB)。 */
+    MAX_ATTACHMENT_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(50 * 1024 * 1024),
   })
   .superRefine((data, ctx) => {
     if (data.MOCK_AUTH) return;

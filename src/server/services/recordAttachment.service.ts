@@ -5,7 +5,8 @@ import { HTTPError } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { recordAudit } from '@/server/audit/interceptor';
-import { MAX_ATTACHMENT_BYTES_DEFAULT, validateAttachment } from '@/lib/attachments/config';
+import { validateAttachment } from '@/lib/attachments/config';
+import { env } from '@/lib/env';
 
 /**
  * 业务记录报销凭证附件(RecordAttachment)。
@@ -107,7 +108,7 @@ export async function getAttachmentData(
 /**
  * 新增附件(bytea 入库 + 审计)。
  * 权限:record:edit。
- * 校验:大小 ≤ MAX_ATTACHMENT_BYTES_DEFAULT;类型白名单(扩展名+MIME 双校验)。
+ * 校验:大小 ≤ env.MAX_ATTACHMENT_BYTES(默认 50MB,可由运维调整);类型白名单(扩展名+MIME 双校验)。
  * 业务规则:作废记录(isVoid=true)不可追加附件 → 400。
  */
 export async function createAttachment(
@@ -123,7 +124,7 @@ export async function createAttachment(
 
   const verdict = validateAttachment(
     { name: file.name, type: file.type, size: file.size },
-    MAX_ATTACHMENT_BYTES_DEFAULT,
+    env.MAX_ATTACHMENT_BYTES,
   );
   if (!verdict.ok) throw new HTTPError(verdict.status, verdict.message);
 
