@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { UserRole } from '@prisma/client';
+import JSZip from 'jszip';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
@@ -252,5 +253,42 @@ describe('attachments API routes (integration)', () => {
       { params: Promise.resolve({ id: projectId }) } as never,
     );
     expect(none.status).toBe(404);
+  });
+
+  it('导出:文件名含 ../ 路径穿越 → zip 条目名扁平(无 .. 与 /)', async () => {
+    const { GET: exportGet } = await import('@/app/api/projects/[id]/attachments/export/route');
+    // 上传一个名字带路径穿越的附件(.pdf + application/pdf 均过 validateAttachment 白名单)。
+    const payload = Buffer.from('SLIP-CONTENT');
+    const up = await uploadPost(
+      makeUploadReq({ name: '../evil.pdf', type: 'application/pdf', bytes: payload }),
+      {
+        params: Promise.resolve({ id: projectId, recordId }),
+      } as never,
+    );
+    expect(up.status).toBe(201);
+
+    const res = await exportGet(
+      new Request(
+        `http://localhost/api/projects/${projectId}/attachments/export?budgetYear=2026`,
+      ) as never,
+      { params: Promise.resolve({ id: projectId }) } as never,
+    );
+    expect(res.status).toBe(200);
+    const buf = Buffer.from(await res.arrayBuffer());
+    // 用 JSZip 解压验证条目名扁平:无任何路径分隔符(/ \),也无".."穿越段。
+    const zip = await JSZip.loadAsync(buf);
+    const names = Object.keys(zip.files);
+    expect(names.length).toBeGreaterThan(0);
+    for (const n of names) {
+      // 路径分隔符被消毒为 _:不存在目录层级,无法 zip-slip。
+      expect(n).not.toContain('/');
+      expect(n).not.toContain('\\');
+      // 不存在 ".." 穿越段(可被解压器解释为父目录的连续点)。
+      expect(n).not.toMatch(/\.\.[\\/]/);
+      // 找到我们上传的那一条,并确认它扁平:../evil.pdf → .._evil.pdf。
+      if (n.endsWith('evil.pdf')) {
+        expect(n).toBe('2026-08-05_route_.._evil.pdf');
+      }
+    }
   });
 });

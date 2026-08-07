@@ -4,7 +4,7 @@ import { UserRole } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
 import { createProject } from '@/server/services/project.service';
-import { createRecord } from '@/server/services/businessRecord.service';
+import { createRecord, voidRecord } from '@/server/services/businessRecord.service';
 import {
   approveApplication,
   createDraft,
@@ -191,6 +191,18 @@ describe('recordAttachment.service (integration, real PG)', () => {
     ).rejects.toMatchObject({ status: 404 });
   });
 
+  it('createAttachment: 已作废记录 → 400', async () => {
+    const { record } = await seedRecord('VOID');
+    await voidRecord(record.id, '测试作废', adminUser());
+    await expect(
+      createAttachment(
+        record.id,
+        { name: 'v.pdf', type: 'application/pdf', size: 10, buffer: samplePdf() },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it('getAttachmentData: 返回 data 与上传一致', async () => {
     const { record } = await seedRecord('GET');
     const buf = Buffer.from('HELLO-ATTACHMENT');
@@ -236,7 +248,7 @@ describe('recordAttachment.service (integration, real PG)', () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
-  it('listForExport: 按年度过滤,返回 record + meta + data', async () => {
+  it('listForExport: 按年度/科目过滤,返回 record + meta + data', async () => {
     const { project, record } = await seedRecord('EXPORT');
     await createAttachment(
       record.id,
@@ -252,5 +264,10 @@ describe('recordAttachment.service (integration, real PG)', () => {
     // 年度不匹配 → 不含。
     const none = await listForExport(project.id, { budgetYear: 2099 }, adminUser());
     expect(none.find((r) => r.attachment.fileName === 'e1.pdf')).toBeUndefined();
+    // 科目匹配 → 含;随机不存在的科目 → 不含。
+    const bySubject = await listForExport(project.id, { subjectId: record.subjectId }, adminUser());
+    expect(bySubject.find((r) => r.attachment.fileName === 'e1.pdf')).toBeTruthy();
+    const wrongSubject = await listForExport(project.id, { subjectId: uuidv7() }, adminUser());
+    expect(wrongSubject.find((r) => r.attachment.fileName === 'e1.pdf')).toBeUndefined();
   });
 });

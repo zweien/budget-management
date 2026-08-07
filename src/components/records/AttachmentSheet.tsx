@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Paperclip, Download, Trash2, Plus, FileWarning } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -58,7 +58,6 @@ export function AttachmentSheet({
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState<PendingItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // 打开时拉取该记录的附件。
   useEffect(() => {
@@ -78,7 +77,7 @@ export function AttachmentSheet({
     return () => {
       cancelled = true;
     };
-  }, [open, record, projectId]);
+  }, [open, record?.id, projectId]);
 
   if (!record) return null;
 
@@ -164,7 +163,6 @@ export function AttachmentSheet({
             <p className="text-sm">点击或拖拽文件到此处上传</p>
             <p className="text-xs text-mute">支持图片 / PDF / Office 文档,单文件 ≤ 50MB</p>
             <input
-              ref={inputRef}
               type="file"
               accept={ACCEPT}
               multiple

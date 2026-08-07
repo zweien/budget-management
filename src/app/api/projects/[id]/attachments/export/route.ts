@@ -35,7 +35,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     for (const r of rows) {
       const date = r.record.businessDate.toISOString().slice(0, 10); // yyyy-mm-dd
       const safeSummary = (r.record.summary || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
-      const base = `${date}_${safeSummary}_${r.attachment.fileName}`.replace(/\s+/g, '_');
+      // 与 safeSummary 同款消毒:替换路径分隔符/Windows 非法字符/NUL,
+      // 防止 ../evil.pdf 之类的 zip-slip(部分解压器会按条目相对路径写出工作目录之外)。
+      const safeName = r.attachment.fileName.replace(/[\\/:*?"<>|\0]/g, '_');
+      const base = `${date}_${safeSummary}_${safeName}`.replace(/\s+/g, '_');
       let name = base;
       const count = used.get(base) ?? 0;
       if (count > 0) {
@@ -55,7 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename*=UTF-8''${zipName}`,
+        'Content-Disposition': `attachment; filename="attachments.zip"; filename*=UTF-8''${zipName}`,
         'Cache-Control': 'no-store',
       },
     });
