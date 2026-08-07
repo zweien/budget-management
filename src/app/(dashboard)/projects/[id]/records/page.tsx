@@ -518,7 +518,8 @@ function BusinessRecordsPageInner() {
   /**
    * 从 TanStack columnFilters 派生当前生效的年度/科目筛选(用于"导出附件 zip",
    * 让导出与表头所见一致)。表头筛选是清单形态(number[]/string[]),导出 API 只接受
-   * 单值,故取清单第一项(用户通常只选一个年度/科目;多选时取最具体的一个)。
+   * 单值,故仅在「恰好选中一个」时取该值传入;多选或未选时传 undefined,
+   * 导出 API 收到 undefined 即回退为「全部年度/全部科目」(不限筛选)。
    */
   const activeYear = (() => {
     const f = columnFilters.find((c) => c.id === 'budgetYear');
