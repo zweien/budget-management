@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { ChevronDown, Funnel, Plus } from 'lucide-react';
+import { ChevronDown, Funnel, Paperclip, Package, Plus } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -21,7 +21,9 @@ import {
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { exportAttachmentsZip } from '@/lib/api/attachments';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
+import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
 import {
   AlertDialog,
@@ -252,6 +254,8 @@ function BusinessRecordsPageInner() {
   const [historyTarget, setHistoryTarget] = useState<BusinessRecordRow | null>(null);
   const [historyRows, setHistoryRows] = useState<BusinessRecordHistoryRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // 报销凭证附件 Sheet(Task 9 集成)。
+  const [attachmentTarget, setAttachmentTarget] = useState<BusinessRecordRow | null>(null);
 
   const form = useForm<RecordFormValues>({
     resolver: zodResolver(recordSchema),
@@ -484,6 +488,22 @@ function BusinessRecordsPageInner() {
     [records],
   );
 
+  /**
+   * 从 TanStack columnFilters 派生当前生效的年度/科目筛选(用于"导出附件 zip",
+   * 让导出与表头所见一致)。表头筛选是清单形态(number[]/string[]),导出 API 只接受
+   * 单值,故取清单第一项(用户通常只选一个年度/科目;多选时取最具体的一个)。
+   */
+  const activeYear = (() => {
+    const f = columnFilters.find((c) => c.id === 'budgetYear');
+    const v = f?.value;
+    return Array.isArray(v) && v.length === 1 ? Number(v[0]) : undefined;
+  })();
+  const activeSubjectId = (() => {
+    const f = columnFilters.find((c) => c.id === 'subjectId');
+    const v = f?.value;
+    return Array.isArray(v) && v.length === 1 ? String(v[0]) : undefined;
+  })();
+
   /** 行内操作:修改/状态切换/作废(可录入者且未作废);历史全员可见。 */
   function RowActions({ row }: { row: BusinessRecordRow }) {
     return (
@@ -636,6 +656,24 @@ function BusinessRecordsPageInner() {
         filterFn: dateRange<BusinessRecordRow>(),
       },
       {
+        id: 'attachments',
+        header: () => '附件',
+        enableColumnFilter: false,
+        cell: ({ row }) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-mute"
+            onClick={() => setAttachmentTarget(row.original)}
+            aria-label="查看报销凭证"
+          >
+            <Paperclip className="size-4" />
+          </Button>
+        ),
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
         id: 'actions',
         header: () => '操作',
         enableColumnFilter: false,
@@ -678,17 +716,32 @@ function BusinessRecordsPageInner() {
 
   return (
     <div className="space-y-4">
-      {/* 工具行:表头筛选说明 + 新增入口(可录入者) */}
+      {/* 工具行:表头筛选说明 + 导出附件 + 新增入口(可录入者) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           点击表头 <Funnel className="inline size-3.5" /> 可按任意列筛选(勾选清单/文本/范围)。
         </p>
-        {project?.canWriteRecords ? (
-          <Button onClick={openCreate}>
-            <Plus />
-            新增
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportAttachmentsZip(projectId, {
+                budgetYear: activeYear,
+                subjectId: activeSubjectId,
+              }).catch((e: unknown) => toast.error(e instanceof Error ? e.message : '导出失败'))
+            }
+          >
+            <Package className="size-4" />
+            导出附件(zip)
           </Button>
-        ) : null}
+          {project?.canWriteRecords ? (
+            <Button onClick={openCreate}>
+              <Plus />
+              新增
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {/* 记录表(Excel 式表头筛选) */}
@@ -720,14 +773,14 @@ function BusinessRecordsPageInner() {
             {loadingRecords ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="hover:bg-transparent">
-                  <TableCell colSpan={9}>
+                  <TableCell colSpan={10}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
                   暂无业务记录
                 </TableCell>
               </TableRow>
@@ -1074,6 +1127,26 @@ function BusinessRecordsPageInner() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      {/* 报销凭证附件 Sheet(Task 9 集成) */}
+      <AttachmentSheet
+        projectId={projectId}
+        record={
+          attachmentTarget
+            ? {
+                id: attachmentTarget.id,
+                summary: attachmentTarget.summary,
+                handler: attachmentTarget.handler,
+                amount: attachmentTarget.amount,
+                businessDate: attachmentTarget.businessDate,
+                isVoid: attachmentTarget.isVoid,
+              }
+            : null
+        }
+        canWrite={!!project?.canWriteRecords}
+        open={!!attachmentTarget}
+        onOpenChange={(o) => !o && setAttachmentTarget(null)}
+      />
     </div>
   );
 }
