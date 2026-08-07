@@ -215,4 +215,42 @@ describe('attachments API routes (integration)', () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it('导出:有附件返回 zip;无附件返回 404', async () => {
+    const { GET: exportGet } = await import('@/app/api/projects/[id]/attachments/export/route');
+    // 先上传一个附件用于导出。
+    const payload = Buffer.from('ZIP-CONTENT');
+    const up = await uploadPost(
+      makeUploadReq({ name: 'z.pdf', type: 'application/pdf', bytes: payload }),
+      {
+        params: Promise.resolve({ id: projectId, recordId }),
+      } as never,
+    );
+    expect(up.status).toBe(201);
+
+    const res = await exportGet(
+      new Request(
+        `http://localhost/api/projects/${projectId}/attachments/export?budgetYear=2026`,
+      ) as never,
+      { params: Promise.resolve({ id: projectId }) } as never,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/zip');
+    expect(res.headers.get('Content-Disposition')).toContain('attachment');
+    // body 非空(zip 字节)。
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.length).toBeGreaterThan(0);
+    // zip 魔数 PK\x03\x04。
+    expect(buf[0]).toBe(0x50);
+    expect(buf[1]).toBe(0x4b);
+
+    // 无附件范围(2099 年)→ 404。
+    const none = await exportGet(
+      new Request(
+        `http://localhost/api/projects/${projectId}/attachments/export?budgetYear=2099`,
+      ) as never,
+      { params: Promise.resolve({ id: projectId }) } as never,
+    );
+    expect(none.status).toBe(404);
+  });
 });
