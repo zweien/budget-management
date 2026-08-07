@@ -192,9 +192,43 @@ export async function deleteAttachment(
 }
 
 /**
+ * 批量导出筛选条件 → Prisma `where`(record 关联按 projectId + 可选年度/科目)。
+ * 抽出来供 listForExport(查数据)与 countForExport(仅 count,不载 bytea)共享,
+ * 保证"计数门槛"与"实际加载"用的是完全相同的过滤口径。
+ */
+function buildExportWhere(
+  projectId: string,
+  filters: { budgetYear?: number; subjectId?: string },
+): Prisma.RecordAttachmentWhereInput {
+  return {
+    record: {
+      projectId,
+      ...(filters.budgetYear ? { budgetYear: filters.budgetYear } : {}),
+      ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
+    },
+  };
+}
+
+/**
+ * 计数:按项目(+可选年度/科目)统计附件数,**不加载 bytea data**。
+ * 权限:project:view(与 listForExport 同口径,确保 count 见到的范围与加载一致)。
+ * 路由层在调用 listForExport 前先用此廉价 count() 做硬上限校验,
+ * 防止 listForExport 的 findMany 把全部 data 缓冲区读进堆导致 OOM。
+ */
+export async function countForExport(
+  projectId: string,
+  filters: { budgetYear?: number; subjectId?: string },
+  user: Pick<User, 'id' | 'role'>,
+): Promise<number> {
+  await requirePermission(user, 'project:view', projectId);
+  return prisma.recordAttachment.count({ where: buildExportWhere(projectId, filters) });
+}
+
+/**
  * 批量导出:按项目(+可选年度/科目)取全部附件 + 关联业务上下文。
  * 权限:project:view。
  * 用于 zip 打包(路由层)。返回每项含 data 二进制。
+ * 调用方应先经 countForExport 做硬上限校验,避免本查询 materialize 过多 bytea。
  */
 export async function listForExport(
   projectId: string,
@@ -209,13 +243,7 @@ export async function listForExport(
 > {
   await requirePermission(user, 'project:view', projectId);
   const rows = await prisma.recordAttachment.findMany({
-    where: {
-      record: {
-        projectId,
-        ...(filters.budgetYear ? { budgetYear: filters.budgetYear } : {}),
-        ...(filters.subjectId ? { subjectId: filters.subjectId } : {}),
-      },
-    },
+    where: buildExportWhere(projectId, filters),
     include: {
       record: { select: { id: true, businessDate: true, summary: true, handler: true } },
       uploadedBy: { select: { id: true, name: true } },

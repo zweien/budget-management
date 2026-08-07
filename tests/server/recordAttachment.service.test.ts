@@ -17,6 +17,7 @@ import {
   createAttachment,
   deleteAttachment,
   listForExport,
+  countForExport,
 } from '@/server/services/recordAttachment.service';
 import { MAX_ATTACHMENT_BYTES_DEFAULT } from '@/lib/attachments/config';
 
@@ -304,5 +305,42 @@ describe('recordAttachment.service (integration, real PG)', () => {
     expect(bySubject.find((r) => r.attachment.fileName === 'e1.pdf')).toBeTruthy();
     const wrongSubject = await listForExport(project.id, { subjectId: uuidv7() }, adminUser());
     expect(wrongSubject.find((r) => r.attachment.fileName === 'e1.pdf')).toBeUndefined();
+  });
+
+  it('countForExport: 计数正确且尊重年度/科目过滤(与 listForExport 同口径,不载 data)', async () => {
+    const { project, record } = await seedRecord('COUNT');
+    await createAttachment(
+      record.id,
+      { name: 'c1.pdf', type: 'application/pdf', size: 4, buffer: Buffer.from('C1') },
+      adminUser(),
+    );
+    // 年度匹配 → 至少含本条。
+    const cYear = await countForExport(project.id, { budgetYear: 2026 }, adminUser());
+    expect(cYear).toBeGreaterThanOrEqual(1);
+    // 年度不匹配 → 不含本条(本应严格小于 cYear,但其他测试可能共享项目;用 2099 断言 0)。
+    const c2099 = await countForExport(project.id, { budgetYear: 2099 }, adminUser());
+    expect(c2099).toBe(0);
+    // 科目匹配 → 至少含本条。
+    const cSubject = await countForExport(project.id, { subjectId: record.subjectId }, adminUser());
+    expect(cSubject).toBeGreaterThanOrEqual(1);
+    // 不存在的科目 → 0。
+    const cWrongSubject = await countForExport(project.id, { subjectId: uuidv7() }, adminUser());
+    expect(cWrongSubject).toBe(0);
+
+    // 与 listForExport 数量一致(同 where 口径)。
+    const rows = await listForExport(project.id, { budgetYear: 2026 }, adminUser());
+    expect(rows.length).toBe(cYear);
+  });
+
+  it('countForExport: 非成员(全局只读 USER)走 project:view,同口径可计数', async () => {
+    const { project, record } = await seedRecord('COUNT-PERM');
+    await createAttachment(
+      record.id,
+      { name: 'cp.pdf', type: 'application/pdf', size: 3, buffer: Buffer.from('CP') },
+      adminUser(),
+    );
+    // outsider 是非成员 USER,project:view 放行(与 listForExport/listAttachments 同权限路径)。
+    const c = await countForExport(project.id, { budgetYear: 2026 }, outsiderUser());
+    expect(c).toBeGreaterThanOrEqual(1);
   });
 });
