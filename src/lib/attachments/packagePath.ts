@@ -30,13 +30,25 @@ const ILLEGAL_CHARS = /[\\/:*?"<>|\0]/g;
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const MAX_NAME = 200;
 
-/** 单段(文件夹名/文件名)消毒:替换非法字符 + Windows 保留名 + 去首尾空格点。 */
+/**
+ * 单段(文件夹名/文件名)消毒:替换非法字符 + Windows 保留名 + 去首尾空格点。
+ * Windows 保留名检查针对 basename(去扩展名部分),否则 `CON.pdf` 会漏判。
+ */
 export function sanitizeSegment(s: string): string {
   let out = s
     .replace(ILLEGAL_CHARS, '_')
     .trim()
     .replace(/^[.\s]+|[.\s]+$/g, '');
-  if (WINDOWS_RESERVED.test(out)) out += '_';
+  const dot = out.lastIndexOf('.');
+  // basename = 去扩展名部分(dot>0 时);无扩展名时 basename = 整串
+  const basename = dot > 0 ? out.slice(0, dot) : out;
+  const ext = dot > 0 ? out.slice(dot) : '';
+  if (WINDOWS_RESERVED.test(basename)) {
+    out = `${basename}_${ext}`;
+  } else if (dot <= 0 && WINDOWS_RESERVED.test(out)) {
+    // 无扩展名的整串保留名(原逻辑的兜底防御)
+    out = `${out}_`;
+  }
   return out;
 }
 
@@ -88,15 +100,24 @@ export function renderFilename(template: string, ctx: TokenContext): string {
 
 /**
  * 同一文件夹下文件名去重:冲突时在扩展名前追加 (1)/(2)…,并更新 used 计数。
+ * 循环探测直到生成未被占用的候选名 — 防止与真实存在的 (N) 文件撞车导致 JSZip 静默覆盖。
+ * used.get(name) 语义:该 name(含其变体)被登记的次数;第 N 次(N≥2)调用取 (N-1) 起步探测。
  */
 export function dedupeName(name: string, used: Map<string, number>): string {
   const count = used.get(name) ?? 0;
   used.set(name, count + 1);
   if (count === 0) return name;
+  // count >= 1:name 已占用,循环找未占用的 (count)/(count+1)/…
   const dot = name.lastIndexOf('.');
-  const deduped =
-    dot > 0 ? `${name.slice(0, dot)}(${count})${name.slice(dot)}` : `${name}(${count})`;
-  // 去重后的名字本身也要登记(避免 (1) 与原 (1) 再次撞)
-  used.set(deduped, (used.get(deduped) ?? 0) + 1);
-  return deduped;
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let n = count;
+  let candidate: string;
+  do {
+    candidate = `${stem}(${n})${ext}`;
+    n += 1;
+  } while (used.has(candidate));
+  // 占用 candidate(若已被预登记则累加,防御性)
+  used.set(candidate, (used.get(candidate) ?? 0) + 1);
+  return candidate;
 }

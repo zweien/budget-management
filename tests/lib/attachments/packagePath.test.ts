@@ -41,6 +41,12 @@ describe('sanitizeSegment', () => {
     expect(sanitizeSegment('COM1')).toBe('COM1_');
     expect(sanitizeSegment('lpt9')).toBe('lpt9_');
   });
+  it('Windows 保留名按 basename(去扩展名)检查', () => {
+    expect(sanitizeSegment('CON.pdf')).toBe('CON_.pdf');
+    expect(sanitizeSegment('nul.txt')).toBe('nul_.txt');
+    expect(sanitizeSegment('PRN')).toBe('PRN_');
+    expect(sanitizeSegment('正常.pdf')).toBe('正常.pdf');
+  });
   it('普通名保留;去首尾空格与点', () => {
     expect(sanitizeSegment('  正常名称  ')).toBe('正常名称');
     expect(sanitizeSegment('.隐藏.')).toBe('隐藏');
@@ -111,5 +117,25 @@ describe('dedupeName', () => {
   it('无扩展名时追加在末尾', () => {
     const used = new Map<string, number>([['noext', 1]]);
     expect(dedupeName('noext', used)).toBe('noext(1)');
+  });
+  it('文件夹已有真实 a(1).pdf 时跳过该候选', () => {
+    // a.pdf 已存在(count=1),且 a(1).pdf 是真实存在的另一个文件 → 第二次 a.pdf 必须跳到 a(2).pdf
+    const used = new Map<string, number>([
+      ['a.pdf', 1],
+      ['a(1).pdf', 1],
+    ]);
+    expect(dedupeName('a.pdf', used)).toBe('a(2).pdf');
+    expect(used.get('a(1).pdf')).toBe(1);
+    expect(used.get('a(2).pdf')).toBe(1);
+    expect(used.get('a.pdf')).toBe(2);
+  });
+  it('三方冲突:连续调用产生 a.pdf/a(1).pdf/a(2).pdf', () => {
+    const used = new Map<string, number>();
+    expect(dedupeName('a.pdf', used)).toBe('a.pdf');
+    expect(dedupeName('a.pdf', used)).toBe('a(1).pdf');
+    expect(dedupeName('a.pdf', used)).toBe('a(2).pdf');
+    expect(used.get('a.pdf')).toBe(3);
+    expect(used.has('a(1).pdf')).toBe(true);
+    expect(used.has('a(2).pdf')).toBe(true);
   });
 });
