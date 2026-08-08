@@ -236,7 +236,16 @@ export async function listForExport(
   user: Pick<User, 'id' | 'role'>,
 ): Promise<
   Array<{
-    record: { id: string; businessDate: Date; summary: string; handler: string };
+    record: {
+      id: string;
+      businessDate: Date;
+      summary: string;
+      handler: string;
+      subjectId: string;
+      amount: Prisma.Decimal;
+      budgetYear: number;
+      status: string;
+    };
     attachment: AttachmentMeta;
     data: Buffer;
   }>
@@ -245,7 +254,18 @@ export async function listForExport(
   const rows = await prisma.recordAttachment.findMany({
     where: buildExportWhere(projectId, filters),
     include: {
-      record: { select: { id: true, businessDate: true, summary: true, handler: true } },
+      record: {
+        select: {
+          id: true,
+          businessDate: true,
+          summary: true,
+          handler: true,
+          subjectId: true,
+          amount: true,
+          budgetYear: true,
+          status: true,
+        },
+      },
       uploadedBy: { select: { id: true, name: true } },
     },
     orderBy: [{ record: { businessDate: 'asc' } }, { createdAt: 'asc' }],

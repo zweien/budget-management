@@ -92,3 +92,21 @@ export function exportAttachmentsZip(
     'attachments.zip',
   );
 }
+
+/**
+ * 按预算科目层级打包附件(整理报告专用)。
+ * 文件夹按科目目录层级,文件名按 template 模板渲染。默认全年度;year 可选筛选。
+ */
+export function packageAttachmentsBySubject(
+  projectId: string,
+  query: { year?: number; template?: string },
+): Promise<void> {
+  const sp = new URLSearchParams();
+  if (query.year) sp.set('year', String(query.year));
+  if (query.template) sp.set('template', query.template);
+  const qs = sp.toString();
+  return downloadFile(
+    `/api/projects/${projectId}/attachments/package${qs ? `?${qs}` : ''}`,
+    'attachments.zip',
+  );
+}

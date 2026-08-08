@@ -297,6 +297,11 @@ describe('recordAttachment.service (integration, real PG)', () => {
     expect(hit).toBeTruthy();
     expect(hit!.record.summary).toContain('附件测试-EXPORT');
     expect(Buffer.isBuffer(hit!.data)).toBe(true);
+    // Task 2:返回类型扩展,新增 subjectId/amount/budgetYear/status 字段
+    expect(hit!.record.subjectId).toBe(record.subjectId);
+    expect(hit!.record.amount.toFixed(2)).toBe('100.00');
+    expect(hit!.record.budgetYear).toBe(2026);
+    expect(hit!.record.status).toBe('PLACEHOLDER');
     // 年度不匹配 → 不含。
     const none = await listForExport(project.id, { budgetYear: 2099 }, adminUser());
     expect(none.find((r) => r.attachment.fileName === 'e1.pdf')).toBeUndefined();

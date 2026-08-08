@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { ChevronDown, Funnel, Paperclip, Package, Plus } from 'lucide-react';
+import { ChevronDown, FolderArchive, Funnel, Paperclip, Package, Plus } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -24,6 +24,7 @@ import { apiFetch } from '@/lib/api/client';
 import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
+import { PackageAttachmentsDialog } from '@/components/records/PackageAttachmentsDialog';
 import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
 import {
   AlertDialog,
@@ -256,6 +257,8 @@ function BusinessRecordsPageInner() {
   const [historyLoading, setHistoryLoading] = useState(false);
   // 报销凭证附件 Sheet(Task 9 集成)。
   const [attachmentTarget, setAttachmentTarget] = useState<BusinessRecordRow | null>(null);
+  // 按科目层级打包附件 Dialog(Task 5 集成)。
+  const [packageOpen, setPackageOpen] = useState(false);
   // 表单内待上传附件(Task 10:不进 zod schema,业务保存成功后循环上传)。
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
@@ -763,6 +766,10 @@ function BusinessRecordsPageInner() {
             <Package className="size-4" />
             导出附件(zip)
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setPackageOpen(true)}>
+            <FolderArchive className="size-4" />
+            按科目打包
+          </Button>
           {project?.canWriteRecords ? (
             <Button onClick={openCreate}>
               <Plus />
@@ -1224,6 +1231,14 @@ function BusinessRecordsPageInner() {
         canWrite={!!project?.canWriteRecords}
         open={!!attachmentTarget}
         onOpenChange={(o) => !o && setAttachmentTarget(null)}
+      />
+
+      {/* 按科目层级打包附件 Dialog(Task 5 集成) */}
+      <PackageAttachmentsDialog
+        projectId={projectId}
+        yearOptions={yearOptions}
+        open={packageOpen}
+        onOpenChange={setPackageOpen}
       />
     </div>
   );
