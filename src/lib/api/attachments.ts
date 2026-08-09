@@ -110,3 +110,42 @@ export function packageAttachmentsBySubject(
     'attachments.zip',
   );
 }
+
+/**
+ * 拉取附件字节并包装为 Blob URL(供 <img>/<iframe> 原生预览)。
+ * 鉴权同 downloadAttachment:Mock 模式 bootstrapMockUser 注入 x-mock-user-id;
+ * SSO 模式同源 fetch 自动带 bm_session cookie。
+ * 返回 createObjectURL 生成的 blob: URL,调用方负责在关闭/切换时 revokeObjectURL。
+ *
+ * Blob URL 是纯前端构造,不带响应头 → 下载路由的 Content-Disposition: attachment
+ * 不生效,浏览器直接渲染(图片 <img> / PDF <iframe> 内置查看器)。
+ */
+export async function fetchAttachmentBlobUrl(
+  projectId: string,
+  recordId: string,
+  attId: string,
+): Promise<string> {
+  const mockUserId = await bootstrapMockUser();
+  const res = await fetch(`/api/projects/${projectId}/records/${recordId}/attachments/${attId}`, {
+    headers: {
+      ...(mockUserId ? { 'x-mock-user-id': mockUserId } : {}),
+      Accept: 'application/octet-stream',
+    },
+  });
+  if (!res.ok) {
+    // 解析服务端 {error} 文案(下载路由错误返回 JSON)。
+    let msg = `加载失败 (${res.status})`;
+    try {
+      const ct = res.headers.get('Content-Type') ?? '';
+      if (ct.includes('application/json')) {
+        const body = (await res.json()) as { error?: unknown };
+        if (body && typeof body.error === 'string') msg = body.error;
+      }
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
