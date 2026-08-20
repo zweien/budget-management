@@ -98,9 +98,9 @@ export function AmountInput({
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const normalized = parseRaw(e.target.value, allowNegative);
-    setRaw(normalized);
-    emit(normalized);
+    // 只更新本地草稿,提交延到失焦:表格场景(如初始预算树表)每次按键 emit
+    // 会触发父级 setState 重建整表,打断输入(焦点丢失/组词中断)。
+    setRaw(parseRaw(e.target.value, allowNegative));
   };
 
   const handleFocus = () => {
@@ -108,13 +108,18 @@ export function AmountInput({
   };
 
   const handleBlur = () => {
-    if (!allowNegative && value != null) {
-      try {
-        const d = fromStored(value);
-        if (d.isFinite() && d.isNegative()) onChange?.('0.00');
-      } catch {
-        // 非法值已由 emit 回传 undefined,无需处理。
+    if (raw !== null) {
+      // 负数钳制(allowNegative=false 时):失焦一并处理,再统一提交。
+      let v = raw;
+      if (!allowNegative && v !== '') {
+        try {
+          const d = fromStored(v);
+          if (d.isFinite() && d.isNegative()) v = '0';
+        } catch {
+          // 非法文本由 emit 回传 undefined。
+        }
       }
+      emit(v);
     }
     setRaw(null);
   };
