@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { BudgetTreeTable, type LedgerNode } from '@/components/ui/BudgetTreeTable';
 import { EmptyState } from '@/components/layout/empty-state';
+import { CommitOnBlurInput } from '@/components/ui/commit-on-blur-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -458,15 +459,15 @@ export default function InitialBudgetPage() {
   /** 在指定行下新增子科目:code 用 UUIDv7,parentCode 指向父 code;同时确保父行展开。 */
   const addChildSubject = (parentKey: string) => {
     markDirty();
+    // setExpanded 必须在 setSubjectRows 的 updater 之外调用(updater 须为纯函数,
+    // StrictMode 下会双重执行导致副作用重复)。
+    if (expanded !== true) {
+      setExpanded((prev) => (prev === true ? prev : { ...prev, [parentKey]: true }));
+    }
     setSubjectRows((rs) => {
       const parent = rs.find((r) => r.key === parentKey);
       if (!parent) return rs;
-      const childKey = genKey();
-      // 父行展开(TanStack ExpandedState;true 已全展开则无需变)。
-      if (expanded !== true) {
-        setExpanded((prev) => (prev === true ? prev : { ...prev, [parentKey]: true }));
-      }
-      return [...rs, { key: childKey, code: uuidv7(), name: '', parentCode: parent.code }];
+      return [...rs, { key: genKey(), code: uuidv7(), name: '', parentCode: parent.code }];
     });
   };
   /** 删除科目:仅允许删除没有子节点的行(由调用方禁用按钮,此处再防御一次)。 */
@@ -799,9 +800,9 @@ export default function InitialBudgetPage() {
         const amt = subjectAmounts[key] ?? '';
         return (
           <div className="flex items-center gap-1.5 whitespace-nowrap">
-            <Input
+            <CommitOnBlurInput
               value={detail.unit}
-              onChange={(e) => applyDetailChange(key, detail, { unit: e.target.value })}
+              onCommit={(unit) => applyDetailChange(key, detail, { unit })}
               placeholder="单位"
               className="h-7 w-16"
             />
@@ -864,9 +865,9 @@ export default function InitialBudgetPage() {
                 <span className="size-4 shrink-0" />
               )}
               {editable ? (
-                <Input
+                <CommitOnBlurInput
                   value={node.name}
-                  onChange={(e) => updateSubjectRow(node.key, { name: e.target.value })}
+                  onCommit={(name) => updateSubjectRow(node.key, { name })}
                   placeholder="如 设备购置费"
                   className="h-7 min-w-28 flex-1"
                 />
