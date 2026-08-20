@@ -1476,7 +1476,9 @@ export default function InitialBudgetPage() {
 
       {/* ====== 操作按钮 ====== */}
       <div className="flex gap-2">
-        {!draft && (
+        {/* 可编辑态(新建/DRAFT/REJECTED/WITHDRAWN)都提供保存草稿:
+            已有草稿时走 PATCH(handleSaveDraft 内分支),而非隐藏入口。 */}
+        {editable && (
           <Button variant="outline" onClick={handleSaveDraft} disabled={submitting}>
             保存草稿
           </Button>
