@@ -59,6 +59,7 @@ export function Combobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-label={selected?.label ?? placeholder}
           disabled={disabled}
           className={cn('justify-between font-normal', !selected && 'text-mute', className)}
         >

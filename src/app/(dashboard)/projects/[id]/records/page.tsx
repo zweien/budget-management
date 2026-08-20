@@ -64,6 +64,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { MoneyText } from '@/components/ui/MoneyText';
+import { Combobox } from '@/components/ui/combobox';
 import {
   Select,
   SelectContent,
@@ -891,18 +892,18 @@ function BusinessRecordsPageInner() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>科目</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择叶科目" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {leafSubjects.map((s) => (
-                          <SelectItem key={s.subjectId} value={s.subjectId}>
-                            {s.code} {s.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Combobox
+                      options={leafSubjects.map((s) => ({
+                        value: s.subjectId,
+                        label: s.name,
+                        keywords: s.code,
+                      }))}
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="选择叶科目"
+                      searchPlaceholder="输入名称或编号筛选…"
+                      emptyText="无匹配叶科目"
+                    />
                     <FormMessage />
                   </FormItem>
                 )}
