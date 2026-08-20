@@ -52,11 +52,15 @@ export function AttachmentPreviewDialog({
     let createdUrl: string | null = null;
     fetchAttachmentBlobUrl(projectId, recordId, attachmentId)
       .then((url) => {
+        // 无论是否已取消都记录 url:若 cleanup 已跑(取消),这里立即 revoke,
+        // 防止飞行中 fetch resolve 后创建的 blob URL 无人释放(最大 50MB 泄漏)。
         createdUrl = url;
-        if (!cancelled) {
-          setBlobUrl(url);
-          setError(null);
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
         }
+        setBlobUrl(url);
+        setError(null);
       })
       .catch((e: unknown) => {
         if (!cancelled) {
