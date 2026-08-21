@@ -514,6 +514,10 @@ export async function updateDraft(
 
   validatePayload(payload);
   const projectTotal = fromStored(payload.projectTotal);
+  // 与 createInitialBudget 一致:按 parentCode 链计算层级(根=1)。
+  // 此前 PATCH 重建时硬编码 level:0,导致再修改过的项目科目层级丢失,
+  // 预算调整页父节点下拉 repeat(level-1) 崩溃。
+  const levels = computeLevels(payload);
 
   await prisma.$transaction(async (tx) => {
     // 清空旧编制数据(subjects 级联带走 subject_budgets / subject_total_budgets;
@@ -536,7 +540,7 @@ export async function updateDraft(
           code: s.code,
           name: s.name,
           description: s.description ?? null,
-          level: 0,
+          level: levels.get(s.code) ?? 1,
           isLeaf: s.isLeaf,
           sortOrder,
         },

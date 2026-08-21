@@ -308,9 +308,10 @@ export default function AdjustmentsPage() {
   /** 父节点候选:非叶科目,带层级缩进显示。 */
   const parentOptions = useMemo(
     () =>
+      // 防御:level 异常(如历史 PATCH 写坏的 0)时不崩页,repeat 负数会抛 RangeError。
       subjectTree
         .filter((s) => !s.isLeaf)
-        .map((s) => ({ value: s.id, label: `${'　'.repeat(s.level - 1)}${s.name}` })),
+        .map((s) => ({ value: s.id, label: `${'　'.repeat(Math.max(0, s.level - 1))}${s.name}` })),
     [subjectTree],
   );
 
