@@ -12,8 +12,8 @@ const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
 /**
  * GET /api/statistics/custom — 自定义统计(§11.3)。
  * Query 参数即筛选条件:
- *   projectId, budgetYear, subjectId, status,
- *   businessDateFrom, businessDateTo, handler, includeVoid(0/1)。
+ *   projectId, budgetYear, subject(科目名称/编号模糊),
+ *   status, businessDateFrom, businessDateTo, handler, includeVoid(0/1)。
  * 返回 { summary, records }。
  */
 export async function GET(req: NextRequest) {
@@ -34,8 +34,8 @@ export async function GET(req: NextRequest) {
       filters.budgetYear = year;
     }
 
-    const subjectId = sp.get('subjectId');
-    if (subjectId) filters.subjectId = subjectId;
+    const subject = sp.get('subject');
+    if (subject) filters.subject = subject;
 
     const status = sp.get('status');
     if (status) {

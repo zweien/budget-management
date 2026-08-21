@@ -2,15 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { BusinessStatus } from '@prisma/client';
 
 import { HTTPError, requireUser } from '@/lib/auth/session';
-import { exportStatistics } from '@/server/services/export.service';
-import type { CustomStatisticsFilters } from '@/server/services/statistics.service';
+import { exportBalanceStatistics, exportStatistics } from '@/server/services/export.service';
+import type {
+  BalanceStatisticsFilters,
+  CustomStatisticsFilters,
+} from '@/server/services/statistics.service';
 
 const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
 
 /**
- * GET /api/statistics/export — 导出自定义统计结果 xlsx(§10.5)。
- * Query 参数即筛选条件(同 /api/statistics/custom):
- *   projectId, budgetYear, subjectId, status,
+ * GET /api/statistics/export — 导出统计结果 xlsx(§10.5)。
+ * - mode=balance:经费余额(总预算口径),参数 subject/projectId/year/onlyNegative。
+ * - 缺省:自定义统计,参数同 /api/statistics/custom:
+ *   projectId, budgetYear, subject, status,
  *   businessDateFrom, businessDateTo, handler, includeVoid(0/1)。
  * 返回 application/vnd.openxmlformats-officedocument.spreadsheetml.sheet。
  */
@@ -18,6 +22,33 @@ export async function GET(req: NextRequest) {
   try {
     const user = await requireUser();
     const sp = req.nextUrl.searchParams;
+
+    if (sp.get('mode') === 'balance') {
+      const balanceFilters: BalanceStatisticsFilters = {};
+      const subject = sp.get('subject');
+      if (subject) balanceFilters.subject = subject;
+      const projectId = sp.get('projectId');
+      if (projectId) balanceFilters.projectId = projectId;
+      const yearParam = sp.get('year');
+      if (yearParam !== null) {
+        const year = Number.parseInt(yearParam, 10);
+        if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+          return NextResponse.json({ error: '年度参数无效' }, { status: 400 });
+        }
+        balanceFilters.year = year;
+      }
+      const onlyNegative = sp.get('onlyNegative');
+      if (onlyNegative === '1' || onlyNegative === 'true') {
+        balanceFilters.onlyNegative = true;
+      }
+      const buffer = await exportBalanceStatistics(balanceFilters, user);
+      return new NextResponse(buffer as unknown as BodyInit, {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': 'attachment; filename="balance-statistics.xlsx"',
+        },
+      });
+    }
 
     const filters: CustomStatisticsFilters = {};
     const projectId = sp.get('projectId');
@@ -32,8 +63,8 @@ export async function GET(req: NextRequest) {
       filters.budgetYear = year;
     }
 
-    const subjectId = sp.get('subjectId');
-    if (subjectId) filters.subjectId = subjectId;
+    const subject = sp.get('subject');
+    if (subject) filters.subject = subject;
 
     const status = sp.get('status');
     if (status) {

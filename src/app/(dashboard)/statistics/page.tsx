@@ -29,6 +29,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -61,18 +62,6 @@ interface ProjectOption {
   id: string;
   code: string;
   name: string;
-}
-
-/** 叶科目(从 ledger nodes isLeaf=true 取得)。 */
-interface LeafSubject {
-  subjectId: string;
-  code: string;
-  name: string;
-}
-
-interface LedgerResponse {
-  year: number;
-  nodes: Array<{ subjectId: string; code: string; name: string; isLeaf: boolean }>;
 }
 
 /** 生成最近 5 年的年度选项(含当前年,按降序)。 */
@@ -115,6 +104,7 @@ export default function StatisticsPage() {
           <TabsTrigger value="custom">自定义统计</TabsTrigger>
           <TabsTrigger value="monthly">月度历史</TabsTrigger>
           <TabsTrigger value="cross">跨项目统计</TabsTrigger>
+          <TabsTrigger value="balance">经费余额</TabsTrigger>
         </TabsList>
         <TabsContent value="custom">
           <CustomStatisticsTab />
@@ -124,6 +114,9 @@ export default function StatisticsPage() {
         </TabsContent>
         <TabsContent value="cross">
           <CrossProjectTab />
+        </TabsContent>
+        <TabsContent value="balance">
+          <BalanceTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -158,42 +151,6 @@ function useAccessibleProjects(): {
   }, []);
 
   return { projects, loading };
-}
-
-/** 拉取项目叶科目(用于科目筛选下拉)。 */
-function useLeafSubjects(projectId: string | undefined): {
-  subjects: LeafSubject[];
-  loading: boolean;
-} {
-  const [subjects, setSubjects] = useState<LeafSubject[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    // 无项目时不发请求;科目 Select 由调用方按 projectId 禁用。
-    if (!projectId) return;
-    let cancelled = false;
-    apiFetch<LedgerResponse>(`/api/projects/${projectId}/ledger`)
-      .then((ledger) => {
-        if (cancelled) return;
-        const leaves: LeafSubject[] = (ledger.nodes ?? [])
-          .filter((n) => n.isLeaf)
-          .map((n) => ({ subjectId: n.subjectId, code: n.code, name: n.name }))
-          .sort((a, b) => a.code.localeCompare(b.code));
-        setSubjects(leaves);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) toast.error(e.message);
-        if (!cancelled) setSubjects([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
-  return { subjects, loading };
 }
 
 // ============================================================
@@ -234,7 +191,8 @@ interface CustomResult {
 interface CustomFilters {
   projectId?: string;
   budgetYear?: number;
-  subjectId?: string;
+  /** 科目模糊(名称/编号 contains,跨项目;服务端含非叶展开)。 */
+  subject?: string;
   status?: BusinessStatus;
   dateRange?: DateRange;
   handler?: string;
@@ -245,7 +203,7 @@ function buildCustomQuery(f: CustomFilters): string {
   const qs = new URLSearchParams();
   if (f.projectId) qs.set('projectId', f.projectId);
   if (f.budgetYear !== undefined) qs.set('budgetYear', String(f.budgetYear));
-  if (f.subjectId) qs.set('subjectId', f.subjectId);
+  if (f.subject?.trim()) qs.set('subject', f.subject.trim());
   if (f.status) qs.set('status', f.status);
   if (f.dateRange?.from) qs.set('businessDateFrom', format(f.dateRange.from, 'yyyy-MM-dd'));
   if (f.dateRange?.to) qs.set('businessDateTo', format(f.dateRange.to, 'yyyy-MM-dd'));
@@ -257,20 +215,12 @@ function buildCustomQuery(f: CustomFilters): string {
 function CustomStatisticsTab() {
   const { projects, loading: loadingProjects } = useAccessibleProjects();
   const [filters, setFilters] = useState<CustomFilters>({});
-  // 科目选项随项目选择即时加载(交互优化:不再等查询落定)。
-  const { subjects, loading: loadingSubjects } = useLeafSubjects(filters.projectId);
 
   const [result, setResult] = useState<CustomResult | null>(null);
   // 初始即 true:挂载自动查询,避免 mount effect 内同步 setState(react-hooks/set-state-in-effect)。
   const [loading, setLoading] = useState(true);
   const [hasQueried, setHasQueried] = useState(false);
   const [exporting, setExporting] = useState(false);
-
-  const subjectMap = useMemo(() => {
-    const m = new Map<string, LeafSubject>();
-    for (const s of subjects) m.set(s.subjectId, s);
-    return m;
-  }, [subjects]);
 
   // setLoading(true) 由调用方(事件处理器 / 初始 state)负责,函数内只做异步落值。
   const runQuery = useCallback(async (f: CustomFilters) => {
@@ -373,11 +323,7 @@ function CustomStatisticsTab() {
             <Select
               value={filters.projectId ?? ALL}
               onValueChange={(v) =>
-                setFilters((f) => ({
-                  ...f,
-                  projectId: v === ALL ? undefined : v,
-                  subjectId: undefined, // 换项目后科目失效
-                }))
+                setFilters((f) => ({ ...f, projectId: v === ALL ? undefined : v }))
               }
               disabled={loadingProjects}
             >
@@ -417,25 +363,14 @@ function CustomStatisticsTab() {
           </div>
           <div className="grid gap-1.5">
             <Label>科目</Label>
-            <Select
-              value={filters.subjectId ?? ALL}
-              onValueChange={(v) =>
-                setFilters((f) => ({ ...f, subjectId: v === ALL ? undefined : v }))
-              }
-              disabled={!filters.projectId || loadingSubjects}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={filters.projectId ? '全部科目' : '请先选项目'} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>全部科目</SelectItem>
-                {subjects.map((s) => (
-                  <SelectItem key={s.subjectId} value={s.subjectId}>
-                    {s.code} {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              placeholder="名称/编号模糊匹配,回车查询"
+              value={filters.subject ?? ''}
+              onChange={(e) => setFilters((f) => ({ ...f, subject: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleQueryClick();
+              }}
+            />
           </div>
           <div className="grid gap-1.5">
             <Label>状态</Label>
@@ -553,13 +488,9 @@ function CustomStatisticsTab() {
             ) : (
               result?.records.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-mono text-[13px]">
-                    {r.subject?.code ??
-                      subjectMap.get(r.subjectId)?.code ??
-                      r.subjectId.slice(0, 8)}
-                  </TableCell>
+                  <TableCell className="font-mono text-[13px]">{r.subject?.code ?? '—'}</TableCell>
                   <TableCell className="max-w-48 truncate" title={r.subject?.name}>
-                    {r.subject?.name ?? subjectMap.get(r.subjectId)?.name ?? '—'}
+                    {r.subject?.name ?? '—'}
                   </TableCell>
                   <TableCell className="tabular-nums">{r.budgetYear}</TableCell>
                   <TableCell className="tabular-nums">{formatDate(r.businessDate)}</TableCell>
@@ -859,6 +790,460 @@ function CrossProjectTab() {
               ))
             )}
           </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Tab 4: 经费余额(总预算口径:科目总预算 − 累计占用)
+// ============================================================
+
+interface BalanceRow {
+  projectId: string;
+  projectCode: string;
+  projectName: string;
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  isLeaf: boolean;
+  totalBudget: string;
+  paid: string;
+  payable: string;
+  totalOccupied: string;
+  balance: string;
+  executionRate: number | null;
+  yearBudget: string | null;
+  yearOccupied: string | null;
+  yearBalance: string | null;
+}
+
+interface BalanceResult {
+  hitProjects: number;
+  hitSubjects: number;
+  rows: BalanceRow[];
+  total: Omit<
+    BalanceRow,
+    | 'projectId'
+    | 'projectCode'
+    | 'projectName'
+    | 'subjectId'
+    | 'subjectCode'
+    | 'subjectName'
+    | 'isLeaf'
+  >;
+}
+
+interface BalanceFilters {
+  subject?: string;
+  projectId?: string;
+  year?: number;
+  onlyNegative?: boolean;
+}
+
+function buildBalanceQuery(f: BalanceFilters): string {
+  const qs = new URLSearchParams();
+  if (f.subject?.trim()) qs.set('subject', f.subject.trim());
+  if (f.projectId) qs.set('projectId', f.projectId);
+  if (f.year !== undefined) qs.set('year', String(f.year));
+  if (f.onlyNegative) qs.set('onlyNegative', '1');
+  return qs.toString();
+}
+
+/** 可排序列(金额列按数值比较)。 */
+type BalanceSortKey =
+  | 'projectName'
+  | 'subjectName'
+  | 'totalBudget'
+  | 'paid'
+  | 'payable'
+  | 'totalOccupied'
+  | 'balance'
+  | 'executionRate'
+  | 'yearBudget'
+  | 'yearOccupied'
+  | 'yearBalance';
+
+function compareBalanceRows(key: BalanceSortKey, dir: 'asc' | 'desc') {
+  const sign = dir === 'asc' ? 1 : -1;
+  return (a: BalanceRow, b: BalanceRow): number => {
+    if (
+      key === 'totalBudget' ||
+      key === 'paid' ||
+      key === 'payable' ||
+      key === 'totalOccupied' ||
+      key === 'balance' ||
+      key === 'yearBudget' ||
+      key === 'yearOccupied' ||
+      key === 'yearBalance'
+    ) {
+      return (Number(a[key] ?? '0') - Number(b[key] ?? '0')) * sign;
+    }
+    if (key === 'executionRate') {
+      const av = a.executionRate ?? -Infinity;
+      const bv = b.executionRate ?? -Infinity;
+      return (av - bv) * sign;
+    }
+    return String(a[key]).localeCompare(String(b[key]), 'zh-Hans-CN') * sign;
+  };
+}
+
+/** 排序表头(点击切 asc/desc;模块级组件,状态经 props 注入)。 */
+function SortHead({
+  sort,
+  keyName,
+  label,
+  align = 'right',
+  onToggle,
+}: {
+  sort: { key: BalanceSortKey; dir: 'asc' | 'desc' };
+  keyName: BalanceSortKey;
+  label: string;
+  align?: 'left' | 'right';
+  onToggle: (key: BalanceSortKey) => void;
+}) {
+  return (
+    <TableHead className={align === 'right' ? 'text-right' : undefined}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-0.5 hover:text-foreground"
+        onClick={() => onToggle(keyName)}
+      >
+        {label}
+        <span className="text-[10px] text-mute">
+          {sort.key === keyName ? (sort.dir === 'asc' ? '▲' : '▼') : '·'}
+        </span>
+      </button>
+    </TableHead>
+  );
+}
+
+function BalanceTab() {
+  const { projects, loading: loadingProjects } = useAccessibleProjects();
+  const [filters, setFilters] = useState<BalanceFilters>({});
+  const [result, setResult] = useState<BalanceResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  // 默认按总结余升序(最紧张在前)。
+  const [sort, setSort] = useState<{ key: BalanceSortKey; dir: 'asc' | 'desc' }>({
+    key: 'balance',
+    dir: 'asc',
+  });
+
+  const runQuery = useCallback(async (f: BalanceFilters) => {
+    try {
+      const suffix = buildBalanceQuery(f);
+      const data = await apiFetch<BalanceResult>(
+        `/api/statistics/balance${suffix ? `?${suffix}` : ''}`,
+      );
+      setResult(data);
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 首次挂载查询一次(loading 已为 true)。
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<BalanceResult>('/api/statistics/balance')
+      .then((data) => {
+        if (!cancelled) setResult(data);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled && e instanceof Error) toast.error(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleQueryClick = () => {
+    setLoading(true);
+    void runQuery(filters);
+  };
+
+  const handleReset = () => {
+    setFilters({});
+    setLoading(true);
+    void runQuery({});
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const suffix = buildBalanceQuery(filters);
+      await downloadFile(
+        `/api/statistics/export?mode=balance${suffix ? `&${suffix}` : ''}`,
+        'balance-statistics.xlsx',
+      );
+      toast.success('已开始导出');
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const toggleSort = (key: BalanceSortKey) => {
+    setSort((s) =>
+      s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' },
+    );
+  };
+
+  const sortedRows = useMemo(
+    () => [...(result?.rows ?? [])].sort(compareBalanceRows(sort.key, sort.dir)),
+    [result, sort],
+  );
+
+  // 年度三列:筛选选了年度即显示(结果行也据此回填)。
+  const hasYear = filters.year !== undefined;
+  const t = result?.total;
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid gap-1.5">
+            <Label>科目</Label>
+            <Input
+              placeholder="名称/编号模糊匹配,如 劳务 / LWF"
+              value={filters.subject ?? ''}
+              onChange={(e) => setFilters((f) => ({ ...f, subject: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleQueryClick();
+              }}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>项目</Label>
+            <Select
+              value={filters.projectId ?? ALL}
+              onValueChange={(v) =>
+                setFilters((f) => ({ ...f, projectId: v === ALL ? undefined : v }))
+              }
+              disabled={loadingProjects}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="全部项目" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部项目</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.code} {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>年度(加显年度口径列)</Label>
+            <Select
+              value={filters.year !== undefined ? String(filters.year) : ALL}
+              onValueChange={(v) =>
+                setFilters((f) => ({ ...f, year: v === ALL ? undefined : Number(v) }))
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="不按年度" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>不按年度</SelectItem>
+                {yearOptions().map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>仅看结余为负</Label>
+            <div className="flex h-8 items-center gap-2">
+              <Switch
+                checked={filters.onlyNegative ?? false}
+                onCheckedChange={(checked) =>
+                  setFilters((f) => ({ ...f, onlyNegative: checked || undefined }))
+                }
+                aria-label="仅看总结余为负的科目"
+              />
+              <span className="text-sm text-muted-foreground">
+                {filters.onlyNegative ? '仅负结余' : '全部'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-end gap-2">
+            <Button onClick={handleQueryClick} disabled={loading}>
+              <Search />
+              {loading ? '查询中…' : '查询'}
+            </Button>
+            <Button variant="outline" onClick={handleReset} disabled={loading}>
+              <RotateCcw />
+              重置
+            </Button>
+            <Button variant="outline" onClick={handleExport} disabled={exporting}>
+              <Download />
+              {exporting ? '导出中…' : '导出'}
+            </Button>
+          </div>
+        </div>
+        {result ? (
+          <p className="mt-3 text-xs text-mute tabular-nums">
+            命中 {result.hitProjects} 个项目 × {result.hitSubjects} 个科目;结余口径 =
+            科目总预算(含调整) − 累计占用
+          </p>
+        ) : null}
+      </Card>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <SortHead
+                sort={sort}
+                onToggle={toggleSort}
+                keyName="projectName"
+                label="项目"
+                align="left"
+              />
+              <SortHead
+                sort={sort}
+                onToggle={toggleSort}
+                keyName="subjectName"
+                label="科目"
+                align="left"
+              />
+              <SortHead
+                sort={sort}
+                onToggle={toggleSort}
+                keyName="totalBudget"
+                label="科目总预算"
+              />
+              <SortHead sort={sort} onToggle={toggleSort} keyName="paid" label="已支出" />
+              <SortHead sort={sort} onToggle={toggleSort} keyName="payable" label="应付未付" />
+              <SortHead sort={sort} onToggle={toggleSort} keyName="totalOccupied" label="总占用" />
+              <SortHead sort={sort} onToggle={toggleSort} keyName="balance" label="总结余" />
+              <SortHead sort={sort} onToggle={toggleSort} keyName="executionRate" label="执行率" />
+              {hasYear ? (
+                <>
+                  <SortHead
+                    sort={sort}
+                    onToggle={toggleSort}
+                    keyName="yearBudget"
+                    label="年度预算"
+                  />
+                  <SortHead
+                    sort={sort}
+                    onToggle={toggleSort}
+                    keyName="yearOccupied"
+                    label="年度占用"
+                  />
+                  <SortHead
+                    sort={sort}
+                    onToggle={toggleSort}
+                    keyName="yearBalance"
+                    label="年度结余"
+                  />
+                </>
+              ) : null}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <TableRow key={i} className="hover:bg-transparent">
+                  <TableCell colSpan={hasYear ? 11 : 8}>
+                    <Skeleton className="h-6 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : sortedRows.length === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell
+                  colSpan={hasYear ? 11 : 8}
+                  className="h-32 text-center text-muted-foreground"
+                >
+                  没有匹配的科目
+                </TableCell>
+              </TableRow>
+            ) : (
+              sortedRows.map((row) => (
+                <TableRow key={`${row.projectId}|${row.subjectId}`}>
+                  <TableCell
+                    className="max-w-40 truncate"
+                    title={`${row.projectCode} ${row.projectName}`}
+                  >
+                    {row.projectCode} {row.projectName}
+                  </TableCell>
+                  <TableCell
+                    className="max-w-48 truncate"
+                    title={`${row.subjectCode} ${row.subjectName}`}
+                  >
+                    <span className="font-mono text-[13px] text-mute">{row.subjectCode}</span>{' '}
+                    {row.subjectName}
+                    {!row.isLeaf ? <span className="ml-1 text-xs text-mute">(含下级)</span> : null}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{row.totalBudget}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.paid}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.payable}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.totalOccupied}</TableCell>
+                  <TableCell>
+                    <MoneyText value={row.balance} className="block text-right" />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {renderRate(row.executionRate)}
+                  </TableCell>
+                  {hasYear ? (
+                    <>
+                      <TableCell className="text-right tabular-nums">
+                        {row.yearBudget ?? '—'}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.yearOccupied ?? '—'}
+                      </TableCell>
+                      <TableCell>
+                        <MoneyText value={row.yearBalance ?? '0.00'} className="block text-right" />
+                      </TableCell>
+                    </>
+                  ) : null}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+          {!loading && t && sortedRows.length > 0 ? (
+            <TableFooter>
+              <TableRow className="font-semibold">
+                <TableCell colSpan={2}>合计(命中科目去重)</TableCell>
+                <TableCell className="text-right tabular-nums">{t.totalBudget}</TableCell>
+                <TableCell className="text-right tabular-nums">{t.paid}</TableCell>
+                <TableCell className="text-right tabular-nums">{t.payable}</TableCell>
+                <TableCell className="text-right tabular-nums">{t.totalOccupied}</TableCell>
+                <TableCell>
+                  <MoneyText value={t.balance} className="block text-right" />
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {renderRate(t.executionRate)}
+                </TableCell>
+                {hasYear ? (
+                  <>
+                    <TableCell className="text-right tabular-nums">{t.yearBudget ?? '—'}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {t.yearOccupied ?? '—'}
+                    </TableCell>
+                    <TableCell>
+                      <MoneyText value={t.yearBalance ?? '0.00'} className="block text-right" />
+                    </TableCell>
+                  </>
+                ) : null}
+              </TableRow>
+            </TableFooter>
+          ) : null}
         </Table>
       </div>
     </div>
