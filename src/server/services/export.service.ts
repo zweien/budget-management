@@ -354,8 +354,9 @@ export async function exportBalanceStatistics(
   if (filters.year !== undefined) {
     summaryValue.push(t.yearBudget ?? '0.00', t.yearOccupied ?? '0.00', t.yearBalance ?? '0.00');
   }
+  // B-D 列补空占位,使合计值与明细的金额列(E 起)纵向对齐。
   const totalRow = sheet.getRow(6);
-  totalRow.values = ['合计(命中科目去重)', ...summaryValue];
+  totalRow.values = ['合计(命中科目去重)', '', '', '', ...summaryValue];
   totalRow.font = { bold: true };
 
   // 明细表头(第 8 行)。

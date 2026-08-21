@@ -923,6 +923,8 @@ function BalanceTab() {
   const { projects, loading: loadingProjects } = useAccessibleProjects();
   const [filters, setFilters] = useState<BalanceFilters>({});
   const [result, setResult] = useState<BalanceResult | null>(null);
+  // 已成功应用的年度:年度三列据此显示(不跟随编辑中的筛选,防止未点查询时列语义漂移)。
+  const [appliedYear, setAppliedYear] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   // 默认按总结余升序(最紧张在前)。
@@ -938,6 +940,7 @@ function BalanceTab() {
         `/api/statistics/balance${suffix ? `?${suffix}` : ''}`,
       );
       setResult(data);
+      setAppliedYear(f.year);
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
     } finally {
@@ -1001,8 +1004,8 @@ function BalanceTab() {
     [result, sort],
   );
 
-  // 年度三列:筛选选了年度即显示(结果行也据此回填)。
-  const hasYear = filters.year !== undefined;
+  // 年度三列:跟随已应用的查询(而非编辑中的筛选),与 result 数据语义一致。
+  const hasYear = appliedYear !== undefined;
   const t = result?.total;
 
   return (
