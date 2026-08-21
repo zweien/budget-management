@@ -669,9 +669,12 @@ export default function InitialBudgetPage() {
         return next;
       });
       setSubjectAmounts((prev) => {
+        // 防御:nextDetail 由上一个 updater 产出(批处理内按入队顺序执行,但跨
+        // updater 传值依赖实现细节)。万一顺序异常,保留现值不清零,待下次变更同步。
+        if (!nextDetail) return prev;
         // 推导金额:quantity × unitPrice(三项齐备时)。
         let amount = '';
-        if (nextDetail && nextDetail.quantity !== '' && nextDetail.unitPrice !== '') {
+        if (nextDetail.quantity !== '' && nextDetail.unitPrice !== '') {
           try {
             amount = new D(nextDetail.quantity).times(new D(nextDetail.unitPrice)).toFixed(2);
           } catch {

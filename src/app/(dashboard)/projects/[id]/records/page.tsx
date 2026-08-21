@@ -512,6 +512,17 @@ function BusinessRecordsPageInner() {
     return m;
   }, [leafSubjects]);
 
+  /** 新增记录科目下拉选项:默认只显示名称;存在同名叶科目时追加编号消歧(防记错科目)。 */
+  const subjectSelectOptions = useMemo(() => {
+    const nameCount = new Map<string, number>();
+    for (const s of leafSubjects) nameCount.set(s.name, (nameCount.get(s.name) ?? 0) + 1);
+    return leafSubjects.map((s) => ({
+      value: s.subjectId,
+      label: (nameCount.get(s.name) ?? 0) > 1 ? `${s.name}（${s.code}）` : s.name,
+      keywords: s.code,
+    }));
+  }, [leafSubjects]);
+
   /** 科目/年度列的稳定候选(不受本列筛选影响)。 */
   const subjectOptions = useMemo(() => leafSubjects.map((s) => s.subjectId), [leafSubjects]);
   const yearOptions = useMemo(
@@ -893,11 +904,7 @@ function BusinessRecordsPageInner() {
                   <FormItem>
                     <FormLabel>科目</FormLabel>
                     <Combobox
-                      options={leafSubjects.map((s) => ({
-                        value: s.subjectId,
-                        label: s.name,
-                        keywords: s.code,
-                      }))}
+                      options={subjectSelectOptions}
                       value={field.value}
                       onChange={field.onChange}
                       placeholder="选择叶科目"
