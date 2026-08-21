@@ -20,6 +20,11 @@ interface AmountInputProps extends Omit<
   allowNegative?: boolean;
   /** 密度:'sm' 用于表格内编辑。 */
   size?: 'sm' | 'default';
+  /**
+   * 输入开始(每次按键)即回调:草稿要等失焦才 emit,父级若需尽早标记表单脏
+   * (装离开拦截防聚焦中刷新丢草稿),用此回调;须传稳定引用。
+   */
+  onEditStart?: () => void;
 }
 
 /** 剥离非数字字符(负号视 allowNegative 决定是否保留),保留单个小数点。 */
@@ -76,6 +81,7 @@ function plainDisplay(stored: string | undefined): string {
 export function AmountInput({
   value,
   onChange,
+  onEditStart,
   allowNegative = false,
   size = 'default',
   className,
@@ -98,6 +104,7 @@ export function AmountInput({
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onEditStart?.();
     // 只更新本地草稿,提交延到失焦:表格场景(如初始预算树表)每次按键 emit
     // 会触发父级 setState 重建整表,打断输入(焦点丢失/组词中断)。
     setRaw(parseRaw(e.target.value, allowNegative));

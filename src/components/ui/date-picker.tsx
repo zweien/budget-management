@@ -69,7 +69,13 @@ export function DatePicker({
           />
         </div>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
+      {/* 阻止 Radix 打开时的自动聚焦日历:否则点击 Input 打开弹层后焦点被抢,
+          Input 立即失焦清空草稿,"点击后直接键入"的流程无法成立。 */}
+      <PopoverContent
+        className="w-auto p-0"
+        align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <Calendar
           mode="single"
           selected={value}

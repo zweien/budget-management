@@ -210,11 +210,14 @@ function toDisplayNumber(s: string | undefined | null): number {
 function NumCellInput({
   value,
   onChange,
+  onEditStart,
   placeholder,
   className,
 }: {
   value: string;
   onChange: (v: string) => void;
+  /** 输入即回调(父级尽早 markDirty 装离开拦截),须稳定引用;值提交仍在失焦。 */
+  onEditStart?: () => void;
   placeholder?: string;
   className?: string;
 }) {
@@ -232,6 +235,7 @@ function NumCellInput({
       value={draft ?? value}
       placeholder={placeholder}
       onChange={(e) => {
+        onEditStart?.();
         const v = e.target.value.replace(/[^0-9.]/g, '');
         // 保留首个小数点。
         const dot = v.indexOf('.');
@@ -255,15 +259,18 @@ const SubjectNameInput = memo(function SubjectNameInput({
   rowKey,
   value,
   onCommitRow,
+  onEditStart,
 }: {
   rowKey: string;
   value: string;
   onCommitRow: (key: string, patch: Partial<SubjectRow>) => void;
+  onEditStart?: () => void;
 }) {
   return (
     <CommitOnBlurInput
       value={value}
       onCommit={(name) => onCommitRow(rowKey, { name })}
+      onEditStart={onEditStart}
       placeholder="如 设备购置费"
       className="h-7 min-w-28 flex-1"
     />
@@ -278,6 +285,7 @@ const SubjectDetailCell = memo(function SubjectDetailCell({
   unitPrice,
   amount,
   onPatch,
+  onEditStart,
 }: {
   detailKey: string;
   unit: string;
@@ -285,12 +293,14 @@ const SubjectDetailCell = memo(function SubjectDetailCell({
   unitPrice: string;
   amount: string;
   onPatch: (key: string, patch: Partial<SubjectBudgetDetail>) => void;
+  onEditStart?: () => void;
 }) {
   return (
     <div className="flex items-center gap-1.5 whitespace-nowrap">
       <CommitOnBlurInput
         value={unit}
         onCommit={(v) => onPatch(detailKey, { unit: v })}
+        onEditStart={onEditStart}
         placeholder="单位"
         className="h-7 w-16"
       />
@@ -298,6 +308,7 @@ const SubjectDetailCell = memo(function SubjectDetailCell({
       <NumCellInput
         value={quantity}
         onChange={(v) => onPatch(detailKey, { quantity: v })}
+        onEditStart={onEditStart}
         placeholder="数量"
         className="w-20"
       />
@@ -305,6 +316,7 @@ const SubjectDetailCell = memo(function SubjectDetailCell({
       <NumCellInput
         value={unitPrice}
         onChange={(v) => onPatch(detailKey, { unitPrice: v })}
+        onEditStart={onEditStart}
         placeholder="单价"
         className="w-24"
       />
@@ -326,12 +338,21 @@ const SubjectTotalInput = memo(function SubjectTotalInput({
   code,
   value,
   onTotal,
+  onEditStart,
 }: {
   code: string;
   value: string | undefined;
   onTotal: (code: string, v: string | undefined) => void;
+  onEditStart?: () => void;
 }) {
-  return <AmountInput size="sm" value={value} onChange={(v) => onTotal(code, v)} />;
+  return (
+    <AmountInput
+      size="sm"
+      value={value}
+      onChange={(v) => onTotal(code, v)}
+      onEditStart={onEditStart}
+    />
+  );
 });
 
 /** 通用确认对话框状态(替代 antd Popconfirm)。 */
@@ -988,6 +1009,7 @@ export default function InitialBudgetPage() {
             unitPrice={detail.unitPrice}
             amount={subjectAmounts[key] ?? ''}
             onPatch={applyDetailPatch}
+            onEditStart={markDirty}
           />
         );
       },
@@ -1028,6 +1050,7 @@ export default function InitialBudgetPage() {
                   rowKey={node.key}
                   value={node.name}
                   onCommitRow={updateSubjectRow}
+                  onEditStart={markDirty}
                 />
               ) : (
                 <span>{node.name}</span>
@@ -1067,6 +1090,7 @@ export default function InitialBudgetPage() {
               code={node.code}
               value={subjectTotalAmounts[node.code] || undefined}
               onTotal={setSubjectTotal}
+              onEditStart={markDirty}
             />
           );
         },
@@ -1125,6 +1149,7 @@ export default function InitialBudgetPage() {
     rollupByCode,
     hasChildrenByCode,
     isLeafRow,
+    markDirty,
   ]);
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。

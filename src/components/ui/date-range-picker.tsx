@@ -95,7 +95,12 @@ export function DateRangePicker({
           ) : null}
         </div>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
+      {/* 同 date-picker:阻止打开时自动聚焦日历,保持 Input 焦点可继续键入。 */}
+      <PopoverContent
+        className="w-auto p-0"
+        align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <Calendar mode="range" selected={value} onSelect={onChange} numberOfMonths={1} />
       </PopoverContent>
     </Popover>

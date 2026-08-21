@@ -12,6 +12,11 @@ interface CommitOnBlurInputProps extends Omit<
   value: string;
   /** 失焦且草稿与受控值不同时提交。 */
   onCommit: (value: string) => void;
+  /**
+   * 输入开始(每次按键)即回调,父级可据此尽早标记表单脏(装离开拦截),
+   * 不必等失焦提交——否则聚焦中刷新/关页会静默丢草稿。须传稳定引用。
+   */
+  onEditStart?: () => void;
 }
 
 /**
@@ -25,14 +30,22 @@ interface CommitOnBlurInputProps extends Omit<
  * 显示值为 `draft ?? value` 派生:未编辑(draft=null)时直接展示外部值,
  * 保存后重载/表单重置等外部变化即时反映,无需 effect 同步。
  */
-export function CommitOnBlurInput({ value, onCommit, ...rest }: CommitOnBlurInputProps) {
+export function CommitOnBlurInput({
+  value,
+  onCommit,
+  onEditStart,
+  ...rest
+}: CommitOnBlurInputProps) {
   const [draft, setDraft] = React.useState<string | null>(null);
 
   return (
     <Input
       {...rest}
       value={draft ?? value}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        onEditStart?.();
+        setDraft(e.target.value);
+      }}
       onBlur={() => {
         if (draft !== null && draft !== value) onCommit(draft);
         setDraft(null);
