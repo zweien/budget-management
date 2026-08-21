@@ -12,6 +12,7 @@ import {
 import { createProject } from '@/server/services/project.service';
 import { createRecord } from '@/server/services/businessRecord.service';
 import {
+  balanceStatistics,
   crossProjectStatistics,
   customStatistics,
   monthlyHistory,
@@ -304,5 +305,215 @@ describe('statistics.service (integration, real PG)', () => {
     // 同名科目不合并:行以 projectId 为粒度,p1/p2 各自一行,符合 §11.5。
     expect(projects.filter((r) => r.name === `stat XP1`).length).toBe(1);
     expect(projects.filter((r) => r.name === `stat XP2`).length).toBe(1);
+  });
+
+  // ---------------- balanceStatistics(经费余额,总预算口径) ----------------
+
+  it('balanceStatistics: 模糊匹配科目名称 → 项目×科目行;总预算口径结余正确', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('BAL1');
+
+    // A:200 PAID + 100 CONTRACT;B:50 PAID。
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '200.00',
+        businessDate: '2026-03-15',
+        handler: '经办人A',
+        summary: 'A1',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '100.00',
+        businessDate: '2026-04-15',
+        handler: '经办人A',
+        summary: 'A2',
+        status: BusinessStatus.CONTRACT,
+      },
+      adminUser(),
+    );
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafB.id,
+        amount: '50.00',
+        businessDate: '2026-05-15',
+        handler: '经办人B',
+        summary: 'B1',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // 模糊匹配"叶A":只命中 A(叶),B 不出现。
+    const result = await balanceStatistics({ subject: '叶A' }, adminUser());
+    const rows = result.rows.filter((r) => r.projectId === project.id);
+    expect(rows.length).toBe(1);
+    const rowA = rows[0];
+    // 总预算 = SubjectTotalBudget.currentAmount = 600。
+    expect(rowA.totalBudget).toBe('600.00');
+    expect(rowA.paid).toBe('200.00');
+    expect(rowA.payable).toBe('100.00');
+    expect(rowA.totalOccupied).toBe('300.00');
+    // 总结余 = 600 - 300 = 300(总预算口径,非年度口径差异场景同值)。
+    expect(rowA.balance).toBe('300.00');
+    expect(rowA.executionRate).toBeCloseTo(0.5, 5);
+    // 未选年度 → 年度列为 null。
+    expect(rowA.yearBudget).toBeNull();
+    // 合计与单行一致(限定项目,避免库中其他项目同名科目干扰)。
+    const projTotal = await balanceStatistics(
+      { subject: '叶A', projectId: project.id },
+      adminUser(),
+    );
+    expect(projTotal.total.balance).toBe('300.00');
+  });
+
+  it('balanceStatistics: 匹配非叶科目 → 行含下级汇总;合计按去重叶集合不重复计数', async () => {
+    const { project, leafA } = await seedApprovedProject('BAL2');
+
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '700.00',
+        businessDate: '2026-03-15',
+        handler: '经办人A',
+        summary: 'A1',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // "根"命中非叶 ROOT → 一行,指标 = A+B 汇总。
+    const result = await balanceStatistics({ subject: '根' }, adminUser());
+    const rootRow = result.rows.find((r) => r.projectId === project.id);
+    expect(rootRow).toBeDefined();
+    expect(rootRow!.isLeaf).toBe(false);
+    expect(rootRow!.totalBudget).toBe('1000.00'); // 600 + 400
+    expect(rootRow!.totalOccupied).toBe('700.00');
+    expect(rootRow!.balance).toBe('300.00');
+    // 合计 = 去重叶集合(A+B),不因 ROOT 行含 A 而重复计 A 的占用。
+    const projTotal = await balanceStatistics(
+      { subject: '根', projectId: project.id },
+      adminUser(),
+    );
+    expect(projTotal.total.totalBudget).toBe('1000.00');
+    expect(projTotal.total.totalOccupied).toBe('700.00');
+  });
+
+  it('balanceStatistics: 编号模糊匹配 + onlyNegative 过滤 + 年度口径列', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('BAL3');
+
+    // A 超支:占用 700 > 总预算 600 → 结余 -100。
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '700.00',
+        businessDate: '2026-03-15',
+        handler: '经办人A',
+        summary: 'A1',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    // B 正常:占用 100 < 400 → 结余 300。
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafB.id,
+        amount: '100.00',
+        businessDate: '2026-06-15',
+        handler: '经办人B',
+        summary: 'B1',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // 编号 'A' 模糊命中 A(叶);按年度 2026 查询 → 年度列回填。
+    const withYear = await balanceStatistics({ subject: 'A', year: 2026 }, adminUser());
+    const rowA = withYear.rows.find((r) => r.projectId === project.id)!;
+    expect(rowA.subjectCode).toBe('A');
+    expect(rowA.balance).toBe('-100.00');
+    // 年度口径:年度预算 600,年度占用 700,年度结余 -100。
+    expect(rowA.yearBudget).toBe('600.00');
+    expect(rowA.yearOccupied).toBe('700.00');
+    expect(rowA.yearBalance).toBe('-100.00');
+
+    // onlyNegative:B(结余 300)被过滤,只剩 A。
+    const negOnly = await balanceStatistics(
+      { projectId: project.id, onlyNegative: true },
+      adminUser(),
+    );
+    const codes = negOnly.rows.map((r) => r.subjectCode);
+    expect(codes).toContain('A');
+    expect(codes).not.toContain('B');
+    expect(negOnly.total.balance).toBe('-100.00');
+  });
+
+  it('balanceStatistics: 无匹配科目 → 空结果;跨项目普通用户可查', async () => {
+    await seedApprovedProject('BAL4');
+    const none = await balanceStatistics({ subject: '不存在的科目xyz' }, adminUser());
+    expect(none.rows.length).toBe(0);
+    expect(none.hitProjects).toBe(0);
+    expect(none.total.totalOccupied).toBe('0.00');
+
+    // 普通用户全局只读可查。
+    const asOutsider = await balanceStatistics({}, outsiderUser());
+    expect(asOutsider.rows.length).toBeGreaterThanOrEqual(0);
+  });
+
+  // ---------------- customStatistics 科目模糊(v0.4.1) ----------------
+
+  it('customStatistics: subject 模糊匹配(名称) → 命中科目明细;非叶匹配展开为叶集合', async () => {
+    const { project, leafA } = await seedApprovedProject('CSUB');
+
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '200.00',
+        businessDate: '2026-03-15',
+        handler: '经办人A',
+        summary: 'A1',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // 名称模糊"叶B":不命中 A → 无记录。
+    const onlyB = await customStatistics({ projectId: project.id, subject: '叶B' }, adminUser());
+    expect(onlyB.records.length).toBe(0);
+    expect(onlyB.summary.totalOccupied).toBe('0.00');
+
+    // 非叶"根"匹配 → 展开为 A+B,记录含 A1。
+    const viaRoot = await customStatistics({ projectId: project.id, subject: '根' }, adminUser());
+    expect(viaRoot.records.length).toBe(1);
+    expect(viaRoot.records[0].summary).toBe('A1');
+
+    // 编号模糊 'A' → 命中叶 A。
+    const viaCode = await customStatistics({ projectId: project.id, subject: 'A' }, adminUser());
+    expect(viaCode.records.length).toBe(1);
+
+    // 完全不匹配 → 空结果。
+    const none = await customStatistics(
+      { projectId: project.id, subject: '不存在xyz' },
+      adminUser(),
+    );
+    expect(none.records.length).toBe(0);
+    expect(none.summary.currentBudget).toBe('0.00');
   });
 });

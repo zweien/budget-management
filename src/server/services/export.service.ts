@@ -5,7 +5,9 @@ import { prisma } from '@/lib/prisma';
 import { fromStored } from '@/lib/decimal';
 import { getProjectLedger, type LedgerNode } from '@/server/services/ledger.service';
 import {
+  balanceStatistics,
   customStatistics,
+  type BalanceStatisticsFilters,
   type CustomStatisticsFilters,
   type CustomStatisticsResult,
 } from '@/server/services/statistics.service';
@@ -282,7 +284,7 @@ function describeFilters(filters: CustomStatisticsFilters): string {
   const parts: string[] = [];
   if (filters.projectId) parts.push(`项目=${filters.projectId}`);
   if (filters.budgetYear !== undefined) parts.push(`年度=${filters.budgetYear}`);
-  if (filters.subjectId) parts.push(`科目=${filters.subjectId}`);
+  if (filters.subject) parts.push(`科目=${filters.subject}`);
   if (filters.status) parts.push(`状态=${filters.status}`);
   if (filters.businessDateFrom) parts.push(`起始=${filters.businessDateFrom}`);
   if (filters.businessDateTo) parts.push(`截止=${filters.businessDateTo}`);
@@ -301,6 +303,118 @@ function formatNow(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// ---------------- 经费余额导出 ----------------
+
+/**
+ * 导出经费余额统计(总预算口径)。
+ *
+ * 权限:复用 balanceStatistics 内部逻辑(所有登录用户可查)。
+ *
+ * xlsx 结构:元信息(筛选条件/导出时间/操作人)+ 合计行(去重叶集合口径)
+ * + 明细表头 + 逐行(项目 × 科目)。年度三列仅选定年度时输出。
+ */
+export async function exportBalanceStatistics(
+  filters: BalanceStatisticsFilters,
+  user: ExportUser,
+): Promise<Buffer> {
+  const result = await balanceStatistics(filters, user);
+
+  const operator = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { name: true },
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'budget-management';
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet('经费余额');
+
+  const descParts: string[] = [];
+  descParts.push(filters.subject ? `科目=${filters.subject}` : '科目=全部');
+  if (filters.projectId) descParts.push('项目=指定');
+  if (filters.year !== undefined) descParts.push(`年度=${filters.year}`);
+  if (filters.onlyNegative) descParts.push('仅看结余为负');
+  sheet.getCell('A1').value = `筛选条件:${descParts.join(' / ')}`;
+  sheet.getCell('A2').value = `命中:${result.hitProjects} 个项目 × ${result.hitSubjects} 个科目`;
+  sheet.getCell('A3').value = `导出时间:${formatNow()}`;
+  sheet.getCell('A4').value = `操作人:${operator?.name ?? user.name ?? user.id}`;
+
+  // 合计行(第 6 行)。
+  const t = result.total;
+  const summaryValue: (string | number)[] = [
+    t.totalBudget,
+    t.paid,
+    t.payable,
+    t.totalOccupied,
+    t.balance,
+    rateToPercent(t.executionRate),
+  ];
+  if (filters.year !== undefined) {
+    summaryValue.push(t.yearBudget ?? '0.00', t.yearOccupied ?? '0.00', t.yearBalance ?? '0.00');
+  }
+  // B-D 列补空占位,使合计值与明细的金额列(E 起)纵向对齐。
+  const totalRow = sheet.getRow(6);
+  totalRow.values = ['合计(命中科目去重)', '', '', '', ...summaryValue];
+  totalRow.font = { bold: true };
+
+  // 明细表头(第 8 行)。
+  const headers = [
+    '项目编号',
+    '项目名称',
+    '科目编码',
+    '科目名称',
+    '科目总预算',
+    '已支出',
+    '应付未付',
+    '总占用',
+    '总结余',
+    '执行率',
+    ...(filters.year !== undefined ? ['年度预算', '年度占用', '年度结余'] : []),
+  ];
+  const headerRow = sheet.getRow(8);
+  headerRow.values = headers;
+  headerRow.font = { bold: true };
+  headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+  headerRow.eachCell((cell) => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+    cell.border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' },
+    };
+  });
+
+  let r = 9;
+  for (const row of result.rows) {
+    const line: (string | number)[] = [
+      row.projectCode,
+      row.projectName,
+      row.subjectCode,
+      row.subjectName,
+      row.totalBudget,
+      row.paid,
+      row.payable,
+      row.totalOccupied,
+      row.balance,
+      rateToPercent(row.executionRate),
+    ];
+    if (filters.year !== undefined) {
+      line.push(row.yearBudget ?? '0.00', row.yearOccupied ?? '0.00', row.yearBalance ?? '0.00');
+    }
+    sheet.getRow(r).values = line;
+    r++;
+  }
+
+  sheet.getColumn(1).width = 14;
+  sheet.getColumn(2).width = 22;
+  sheet.getColumn(3).width = 12;
+  sheet.getColumn(4).width = 22;
+  for (let c = 5; c <= headers.length; c++) sheet.getColumn(c).width = 14;
+
+  return toBuffer(await workbook.xlsx.writeBuffer());
 }
 
 export { XLSX_MIME };
