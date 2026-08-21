@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   flexRender,
@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { BudgetTreeTable, type LedgerNode } from '@/components/ui/BudgetTreeTable';
 import { EmptyState } from '@/components/layout/empty-state';
+import { CommitOnBlurInput } from '@/components/ui/commit-on-blur-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -201,18 +202,26 @@ function toDisplayNumber(s: string | undefined | null): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** 数字小输入(数量/单价):仅过滤非数字字符,保留原始文本。 */
+/**
+ * 数字小输入(数量/单价):仅过滤非数字字符,保留原始文本。
+ * 本地草稿 + 失焦提交:输入期零父级 setState——树表格 columns 依赖明细 map,
+ * 每按键提交会整表重建并打断输入(与名称输入同款问题)。过滤在本地草稿层做。
+ */
 function NumCellInput({
   value,
   onChange,
+  onEditStart,
   placeholder,
   className,
 }: {
   value: string;
   onChange: (v: string) => void;
+  /** 输入即回调(父级尽早 markDirty 装离开拦截),须稳定引用;值提交仍在失焦。 */
+  onEditStart?: () => void;
   placeholder?: string;
   className?: string;
 }) {
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <input
       type="text"
@@ -223,17 +232,128 @@ function NumCellInput({
         'focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30',
         className,
       )}
-      value={value}
+      value={draft ?? value}
       placeholder={placeholder}
       onChange={(e) => {
+        onEditStart?.();
         const v = e.target.value.replace(/[^0-9.]/g, '');
         // 保留首个小数点。
         const dot = v.indexOf('.');
-        onChange(dot >= 0 ? v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '') : v);
+        setDraft(dot >= 0 ? v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '') : v);
+      }}
+      onBlur={() => {
+        if (draft !== null && draft !== value) onChange(draft);
+        setDraft(null);
       }}
     />
   );
 }
+
+/**
+ * 以下三个 memo 单元格组件:props 全为原始值 + 稳定回调(useCallback)。
+ * 失焦提交会让 columns 整组重建并刷新全部 cell,若无 memo 边界,重建瞬间的
+ * 渲染会替换正在聚焦切换的输入框 DOM(点击下一格时上一格 blur 提交 → 目标格
+ * 被替换 → 焦点丢失)。memo 保证值未变的行其输入框完全静止。
+ */
+const SubjectNameInput = memo(function SubjectNameInput({
+  rowKey,
+  value,
+  onCommitRow,
+  onEditStart,
+}: {
+  rowKey: string;
+  value: string;
+  onCommitRow: (key: string, patch: Partial<SubjectRow>) => void;
+  onEditStart?: () => void;
+}) {
+  return (
+    <CommitOnBlurInput
+      value={value}
+      onCommit={(name) => onCommitRow(rowKey, { name })}
+      onEditStart={onEditStart}
+      placeholder="如 设备购置费"
+      className="h-7 min-w-28 flex-1"
+    />
+  );
+});
+
+/** 年度明细单元格:单位 × 数量 × 单价 → 金额(叶行)。 */
+const SubjectDetailCell = memo(function SubjectDetailCell({
+  detailKey,
+  unit,
+  quantity,
+  unitPrice,
+  amount,
+  onPatch,
+  onEditStart,
+}: {
+  detailKey: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string;
+  amount: string;
+  onPatch: (key: string, patch: Partial<SubjectBudgetDetail>) => void;
+  onEditStart?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 whitespace-nowrap">
+      <CommitOnBlurInput
+        value={unit}
+        onCommit={(v) => onPatch(detailKey, { unit: v })}
+        onEditStart={onEditStart}
+        placeholder="单位"
+        className="h-7 w-16"
+      />
+      <span className="text-mute">×</span>
+      <NumCellInput
+        value={quantity}
+        onChange={(v) => onPatch(detailKey, { quantity: v })}
+        onEditStart={onEditStart}
+        placeholder="数量"
+        className="w-20"
+      />
+      <span className="text-mute">×</span>
+      <NumCellInput
+        value={unitPrice}
+        onChange={(v) => onPatch(detailKey, { unitPrice: v })}
+        onEditStart={onEditStart}
+        placeholder="单价"
+        className="w-24"
+      />
+      <span className="text-mute">=</span>
+      <span
+        className={cn(
+          'inline-block min-w-20 text-right font-medium tabular-nums',
+          !amount && 'text-mute',
+        )}
+      >
+        {amount || '0.00'}
+      </span>
+    </div>
+  );
+});
+
+/** 科目总预算(跨年度)输入单元格(叶行)。 */
+const SubjectTotalInput = memo(function SubjectTotalInput({
+  code,
+  value,
+  onTotal,
+  onEditStart,
+}: {
+  code: string;
+  value: string | undefined;
+  onTotal: (code: string, v: string | undefined) => void;
+  onEditStart?: () => void;
+}) {
+  return (
+    <AmountInput
+      size="sm"
+      value={value}
+      onChange={(v) => onTotal(code, v)}
+      onEditStart={onEditStart}
+    />
+  );
+});
 
 /** 通用确认对话框状态(替代 antd Popconfirm)。 */
 interface ConfirmState {
@@ -276,6 +396,64 @@ export default function InitialBudgetPage() {
 
   /** 编辑动作统一入口:标脏 + 执行。 */
   const markDirty = useCallback(() => setDirty(true), []);
+
+  // ====== 焦点自愈 ======
+  // 失焦提交(名称/单位/数量/单价/总预算)会让整表内容树重建(含表头,TanStack 行为),
+  // 重建瞬间用户"正在切换聚焦"的目标输入框 DOM 被替换,浏览器默认聚焦落到已 detach
+  // 的旧节点上而丢失焦点。这里在 mousedown/Tab 时记录目标输入框的稳定键
+  // (placeholder + 同名序号),提交重渲染后的下一帧若焦点丢失则恢复聚焦。
+  // 监听挂 document(委托):effect 首跑时页面可能仍处 loading 骨架,表格容器
+  // 尚未渲染(ref 为 null),root 在事件处理时动态获取。
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let pendingKey: string | null = null;
+    /** 输入框的稳定键:placeholder + 在整表同名输入框中的序号(行序稳定)。 */
+    const keyOf = (el: HTMLInputElement): string | null => {
+      const root = tableWrapRef.current;
+      if (!root || !root.contains(el)) return null;
+      const ph = el.getAttribute('placeholder');
+      if (!ph) return null;
+      const all = root.querySelectorAll<HTMLInputElement>(`input[placeholder="${ph}"]`);
+      const idx = Array.prototype.indexOf.call(all, el);
+      return idx >= 0 ? `${ph}#${idx}` : null;
+    };
+    const restore = () => {
+      const root = tableWrapRef.current;
+      const key = pendingKey;
+      pendingKey = null;
+      if (!key || !root) return;
+      const active = document.activeElement;
+      if (active && active !== document.body) return; // 焦点未丢,无需恢复
+      const [ph, idxStr] = key.split('#');
+      const all = root.querySelectorAll<HTMLInputElement>(`input[placeholder="${ph}"]`);
+      const el = all[Number(idxStr)];
+      if (el) {
+        el.focus();
+        // 光标落末尾,贴近用户预期。
+        const v = el.value;
+        el.setSelectionRange(v.length, v.length);
+      }
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement | null)?.closest('input');
+      if (target) pendingKey = keyOf(target as HTMLInputElement);
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      // 键盘 Tab 切换:relatedTarget 即将聚焦的目标(在 DOM 替换前记录)。
+      const rt = e.relatedTarget as HTMLInputElement | null;
+      if (rt && rt.tagName === 'INPUT') {
+        const k = keyOf(rt);
+        if (k) pendingKey = k;
+      }
+      requestAnimationFrame(restore);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('focusout', onFocusOut);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
 
   // 脏状态离开拦截:beforeunload 管浏览器关闭/刷新;
   // capture 阶段拦截站内 <a> 点击,管 SPA 客户端导航(项目 Tab/侧边栏等,绕过 beforeunload)。
@@ -458,15 +636,15 @@ export default function InitialBudgetPage() {
   /** 在指定行下新增子科目:code 用 UUIDv7,parentCode 指向父 code;同时确保父行展开。 */
   const addChildSubject = (parentKey: string) => {
     markDirty();
+    // setExpanded 必须在 setSubjectRows 的 updater 之外调用(updater 须为纯函数,
+    // StrictMode 下会双重执行导致副作用重复)。
+    if (expanded !== true) {
+      setExpanded((prev) => (prev === true ? prev : { ...prev, [parentKey]: true }));
+    }
     setSubjectRows((rs) => {
       const parent = rs.find((r) => r.key === parentKey);
       if (!parent) return rs;
-      const childKey = genKey();
-      // 父行展开(TanStack ExpandedState;true 已全展开则无需变)。
-      if (expanded !== true) {
-        setExpanded((prev) => (prev === true ? prev : { ...prev, [parentKey]: true }));
-      }
-      return [...rs, { key: childKey, code: uuidv7(), name: '', parentCode: parent.code }];
+      return [...rs, { key: genKey(), code: uuidv7(), name: '', parentCode: parent.code }];
     });
   };
   /** 删除科目:仅允许删除没有子节点的行(由调用方禁用按钮,此处再防御一次)。 */
@@ -480,10 +658,78 @@ export default function InitialBudgetPage() {
       return rs.filter((r) => r.key !== key);
     });
   };
-  const updateSubjectRow = (key: string, patch: Partial<SubjectRow>) => {
-    markDirty();
-    setSubjectRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  };
+  // 以下编辑回调均 useCallback 稳定化(配合 memo 化的单元格组件):失焦提交引发的
+  // 整表 columns 重建被 memo 边界挡住,行内输入框 DOM 保持静止,焦点/IME 不受打断。
+  const updateSubjectRow = useCallback(
+    (key: string, patch: Partial<SubjectRow>) => {
+      markDirty();
+      setSubjectRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    },
+    [markDirty],
+  );
+
+  /** §enhance3 单元格明细变更(函数式,不捕获现场 map):重算推导金额并同步两个 map。 */
+  const applyDetailPatch = useCallback(
+    (key: string, patch: Partial<SubjectBudgetDetail>) => {
+      markDirty();
+      // 两个 setState 的 updater 在批处理中依序同步执行,第二个可读到第一个算出的明细。
+      let nextDetail: SubjectBudgetDetail | null = null;
+      setSubjectDetails((prev) => {
+        const current = prev[key] ?? { unit: '', quantity: '', unitPrice: '' };
+        nextDetail = { ...current, ...patch };
+        const next = { ...prev };
+        if (
+          nextDetail.unit.trim() === '' &&
+          nextDetail.quantity === '' &&
+          nextDetail.unitPrice === ''
+        ) {
+          delete next[key];
+        } else {
+          next[key] = nextDetail;
+        }
+        return next;
+      });
+      setSubjectAmounts((prev) => {
+        // 防御:nextDetail 由上一个 updater 产出(批处理内按入队顺序执行,但跨
+        // updater 传值依赖实现细节)。万一顺序异常,保留现值不清零,待下次变更同步。
+        if (!nextDetail) return prev;
+        // 推导金额:quantity × unitPrice(三项齐备时)。
+        let amount = '';
+        if (nextDetail.quantity !== '' && nextDetail.unitPrice !== '') {
+          try {
+            amount = new D(nextDetail.quantity).times(new D(nextDetail.unitPrice)).toFixed(2);
+          } catch {
+            amount = '';
+          }
+        }
+        const next = { ...prev };
+        if (amount === '') {
+          delete next[key];
+        } else {
+          next[key] = amount;
+        }
+        return next;
+      });
+    },
+    [markDirty],
+  );
+
+  /** 科目总预算(跨年度)单元格提交。 */
+  const setSubjectTotal = useCallback(
+    (code: string, v: string | undefined) => {
+      markDirty();
+      setSubjectTotalAmounts((prev) => {
+        const next = { ...prev };
+        if (v === undefined || v === '') {
+          delete next[code];
+        } else {
+          next[code] = v;
+        }
+        return next;
+      });
+    },
+    [markDirty],
+  );
 
   /** 套用预设科目模板:替换当前科目树(用户可继续增删改)。 */
   const applyDefaultTemplate = () => {
@@ -732,47 +978,6 @@ export default function InitialBudgetPage() {
 
   // ====== 科目树表列(TanStack ColumnDef) ======
   const subjectColumns = useMemo<ColumnDef<SubjectTreeNode>[]>(() => {
-    /** §enhance3 单元格明细变更:重算推导金额并同步两个 map。 */
-    const applyDetailChange = (
-      key: string,
-      current: SubjectBudgetDetail,
-      patch: Partial<SubjectBudgetDetail>,
-    ) => {
-      markDirty();
-      const nextDetail: SubjectBudgetDetail = { ...current, ...patch };
-      // 推导金额:quantity × unitPrice(三项齐备时)。
-      let amount = '';
-      if (nextDetail.quantity !== '' && nextDetail.unitPrice !== '') {
-        try {
-          amount = new D(nextDetail.quantity).times(new D(nextDetail.unitPrice)).toFixed(2);
-        } catch {
-          amount = '';
-        }
-      }
-      setSubjectDetails((map) => {
-        const next = { ...map };
-        if (
-          nextDetail.unit.trim() === '' &&
-          nextDetail.quantity === '' &&
-          nextDetail.unitPrice === ''
-        ) {
-          delete next[key];
-        } else {
-          next[key] = nextDetail;
-        }
-        return next;
-      });
-      setSubjectAmounts((map) => {
-        const next = { ...map };
-        if (amount === '') {
-          delete next[key];
-        } else {
-          next[key] = amount;
-        }
-        return next;
-      });
-    };
-
     const dynamicYearCols: ColumnDef<SubjectTreeNode>[] = declaredYears.map((y) => ({
       id: `year-${y}`,
       header: () => <span className="tabular-nums">{y}</span>,
@@ -794,41 +999,18 @@ export default function InitialBudgetPage() {
           if (rolled === undefined) return <span className="text-mute">—</span>;
           return <span className="text-muted-foreground tabular-nums">{rolled.toFixed(2)}</span>;
         }
-        // §enhance3 叶行:单位 × 数量 × 单价 → 金额(只读)。
+        // §enhance3 叶行:单位 × 数量 × 单价 → 金额(只读)。memo 单元格详见组件注释。
         const detail = subjectDetails[key] ?? { unit: '', quantity: '', unitPrice: '' };
-        const amt = subjectAmounts[key] ?? '';
         return (
-          <div className="flex items-center gap-1.5 whitespace-nowrap">
-            <Input
-              value={detail.unit}
-              onChange={(e) => applyDetailChange(key, detail, { unit: e.target.value })}
-              placeholder="单位"
-              className="h-7 w-16"
-            />
-            <span className="text-mute">×</span>
-            <NumCellInput
-              value={detail.quantity}
-              onChange={(v) => applyDetailChange(key, detail, { quantity: v })}
-              placeholder="数量"
-              className="w-20"
-            />
-            <span className="text-mute">×</span>
-            <NumCellInput
-              value={detail.unitPrice}
-              onChange={(v) => applyDetailChange(key, detail, { unitPrice: v })}
-              placeholder="单价"
-              className="w-24"
-            />
-            <span className="text-mute">=</span>
-            <span
-              className={cn(
-                'inline-block min-w-20 text-right font-medium tabular-nums',
-                !amt && 'text-mute',
-              )}
-            >
-              {amt || '0.00'}
-            </span>
-          </div>
+          <SubjectDetailCell
+            detailKey={key}
+            unit={detail.unit}
+            quantity={detail.quantity}
+            unitPrice={detail.unitPrice}
+            amount={subjectAmounts[key] ?? ''}
+            onPatch={applyDetailPatch}
+            onEditStart={markDirty}
+          />
         );
       },
     }));
@@ -864,11 +1046,11 @@ export default function InitialBudgetPage() {
                 <span className="size-4 shrink-0" />
               )}
               {editable ? (
-                <Input
+                <SubjectNameInput
+                  rowKey={node.key}
                   value={node.name}
-                  onChange={(e) => updateSubjectRow(node.key, { name: e.target.value })}
-                  placeholder="如 设备购置费"
-                  className="h-7 min-w-28 flex-1"
+                  onCommitRow={updateSubjectRow}
+                  onEditStart={markDirty}
                 />
               ) : (
                 <span>{node.name}</span>
@@ -904,21 +1086,11 @@ export default function InitialBudgetPage() {
             );
           }
           return (
-            <AmountInput
-              size="sm"
+            <SubjectTotalInput
+              code={node.code}
               value={subjectTotalAmounts[node.code] || undefined}
-              onChange={(v) => {
-                markDirty();
-                setSubjectTotalAmounts((prev) => {
-                  const next = { ...prev };
-                  if (v === undefined || v === '') {
-                    delete next[node.code];
-                  } else {
-                    next[node.code] = v;
-                  }
-                  return next;
-                });
-              }}
+              onTotal={setSubjectTotal}
+              onEditStart={markDirty}
             />
           );
         },
@@ -977,6 +1149,7 @@ export default function InitialBudgetPage() {
     rollupByCode,
     hasChildrenByCode,
     isLeafRow,
+    markDirty,
   ]);
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。
@@ -1288,7 +1461,10 @@ export default function InitialBudgetPage() {
             )}
           </div>
         </div>
-        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2">
+        <div
+          ref={tableWrapRef}
+          className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2"
+        >
           {subjectRows.length === 0 ? (
             <EmptyState title="暂无科目,点击「新增根科目」或「套用预设模板」" className="m-4" />
           ) : (
@@ -1328,7 +1504,9 @@ export default function InitialBudgetPage() {
 
       {/* ====== 操作按钮 ====== */}
       <div className="flex gap-2">
-        {!draft && (
+        {/* 可编辑态(新建/DRAFT/REJECTED/WITHDRAWN)都提供保存草稿:
+            已有草稿时走 PATCH(handleSaveDraft 内分支),而非隐藏入口。 */}
+        {editable && (
           <Button variant="outline" onClick={handleSaveDraft} disabled={submitting}>
             保存草稿
           </Button>

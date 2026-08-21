@@ -20,6 +20,11 @@ interface AmountInputProps extends Omit<
   allowNegative?: boolean;
   /** 密度:'sm' 用于表格内编辑。 */
   size?: 'sm' | 'default';
+  /**
+   * 输入开始(每次按键)即回调:草稿要等失焦才 emit,父级若需尽早标记表单脏
+   * (装离开拦截防聚焦中刷新丢草稿),用此回调;须传稳定引用。
+   */
+  onEditStart?: () => void;
 }
 
 /** 剥离非数字字符(负号视 allowNegative 决定是否保留),保留单个小数点。 */
@@ -76,6 +81,7 @@ function plainDisplay(stored: string | undefined): string {
 export function AmountInput({
   value,
   onChange,
+  onEditStart,
   allowNegative = false,
   size = 'default',
   className,
@@ -98,25 +104,37 @@ export function AmountInput({
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const normalized = parseRaw(e.target.value, allowNegative);
-    setRaw(normalized);
-    emit(normalized);
+    onEditStart?.();
+    // 只更新本地草稿,提交延到失焦:表格场景(如初始预算树表)每次按键 emit
+    // 会触发父级 setState 重建整表,打断输入(焦点丢失/组词中断)。
+    setRaw(parseRaw(e.target.value, allowNegative));
   };
 
   const handleFocus = () => {
     setRaw(plainDisplay(value));
   };
 
-  const handleBlur = () => {
-    if (!allowNegative && value != null) {
-      try {
-        const d = fromStored(value);
-        if (d.isFinite() && d.isNegative()) onChange?.('0.00');
-      } catch {
-        // 非法值已由 emit 回传 undefined,无需处理。
+  /** 提交草稿(含负数钳制)并退出编辑态;blur 与 Enter 前置提交共用。 */
+  const flush = () => {
+    if (raw !== null) {
+      let v = raw;
+      if (!allowNegative && v !== '') {
+        try {
+          const d = fromStored(v);
+          if (d.isFinite() && d.isNegative()) v = '0';
+        } catch {
+          // 非法文本由 emit 回传 undefined。
+        }
       }
+      emit(v);
     }
     setRaw(null);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 聚焦中按 Enter:浏览器直接提交表单且不触发 blur,须先把草稿 emit 给表单,
+    // 否则提交的是旧值(编辑场景会静默提交旧金额)。
+    if (e.key === 'Enter') flush();
   };
 
   return (
@@ -136,7 +154,8 @@ export function AmountInput({
       value={raw ?? formatDisplay(value)}
       onChange={handleChange}
       onFocus={handleFocus}
-      onBlur={handleBlur}
+      onBlur={flush}
+      onKeyDown={handleKeyDown}
       {...rest}
     />
   );

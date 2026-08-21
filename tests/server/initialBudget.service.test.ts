@@ -180,6 +180,27 @@ describe('initialBudget.service (integration, real PG)', () => {
     expect(draft.subjectTotalBudgets).toHaveLength(2);
   });
 
+  it('updateDraft: 重建科目树保持层级正确(回归:此前 PATCH 重建硬编码 level 0,预算调整页父节点下拉因此崩溃)', async () => {
+    const code = `T3-UPD-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 't3 upd' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    const { appId } = await createDraft(project.id, validPayload(), {
+      id: adminId,
+      role: UserRole.ADMIN,
+    });
+    await updateDraft(appId, validPayload(), { id: adminId, role: UserRole.ADMIN });
+
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    expect(subjects).toHaveLength(3);
+    expect(subjects.find((s) => s.code === 'ROOT')!.level).toBe(1);
+    expect(subjects.find((s) => s.code === 'A')!.level).toBe(2);
+    expect(subjects.find((s) => s.code === 'B')!.level).toBe(2);
+  });
+
   it('createDraft: §6.4 叶节点合计 > 年度 → HTTPError 422', async () => {
     const code = `T3-VIO-${uuidv7().slice(0, 8)}`;
     const project = await createProject(
