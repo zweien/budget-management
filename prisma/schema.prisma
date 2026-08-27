@@ -37,6 +37,12 @@ enum BusinessStatus {
   PAID        // 已支出
 }
 
+// 调整单类型:调剂(零和,科目/年度间挪钱) | 追加下达(净增,给某年做此前未分配的预算)。
+enum AdjustmentKind {
+  ADJUST
+  ALLOCATE
+}
+
 model User {
   id        String     @id @db.Uuid
   name      String
@@ -225,6 +231,8 @@ model BudgetAdjustment {
   projectId   String          @map("project_id") @db.Uuid
   // 一次调整针对的统一年度(所有明细行同属该年度)。
   year        Int
+  // 调整单类型(§追加下达):ADJUST=调剂(默认,零和);ALLOCATE=追加(净增,可新建年度账)。
+  kind        AdjustmentKind  @default(ADJUST)
   // 调整原因按维度分开(对应总预算/年度预算两份导出文档)。
   totalReason  String? @map("total_reason")
   annualReason String? @map("annual_reason")

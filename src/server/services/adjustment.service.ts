@@ -1,4 +1,4 @@
-import { ApprovalStatus, BudgetAdjustment, Prisma, User } from '@prisma/client';
+import { AdjustmentKind, ApprovalStatus, BudgetAdjustment, Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
@@ -10,15 +10,20 @@ import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
 
 /**
- * §7 预算调整(双维度模型)。
+ * §7 预算调整(双维度模型 + 追加下达模式)。
  *
- * 一次调整针对一个统一年度,由若干叶科目行组成;每行同时调整两个维度:
- * - 总预算维度(totalAdjustment):对应 SubjectTotalBudget.currentAmount。
- * - 年度预算维度(annualAdjustment):对应 SubjectBudget.currentAmount。
+ * kind=ADJUST(调剂,默认) —— 零和挪钱:
+ * - 总预算维度(totalAdjustment)/年度预算维度(annualAdjustment)各自 Σ === 0。
+ * - 提交时对年度调减行校验可调额度并写 budget_lock;审批生效后双维度同步更新。
  *
- * 两个维度各自收支平衡:Σ totalAdjustment === 0 且 Σ annualAdjustment === 0
- * (科目间转移,总额不变)。提交时对年度维度调减(annualAdjustment < 0)写 budget_lock
- * 并校验可调额度;审批生效后双维度 currentAmount 同步更新。
+ * kind=ALLOCATE(追加下达) —— 净增做预算("总盘子固定、年度分批做满",含新经费入账):
+ * - 每行只有年度维度下达额(annualAdjustment ≥ 0,totalAdjustment 必须 0),Σ > 0。
+ * - 目标年份未建账则审批生效时自动创建 AnnualBudget 与各行 SubjectBudget。
+ * - 护栏:现有科目行的分配额 ≤ 该科目总预算 − 历年已分配年度预算合计(剩余可分配额);
+ *   新增科目行无此限制(首笔分配即立账)。
+ * - 生效联动:AnnualBudget(该年) 新建或累加 += X;ProjectBudget.currentAmount += X;
+ *   SubjectTotalBudget 不动(总额在编制时已定,追加分批落地到年份);
+ *   新增科目行的总预算以首笔分配额立账。
  */
 
 /** 单行入参(来自 payload)。 */
@@ -28,6 +33,7 @@ export interface AdjustmentLineInput {
   // 新增科目(仅 subjectId 为空时):名称 + 父节点(非叶科目 id)。
   newSubjectName?: string | null;
   newSubjectParentId?: string | null;
+  // ALLOCATE 模式下必须为 0(或省略,按 0 处理)。
   totalAdjustment: string; // decimal 字符串,可正可负
   annualAdjustment: string; // decimal 字符串,可正可负
 }
@@ -35,6 +41,8 @@ export interface AdjustmentLineInput {
 /** 创建/编辑调整单 payload。 */
 export interface AdjustmentPayload {
   year: number;
+  /** 调整单类型,缺省 ADJUST(调剂)。 */
+  kind?: 'ADJUST' | 'ALLOCATE';
   // 调整原因按维度分开(对应总预算/年度预算两份导出文档)。
   totalReason?: string | null;
   annualReason?: string | null;
@@ -52,12 +60,20 @@ function snapshotAdjustment(row: BudgetAdjustment): Record<string, unknown> {
     id: row.id,
     projectId: row.projectId,
     year: row.year,
+    kind: row.kind,
     status: row.status,
     totalReason: row.totalReason,
     annualReason: row.annualReason,
     applicantId: row.applicantId,
     approverId: row.approverId,
   });
+}
+
+/** 归一化 payload.kind:'ADJUST' | 'ALLOCATE',非法值 422,缺省 ADJUST。 */
+function normalizeKind(kind?: string | null): 'ADJUST' | 'ALLOCATE' {
+  if (kind === undefined || kind === null || kind === '') return 'ADJUST';
+  if (kind === AdjustmentKind.ADJUST || kind === AdjustmentKind.ALLOCATE) return kind;
+  throw new HTTPError(422, `调整类型无效:${kind}(应为 ADJUST 或 ALLOCATE)`);
 }
 
 /** 校验年度为正整数(1900~9999)。 */
@@ -162,7 +178,7 @@ function validateAndParseLines(payload: AdjustmentPayload): ParsedLine[] {
 }
 
 /**
- * §7 双维度收支平衡校验:Σ total === 0 且 Σ annual === 0。
+ * §7 双维度收支平衡校验(仅 ADJUST):Σ total === 0 且 Σ annual === 0。
  * 不平衡 → 422。
  */
 function assertBalanced(parsedLines: ParsedLine[]): void {
@@ -173,6 +189,70 @@ function assertBalanced(parsedLines: ParsedLine[]): void {
   }
   if (!annualSum.eq(ZERO)) {
     throw new HTTPError(422, `年度预算维度调整不平衡:合计 ${annualSum.toFixed(2)} ≠ 0(须收支平衡)`);
+  }
+}
+
+/**
+ * §7 追加下达(ALLOCATE)结构校验:每行 total 必须 0、annual ≥ 0,且 Σ annual > 0。
+ * 返回本单合计下达额 X。
+ */
+function validateAllocate(parsedLines: ParsedLine[]): D {
+  for (const [i, line] of parsedLines.entries()) {
+    if (!line.total.eq(ZERO)) {
+      throw new HTTPError(
+        422,
+        `追加下达第 ${i + 1} 行的总预算调整额须为 0(总预算不变,只做年度分配)`,
+      );
+    }
+    if (line.annual.isNeg()) {
+      throw new HTTPError(422, `追加下达第 ${i + 1} 行的年度下达额不能为负(调减请改用调剂单)`);
+    }
+  }
+  const annualSum = sumAmounts(parsedLines.map((l) => l.annual));
+  if (annualSum.lte(ZERO)) {
+    throw new HTTPError(422, '追加下达至少需要一行正数年度下达额');
+  }
+  return annualSum;
+}
+
+/**
+ * §7 追加下达容量护栏(现有科目行):
+ * 分配额 ≤ 科目总预算(currentAmount) − 该科目历年已分配 SubjectBudget.currentAmount 合计。
+ */
+async function assertAllocateCapacity(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  parsedLines: ParsedLine[],
+): Promise<void> {
+  // 按科目合并(同一科目多行相加),跳过新增科目行(无历史总额,首笔立账)。
+  const allocatedBySubject = new Map<string, D>();
+  for (const line of parsedLines) {
+    if (!line.subjectId || line.annual.eq(ZERO)) continue;
+    const sid = line.subjectId;
+    allocatedBySubject.set(sid, (allocatedBySubject.get(sid) ?? ZERO).plus(line.annual));
+  }
+
+  for (const [subjectId, amount] of allocatedBySubject.entries()) {
+    const stb = await tx.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId, subjectId } },
+      select: { currentAmount: true },
+    });
+    if (!stb) {
+      throw new HTTPError(422, `科目 ${subjectId} 无总预算记录,请以新增科目行方式下达`);
+    }
+    const yearlySums = await tx.subjectBudget.aggregate({
+      where: { projectId, subjectId },
+      _sum: { currentAmount: true },
+    });
+    const totalCurrent = fromStored(stb.currentAmount);
+    const alreadyAllocated = fromStored(yearlySums._sum.currentAmount ?? '0');
+    const remaining = totalCurrent.minus(alreadyAllocated);
+    if (amount.gt(remaining)) {
+      throw new HTTPError(
+        422,
+        `超出剩余可分配额度:该科目剩余 ${remaining.toFixed(2)}(总预算 ${totalCurrent.toFixed(2)} − 历年已分配 ${alreadyAllocated.toFixed(2)}),本次申请 ${amount.toFixed(2)}`,
+      );
+    }
   }
 }
 
@@ -220,6 +300,7 @@ export async function createAdjustment(
   const totalReason = payload.totalReason?.trim() ? payload.totalReason.trim() : null;
   const annualReason = payload.annualReason?.trim() ? payload.annualReason.trim() : null;
   const year = payload.year;
+  const kind = normalizeKind(payload.kind);
 
   return prisma.$transaction(async (tx) => {
     const created = await tx.budgetAdjustment.create({
@@ -227,6 +308,7 @@ export async function createAdjustment(
         id,
         projectId,
         year,
+        kind,
         status: ApprovalStatus.DRAFT,
         totalReason,
         annualReason,
@@ -311,7 +393,7 @@ export async function updateDraftAdjustment(
     const annualReason = payload.annualReason?.trim() ? payload.annualReason.trim() : null;
     const updated = await tx.budgetAdjustment.update({
       where: { id: adjId },
-      data: { year: payload.year, totalReason, annualReason },
+      data: { year: payload.year, kind: normalizeKind(payload.kind), totalReason, annualReason },
     });
 
     // 重建明细行(先删后建)。
@@ -459,6 +541,29 @@ export async function submitAdjustment(
     total: fromStored(l.totalAdjustment),
     annual: fromStored(l.annualAdjustment),
   }));
+
+  if (adj.kind === AdjustmentKind.ALLOCATE) {
+    // 追加下达:正向 + 非零合计 + 容量护栏;无锁、无零和校验。
+    validateAllocate(parsedLines);
+    return prisma.$transaction(async (tx) => {
+      await assertAllocateCapacity(tx, adj.projectId, parsedLines);
+      const submitted = await tx.budgetAdjustment.update({
+        where: { id: adjId },
+        data: { status: ApprovalStatus.PENDING },
+      });
+      await recordAudit(tx, {
+        projectId: adj.projectId,
+        objectType: 'budget_adjustments',
+        objectId: adjId,
+        action: 'submit',
+        operatorId: user.id,
+        before: snapshotAdjustment(adj),
+        after: snapshotAdjustment(submitted),
+      });
+      return submitted;
+    });
+  }
+
   assertBalanced(parsedLines);
   // 新增科目行原预算为 0,调减无意义(应只调增)。
   for (const line of parsedLines) {
@@ -600,6 +705,164 @@ export async function approveAdjustment(
       total: fromStored(l.totalAdjustment),
       annual: fromStored(l.annualAdjustment),
     }));
+
+    // ===== 追加下达(ALLOCATE)生效路径 =====
+    if (adj.kind === AdjustmentKind.ALLOCATE) {
+      const yearTotal = validateAllocate(parsedLines);
+      await assertAllocateCapacity(tx, adj.projectId, parsedLines);
+
+      // 1) 新增科目行:建档(叶)+ 该年 SubjectBudget + SubjectTotalBudget(首笔分配额立账)。
+      //    建账即含本次分配额,已计入 createdNewSubjects,第 3 步跳过防双计。
+      const createdNewSubjects = new Set<string>();
+      const maxSortOrder = await tx.budgetSubject.aggregate({
+        where: { projectId: adj.projectId },
+        _max: { sortOrder: true },
+      });
+      let nextSort = (maxSortOrder._max.sortOrder ?? -1) + 1;
+      for (const line of parsedLines) {
+        if (line.subjectId) continue;
+        await validateNewSubject(tx, adj.projectId, line.newSubjectName!, line.newSubjectParentId!);
+        const parent = await tx.budgetSubject.findUnique({
+          where: { id: line.newSubjectParentId! },
+          select: { level: true },
+        });
+        const newSubjectId = uuidv7();
+        await tx.budgetSubject.create({
+          data: {
+            id: newSubjectId,
+            projectId: adj.projectId,
+            parentId: line.newSubjectParentId,
+            code: uuidv7(),
+            name: line.newSubjectName!,
+            level: (parent?.level ?? 1) + 1,
+            isLeaf: true,
+            sortOrder: nextSort++,
+          },
+        });
+        // 该年 SubjectBudget:全部计入 adjustmentAmount(initial 保持 0,与调剂口径一致)。
+        await tx.subjectBudget.create({
+          data: {
+            id: uuidv7(),
+            projectId: adj.projectId,
+            year: adj.year,
+            subjectId: newSubjectId,
+            initialAmount: toStored(ZERO),
+            adjustmentAmount: toStored(line.annual),
+            currentAmount: toStored(line.annual),
+          },
+        });
+        // 总预算以首笔分配额立账(科目此前不存在,无"编制期总额")。
+        await tx.subjectTotalBudget.create({
+          data: {
+            id: uuidv7(),
+            projectId: adj.projectId,
+            subjectId: newSubjectId,
+            initialAmount: toStored(ZERO),
+            adjustmentAmount: toStored(line.annual),
+            currentAmount: toStored(line.annual),
+          },
+        });
+        line.subjectId = newSubjectId;
+        createdNewSubjects.add(newSubjectId);
+      }
+
+      // 2) 年度维度:现有科目 SubjectBudget 缺行则创建(initial=0),有行则累加。
+      //    (isNew 行已在第 1 步建账含额,跳过。)
+      for (const line of parsedLines) {
+        if (!line.subjectId || createdNewSubjects.has(line.subjectId)) continue;
+        if (line.annual.eq(ZERO)) continue;
+        const sb = await tx.subjectBudget.findUnique({
+          where: {
+            projectId_year_subjectId: {
+              projectId: adj.projectId,
+              year: adj.year,
+              subjectId: line.subjectId,
+            },
+          },
+        });
+        if (!sb) {
+          await tx.subjectBudget.create({
+            data: {
+              id: uuidv7(),
+              projectId: adj.projectId,
+              year: adj.year,
+              subjectId: line.subjectId!,
+              initialAmount: toStored(ZERO),
+              adjustmentAmount: toStored(line.annual),
+              currentAmount: toStored(line.annual),
+            },
+          });
+        } else {
+          await tx.subjectBudget.update({
+            where: { id: sb.id },
+            data: {
+              currentAmount: toStored(fromStored(sb.currentAmount).plus(line.annual)),
+              adjustmentAmount: toStored(fromStored(sb.adjustmentAmount).plus(line.annual)),
+            },
+          });
+        }
+      }
+
+      // 3) 年度盘子:AnnualBudget 新建或累加 += X。
+      const annualBudget = await tx.annualBudget.findUnique({
+        where: { projectId_year: { projectId: adj.projectId, year: adj.year } },
+      });
+      if (!annualBudget) {
+        await tx.annualBudget.create({
+          data: {
+            id: uuidv7(),
+            projectId: adj.projectId,
+            year: adj.year,
+            initialAmount: toStored(yearTotal),
+            adjustmentAmount: toStored(yearTotal),
+            currentAmount: toStored(yearTotal),
+          },
+        });
+      } else {
+        await tx.annualBudget.update({
+          where: { id: annualBudget.id },
+          data: {
+            initialAmount: toStored(fromStored(annualBudget.initialAmount).plus(yearTotal)),
+            adjustmentAmount: toStored(fromStored(annualBudget.adjustmentAmount).plus(yearTotal)),
+            currentAmount: toStored(fromStored(annualBudget.currentAmount).plus(yearTotal)),
+          },
+        });
+      }
+
+      // 4) 项目总盘:ProjectBudget.currentAmount += X(人才类项目逐年到账总额能涨)。
+      const projectBudget = await tx.projectBudget.findUnique({
+        where: { projectId: adj.projectId },
+      });
+      if (!projectBudget) {
+        throw new HTTPError(422, '项目总预算不存在(须先完成初始预算编制并审批)');
+      }
+      await tx.projectBudget.update({
+        where: { projectId: adj.projectId },
+        data: {
+          initialAmount: toStored(fromStored(projectBudget.initialAmount).plus(yearTotal)),
+          adjustmentAmount: toStored(fromStored(projectBudget.adjustmentAmount).plus(yearTotal)),
+          currentAmount: toStored(fromStored(projectBudget.currentAmount).plus(yearTotal)),
+        },
+      });
+
+      // 追加只做正向下达,无锁可释放。
+      const approvedAlloc = await tx.budgetAdjustment.update({
+        where: { id: adjId },
+        data: { status: ApprovalStatus.APPROVED, approverId: user.id, approvedAt: now },
+      });
+      await recordAudit(tx, {
+        projectId: adj.projectId,
+        objectType: 'budget_adjustments',
+        objectId: adjId,
+        action: 'approve',
+        operatorId: user.id,
+        before: snapshotAdjustment(adj),
+        after: { ...snapshotAdjustment(approvedAlloc), opinion: opinion ?? null },
+      });
+      return approvedAlloc;
+    }
+
+    // ===== 调剂(ADJUST)生效路径(现状逻辑) =====
     assertBalanced(parsedLines);
 
     // 先落库新增科目(subjectId 为空的行):建 BudgetSubject(叶)+ 该年度
