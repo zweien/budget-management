@@ -12,6 +12,7 @@ import {
 } from '@/server/services/initialBudget.service';
 import { createProject } from '@/server/services/project.service';
 import {
+  approveAdjustment,
   createAdjustment,
   deleteDraftAdjustment,
   getAdjustment,
@@ -458,5 +459,398 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       adminUser(),
     );
     expect(adj.status).toBe(ApprovalStatus.DRAFT);
+  });
+
+  // ---------------- 追加下达(ALLOCATE) ----------------
+
+  /**
+   * ALLOCATE 专用种子:「总预算固定、年度分批做满」——年度只分配 40%:
+   * projectTotal=1000;2026 年度=400(A 240 / B 160);科目总预算 A=600、B=400。
+   * 剩余可分配:A 360、B 240;项目未分配池 = 1000 − 400 = 600。
+   */
+  function partialAllocPayload(): InitialBudgetPayload {
+    return {
+      projectTotal: '1000.00',
+      annualBudgets: [{ year: 2026, amount: '400.00' }],
+      subjects: [
+        { code: 'ROOT', name: '根', parentCode: null, isLeaf: false },
+        { code: 'A', name: '叶A', parentCode: 'ROOT', isLeaf: true },
+        { code: 'B', name: '叶B', parentCode: 'ROOT', isLeaf: true },
+      ],
+      subjectBudgets: [
+        {
+          year: 2026,
+          subjectCode: 'A',
+          amount: '240.00',
+          unit: '次',
+          quantity: '2.40',
+          unitPrice: '100.00',
+        },
+        {
+          year: 2026,
+          subjectCode: 'B',
+          amount: '160.00',
+          unit: '次',
+          quantity: '1.60',
+          unitPrice: '100.00',
+        },
+      ],
+      subjectTotalBudgets: [
+        { subjectCode: 'A', amount: '600.00' },
+        { subjectCode: 'B', amount: '400.00' },
+      ],
+    };
+  }
+
+  /** helper:建项目 + partialAlloc 编制生效(分批场景)。 */
+  async function seedPartialProject(suffix: string) {
+    const code = `ALLOC-${suffix}-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: `alloc ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    const { appId } = await createDraft(project.id, partialAllocPayload(), adminUser());
+    await submitDraft(appId, adminUser());
+    await approveApplication(appId, adminUser());
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    return {
+      project,
+      leafA: subjects.find((s) => s.code === 'A')!,
+      leafB: subjects.find((s) => s.code === 'B')!,
+    };
+  }
+
+  it('ALLOCATE: 新年度提交审批生效 → 自动建 AnnualBudget/SubjectBudget;池内分配不动 ProjectBudget', async () => {
+    const { project, leafA, leafB } = await seedPartialProject('NEWYEAR');
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027, // 编制未声明的新年度
+        kind: 'ALLOCATE',
+        annualReason: '把科目既有总预算分批落地到2027年',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '200.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '100.00' },
+        ],
+      },
+      adminUser(),
+    );
+    expect(adj.kind).toBe('ALLOCATE');
+    expect(adj.expandTotals).toBe(false);
+    const submitted = await submitAdjustment(adj.id, adminUser());
+    expect(submitted.status).toBe(ApprovalStatus.PENDING);
+    const approved = await approveAdjustment(adj.id, adminUser());
+    expect(approved.status).toBe(ApprovalStatus.APPROVED);
+
+    // 该年未建账 → AnnualBudget(2027) 自动创建:initial=300, adjustment=0, current=300
+    // (维持 current = initial + adjustment 恒等式,追加额不重复计入 initial)。
+    const ab = await prisma.annualBudget.findUnique({
+      where: { projectId_year: { projectId: project.id, year: 2027 } },
+    });
+    expect(ab).not.toBeNull();
+    expect(ab!.initialAmount.toFixed(2)).toBe('300.00');
+    expect(ab!.adjustmentAmount.toFixed(2)).toBe('0.00');
+    expect(ab!.currentAmount.toFixed(2)).toBe('300.00');
+
+    // SubjectBudget(2027) 按行创建(initial=0,adjustment=current=分配额)。
+    const sbA = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2027, subjectId: leafA.id },
+      },
+    });
+    expect(sbA!.currentAmount.toFixed(2)).toBe('200.00');
+    expect(sbA!.initialAmount.toFixed(2)).toBe('0.00');
+    const sbB = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2027, subjectId: leafB.id },
+      },
+    });
+    expect(sbB!.currentAmount.toFixed(2)).toBe('100.00');
+
+    // 池内分配:项目总盘不变(钱本就在 1000 总预算内,只是落地到年份)。
+    const pb = await prisma.projectBudget.findUniqueOrThrow({ where: { projectId: project.id } });
+    expect(pb.currentAmount.toFixed(2)).toBe('1000.00');
+    expect(pb.initialAmount.toFixed(2)).toBe('1000.00');
+
+    // SubjectTotalBudget 不受追加影响。
+    const stbA = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafA.id } },
+    });
+    expect(stbA!.currentAmount.toFixed(2)).toBe('600.00');
+  });
+
+  it('ALLOCATE + expandTotals(新经费入账): 跳过容量护栏,STB/ProjectBudget 同步调增且 initial 不动', async () => {
+    const { project, leafA } = await seedPartialProject('EXPAND');
+    // A 剩余 360,申请 400(超剩余)→ expandTotals 放行,总预算随之增长。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2028,
+        kind: 'ALLOCATE',
+        expandTotals: true,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '400.00' }],
+      },
+      adminUser(),
+    );
+    expect(adj.expandTotals).toBe(true);
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2028, subjectId: leafA.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('400.00');
+    const stbA = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafA.id } },
+    });
+    expect(stbA!.currentAmount.toFixed(2)).toBe('1000.00'); // 600 + 400
+    expect(stbA!.initialAmount.toFixed(2)).toBe('600.00'); // initial 不动
+    const pb = await prisma.projectBudget.findUniqueOrThrow({ where: { projectId: project.id } });
+    expect(pb.currentAmount.toFixed(2)).toBe('1400.00'); // 1000 + 400
+    expect(pb.initialAmount.toFixed(2)).toBe('1000.00');
+    const ab = await prisma.annualBudget.findUnique({
+      where: { projectId_year: { projectId: project.id, year: 2028 } },
+    });
+    expect(ab!.currentAmount.toFixed(2)).toBe('400.00');
+    expect(ab!.adjustmentAmount.toFixed(2)).toBe('0.00');
+    expect(ab!.initialAmount.toFixed(2)).toBe('400.00');
+  });
+
+  it('ALLOCATE: 已有年份累加到 AnnualBudget 与既有 SubjectBudget 上', async () => {
+    const { project, leafA } = await seedPartialProject('SAMEYEAR');
+    // 2026 已有 A=240;追加下达同一年 +60 → 300,AnnualBudget current 400→460。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '60.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: leafA.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('300.00'); // 240 + 60
+    const ab = await prisma.annualBudget.findUnique({
+      where: { projectId_year: { projectId: project.id, year: 2026 } },
+    });
+    expect(ab!.currentAmount.toFixed(2)).toBe('460.00'); // 400 + 60
+    expect(ab!.initialAmount.toFixed(2)).toBe('400.00'); // initial 不动
+    expect(ab!.adjustmentAmount.toFixed(2)).toBe('60.00');
+    const pb = await prisma.projectBudget.findUniqueOrThrow({ where: { projectId: project.id } });
+    expect(pb.currentAmount.toFixed(2)).toBe('1000.00'); // 池内分配,总盘不变
+  });
+
+  it('ALLOCATE: 新增科目零额行 → submit 422(不接受零额建档)', async () => {
+    const { project } = await seedPartialProject('ZERONEW');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '零额新科目',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '0.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    const err = await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
+    expect(err.message).toContain('零额建档');
+  });
+
+  it('ALLOCATE: 初始预算未审批生效 → approve 422(防后续编制审批重置追加额度)', async () => {
+    // 只建项目 + 编制草稿(不提交审批):科目树存在但状态 DRAFT。
+    const project = await createProject(
+      { code: `ALLOC-NOINIT-${uuidv7().slice(0, 8)}`, name: 'alloc noinit' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    await createDraft(project.id, partialAllocPayload(), adminUser());
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    const leafA = subjects.find((s) => s.code === 'A')!;
+
+    // 纯 API 路径(前端按钮门控可被绕过):创建/提交放行,审批必须拦截。
+    // expandTotals 跳过容量护栏(草稿期 STB current 全 0,池内模式会先被容量拦下,
+    // 到不了审批的前提校验)。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        expandTotals: true,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '50.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    const err = await expectHTTP(() => approveAdjustment(adj.id, adminUser()), 422);
+    expect(err.message).toContain('初始预算编制尚未审批生效');
+
+    // 追加未落任何金额:2027 年不应存在 SubjectBudget 行。
+    const sbCount = await prisma.subjectBudget.count({
+      where: { projectId: project.id, year: 2027 },
+    });
+    expect(sbCount).toBe(0);
+  });
+
+  it('ALLOCATE: 并发双重审批 → 恰好一个成功另一个 409,金额不重复应用', async () => {
+    const { project, leafA } = await seedPartialProject('RACE');
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '100.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+
+    // 两个审批同时发起(都在事务外读到 PENDING);行锁 + 锁内复核保证只有一个生效。
+    const results = await Promise.allSettled([
+      approveAdjustment(adj.id, adminUser()),
+      approveAdjustment(adj.id, adminUser()),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected409 = results.filter(
+      (r) =>
+        r.status === 'rejected' &&
+        r.reason instanceof HTTPError &&
+        (r.reason as HTTPError).status === 409,
+    );
+    expect(fulfilled.length).toBe(1);
+    expect(rejected409.length).toBe(1);
+
+    // 金额恰好应用一次(未被第二个事务重复累加)。
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2027, subjectId: leafA.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('100.00');
+  });
+
+  it('ALLOCATE: 超出剩余可分配额 → submit 422(容量护栏)', async () => {
+    const { project, leafA } = await seedPartialProject('CAP');
+    // A 剩余 360,申请 400 → 拒绝。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2028,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '400.00' }],
+      },
+      adminUser(),
+    );
+    const err = await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
+    expect(err.message).toContain('剩余可分配');
+  });
+
+  it('ALLOCATE: 负数行/非零 total 行/全零单 均 422', async () => {
+    const { project, leafA, leafB } = await seedPartialProject('SHAPE');
+
+    const negAdj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '50.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '-10.00' },
+        ],
+      },
+      adminUser(),
+    );
+    expect(
+      (await expectHTTP(() => submitAdjustment(negAdj.id, adminUser()), 422)).message,
+    ).toContain('不能为负');
+
+    const totalAdj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '30.00', annualAdjustment: '50.00' }],
+      },
+      adminUser(),
+    );
+    expect(
+      (await expectHTTP(() => submitAdjustment(totalAdj.id, adminUser()), 422)).message,
+    ).toContain('须为 0');
+
+    const zeroAdj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '0.00' }],
+      },
+      adminUser(),
+    );
+    expect(
+      (await expectHTTP(() => submitAdjustment(zeroAdj.id, adminUser()), 422)).message,
+    ).toContain('至少需要一行正数');
+  });
+
+  it('ALLOCATE: isNew 新增科目行 → 审批建档并以首笔分配额立账', async () => {
+    const { project } = await seedPartialProject('NEWSUBJ');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '新设劳务费',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '80.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    const created = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, name: '新设劳务费' },
+    });
+    expect(created).not.toBeNull();
+    expect(created!.isLeaf).toBe(true);
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2027, subjectId: created!.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('80.00');
+    const stb = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: created!.id } },
+    });
+    expect(stb!.currentAmount.toFixed(2)).toBe('80.00');
   });
 });

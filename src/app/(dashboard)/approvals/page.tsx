@@ -56,6 +56,9 @@ interface AdjustmentPending {
   id: string;
   projectId: string;
   year: number;
+  kind?: 'ADJUST' | 'ALLOCATE';
+  /** 追加下达且勾选:审批将同步调增科目总预算与项目总预算(新经费入账)。 */
+  expandTotals?: boolean;
   status: string;
   reason: string | null;
   applicantId: string;
@@ -313,7 +316,22 @@ export default function ApprovalsPage() {
                   data?.adjustments.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell>{projectCell(r.project)}</TableCell>
-                      <TableCell className="tabular-nums">{r.year}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {r.year}
+                        {r.kind === 'ALLOCATE' && (
+                          <Badge
+                            variant={r.expandTotals ? 'warning' : 'outline'}
+                            className="ml-1 align-middle"
+                            title={
+                              r.expandTotals
+                                ? '追加下达(新经费入账):通过后将调增科目总预算与项目总预算'
+                                : '追加下达(池内分配):只把科目既有总预算落地到年份'
+                            }
+                          >
+                            {r.expandTotals ? '追加·新经费' : '追加'}
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="tabular-nums">{r.lineCount ?? '—'}</TableCell>
                       <TableCell className="max-w-48 truncate" title={r.reason ?? undefined}>
                         {r.reason ?? '—'}
@@ -381,6 +399,21 @@ export default function ApprovalsPage() {
                 <span className="text-muted-foreground">项目:</span>
                 {projectCell(targetRow.project)}
               </p>
+              {target?.kind === 'adjustment' && target.row.kind === 'ALLOCATE' ? (
+                <p
+                  className={
+                    target.row.expandTotals
+                      ? 'rounded-md bg-warning-soft px-2 py-1.5'
+                      : 'text-muted-foreground'
+                  }
+                >
+                  <span className="text-muted-foreground">类型:</span>
+                  预算追加下达
+                  {target.row.expandTotals
+                    ? ' · 新经费入账(通过后将调增科目总预算与项目总预算)'
+                    : ' · 池内分配(各层总额不变)'}
+                </p>
+              ) : null}
               <p>
                 <span className="text-muted-foreground">申请人:</span>
                 {targetRow.applicant.name}

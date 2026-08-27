@@ -66,6 +66,8 @@ export async function GET() {
       id: a.id,
       projectId: a.projectId,
       year: a.year,
+      kind: a.kind,
+      expandTotals: a.expandTotals,
       status: a.status,
       totalReason: a.totalReason,
       annualReason: a.annualReason,

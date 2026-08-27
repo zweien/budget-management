@@ -23,6 +23,8 @@ import { AmountInput } from '@/components/ui/AmountInput';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/layout/empty-state';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { MoneyText } from '@/components/ui/MoneyText';
 import {
@@ -81,13 +83,15 @@ interface InitialBudgetState {
   status?: string;
 }
 
-/** 科目预算基线(原总预算 + 原年度预算)。 */
+/** 科目预算基线(原总预算 + 原年度预算 + 剩余可分配额)。 */
 interface SubjectBaseline {
   subjectId: string;
   code: string;
   name: string;
   totalCurrent: string;
   annualCurrent: string;
+  /** 追加下达模式每行上限 = 总预算 − 历年已分配年度合计。 */
+  remaining: string;
 }
 
 interface BaselineResponse {
@@ -110,6 +114,8 @@ interface AdjustmentLine {
 interface AdjustmentRow {
   id: string;
   year: number;
+  kind?: 'ADJUST' | 'ALLOCATE';
+  expandTotals?: boolean;
   status: string;
   totalReason: string | null;
   annualReason: string | null;
@@ -192,6 +198,10 @@ export default function AdjustmentsPage() {
 
   // 表单状态。
   const [formYear, setFormYear] = useState<number>(() => new Date().getFullYear());
+  // 调整单类型:ADJUST=调剂(零和);ALLOCATE=追加下达(净增,可新建年度账)。
+  const [formKind, setFormKind] = useState<'ADJUST' | 'ALLOCATE'>('ADJUST');
+  // 仅追加下达:追加的同时调增科目总预算与项目总预算(新经费入账);缺省=池内分配。
+  const [formExpandTotals, setFormExpandTotals] = useState(false);
   const [baseline, setBaseline] = useState<SubjectBaseline[]>([]);
   const [formLines, setFormLines] = useState<EditLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -320,6 +330,8 @@ export default function AdjustmentsPage() {
   // ------------------------------------------------------------
   const openCreate = async () => {
     setEditingId(null);
+    setFormKind('ADJUST');
+    setFormExpandTotals(false);
     const y = new Date().getFullYear();
     setFormYear(y);
     setTotalReason('');
@@ -331,6 +343,8 @@ export default function AdjustmentsPage() {
 
   const openEdit = async (row: AdjustmentRow) => {
     setEditingId(row.id);
+    setFormKind(row.kind === 'ALLOCATE' ? 'ALLOCATE' : 'ADJUST');
+    setFormExpandTotals(row.expandTotals === true);
     setFormYear(row.year);
     setTotalReason(row.totalReason ?? '');
     setAnnualReason(row.annualReason ?? '');
@@ -373,8 +387,9 @@ export default function AdjustmentsPage() {
 
   /**
    * 构建并校验 payload。
-   * @param requireBalance 是否强制双维度收支平衡(草稿=false,提交=true)。
-   *   草稿允许不平衡、允许调整额留空(留空按 0 处理),便于保存中间态。
+   * @param requireBalance 是否强制提交级校验(草稿=false)。
+   *   ADJUST:双维度收支平衡(Σ=0),草稿允许留空按 0 处理。
+   *   ALLOCATE:每行 annual ≥ 0 且需填写、Σ > 0、每行 ≤ 剩余可分配额;total 恒为 0。
    */
   const buildPayload = (
     requireBalance: boolean,
@@ -386,6 +401,77 @@ export default function AdjustmentsPage() {
     if (valid.length === 0) {
       return { ok: false, error: '请至少选择一个科目或新增科目' };
     }
+
+    if (formKind === 'ALLOCATE') {
+      // 提交级校验(requireBalance=true):行值 ≥ 0、合计 > 0、同科目合计 ≤ 剩余可分配额、
+      // 新增科目行 > 0。草稿(=false)允许留空按 0 落库的中间态,校验推迟到提交。
+      if (requireBalance) {
+        for (const [i, l] of valid.entries()) {
+          if (l.annualAdjustment === '') {
+            return { ok: false, error: `第 ${i + 1} 行的「本年度下达额」需填写(追加单不可调减)` };
+          }
+          if ((Number(l.annualAdjustment) || 0) < 0) {
+            return {
+              ok: false,
+              error: `第 ${i + 1} 行不能为负——要减预算请改用「调剂」类型(有额度护栏)`,
+            };
+          }
+          if (l.isNew && (Number(l.annualAdjustment) || 0) <= 0) {
+            return {
+              ok: false,
+              error: `第 ${i + 1} 行新增科目"${l.newName.trim()}"的分配额须大于 0(不接受零额建档)`,
+            };
+          }
+        }
+        // 同科目多行合并后再比剩余额度(与后端聚合口径一致)。
+        if (!formExpandTotals) {
+          const sumBySubject = new Map<string, number>();
+          for (const l of valid) {
+            if (l.isNew || !l.subjectId) continue;
+            sumBySubject.set(
+              l.subjectId,
+              (sumBySubject.get(l.subjectId) ?? 0) + (Number(l.annualAdjustment) || 0),
+            );
+          }
+          for (const [sid, sum] of sumBySubject) {
+            const remaining = Number(baselineMap.get(sid)?.remaining ?? '0');
+            if (sum > remaining + 1e-9) {
+              return {
+                ok: false,
+                error: `${baselineMap.get(sid)?.name ?? '科目'} 合计下达 ${sum.toFixed(2)} 超出剩余可分配额度 ${remaining.toFixed(2)}(总预算 − 历年已分配)`,
+              };
+            }
+          }
+        }
+        const allocSum = valid.reduce((a, l) => a + (Number(l.annualAdjustment) || 0), 0);
+        if (!(allocSum > 0.001)) {
+          return { ok: false, error: '追加下达至少需要一行正数金额' };
+        }
+      }
+      const lines = valid.map((l) => ({
+        totalAdjustment: '0',
+        annualAdjustment: l.annualAdjustment === '' ? '0' : Number(l.annualAdjustment).toFixed(2),
+        ...(l.isNew
+          ? {
+              subjectId: null,
+              newSubjectName: l.newName.trim(),
+              newSubjectParentId: l.newParentId,
+            }
+          : { subjectId: l.subjectId }),
+      }));
+      return {
+        ok: true,
+        payload: {
+          year: formYear,
+          kind: 'ALLOCATE',
+          expandTotals: formExpandTotals || undefined,
+          totalReason: null,
+          annualReason: annualReason.trim() || null,
+          lines,
+        },
+      };
+    }
+
     const sumField = (sel: 'totalAdjustment' | 'annualAdjustment') =>
       valid.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
     if (requireBalance) {
@@ -424,6 +510,7 @@ export default function AdjustmentsPage() {
       ok: true,
       payload: {
         year: formYear,
+        kind: 'ADJUST',
         totalReason: totalReason.trim() || null,
         annualReason: annualReason.trim() || null,
         lines,
@@ -607,6 +694,31 @@ export default function AdjustmentsPage() {
     };
   }, [formLines]);
 
+  /** 追加下达就绪:有正数行,且(池内模式)每科目合计下达不超剩余可分配额。 */
+  const allocateReady = useMemo(() => {
+    const lines = formLines.filter(
+      (l) => l.subjectId || (l.isNew && l.newName.trim() && l.newParentId),
+    );
+    if (lines.length === 0) return false;
+    const sumBySubject = new Map<string, number>();
+    let hasPositive = false;
+    for (const l of lines) {
+      const v = Number(l.annualAdjustment) || 0;
+      if (v < 0) return false;
+      if (v > 0) hasPositive = true;
+      if (!l.isNew && l.subjectId) {
+        sumBySubject.set(l.subjectId, (sumBySubject.get(l.subjectId) ?? 0) + v);
+      }
+    }
+    if (!hasPositive) return false;
+    if (formExpandTotals) return true;
+    for (const [sid, sum] of sumBySubject) {
+      const remaining = Number(baselineMap.get(sid)?.remaining ?? '0');
+      if (sum > remaining + 1e-9) return false;
+    }
+    return true;
+  }, [formLines, baselineMap, formExpandTotals]);
+
   // ------------------------------------------------------------
   // 渲染
   // ------------------------------------------------------------
@@ -655,7 +767,11 @@ export default function AdjustmentsPage() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold tracking-[-0.3px]">
-            {editingId ? '编辑调整单' : '发起预算调整'}
+            {editingId
+              ? '编辑调整单'
+              : formKind === 'ALLOCATE'
+                ? '发起预算追加下达'
+                : '发起预算调整'}
           </h2>
           <Button variant="outline" onClick={cancelForm}>
             取消
@@ -670,26 +786,91 @@ export default function AdjustmentsPage() {
           </Alert>
         )}
 
-        {/* 年度 + 原因(原生受控 textarea,无输入法问题) */}
-        <div className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-l2 lg:grid-cols-[200px_1fr]">
+        {/* 类型 + 年度 + 原因(原生受控 textarea,无输入法问题) */}
+        <div className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-l2 lg:grid-cols-[260px_200px_1fr]">
           <div className="grid content-start gap-1.5">
-            <Label>调整年度</Label>
+            <Label>调整类型</Label>
             <Select
-              value={String(formYear)}
-              onValueChange={(v) => void handleYearChange(Number(v))}
+              value={formKind}
+              onValueChange={(v) => {
+                setFormKind(v === 'ALLOCATE' ? 'ALLOCATE' : 'ADJUST');
+                // 切到追加时把历史负数清掉,避免提交被拒(追加不可为负)。
+                if (v === 'ALLOCATE') {
+                  setFormLines((prev) =>
+                    prev.map((l) => ({
+                      ...l,
+                      totalAdjustment: '',
+                      annualAdjustment:
+                        l.annualAdjustment && Number(l.annualAdjustment) < 0
+                          ? ''
+                          : l.annualAdjustment,
+                    })),
+                  );
+                }
+              }}
               disabled={baselineLoading}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {yearOptions().map((y) => (
-                  <SelectItem key={y} value={String(y)}>
-                    {y} 年
-                  </SelectItem>
-                ))}
+                <SelectItem value="ADJUST">调剂(零和挪钱)</SelectItem>
+                <SelectItem value="ALLOCATE">追加下达(净增)</SelectItem>
               </SelectContent>
             </Select>
+            {formKind === 'ALLOCATE' && (
+              <div className="mt-1 grid gap-1.5">
+                <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                  <Checkbox
+                    checked={formExpandTotals}
+                    onCheckedChange={(v) => setFormExpandTotals(v === true)}
+                    aria-label="同步调增科目总预算与项目总预算"
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-foreground">新经费入账</span>
+                    (同步调增科目总预算与项目总预算)
+                    <br />
+                    勾选后不受「剩余可分配额」限制;不勾选则只把科目既有总预算分批落地到年份,各层总额不变。
+                  </span>
+                </label>
+                <p className="text-xs leading-relaxed text-mute">
+                  为选定年度下达此前未分配的预算;该年未建账会在审批通过时自动创建。调减请改用「调剂」。
+                </p>
+              </div>
+            )}
+          </div>
+          <div className="grid content-start gap-1.5">
+            <Label>{formKind === 'ALLOCATE' ? '下达年度' : '调整年度'}</Label>
+            {formKind === 'ALLOCATE' ? (
+              // 追加模式可任意年份(含未来新年度),数字输入而非近五年下拉。
+              <Input
+                type="number"
+                min={1900}
+                max={9999}
+                value={String(formYear)}
+                onChange={(e) => void handleYearChange(Number(e.target.value))}
+                onBlur={() => void loadBaseline(formYear)}
+                disabled={baselineLoading}
+              />
+            ) : (
+              <Select
+                value={String(formYear)}
+                onValueChange={(v) => void handleYearChange(Number(v))}
+                disabled={baselineLoading}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {yearOptions().map((y) => (
+                    <SelectItem key={y} value={String(y)}>
+                      {y} 年
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div className="grid gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -700,20 +881,26 @@ export default function AdjustmentsPage() {
               </Button>
               <span className="text-xs text-mute">根据当前调整明细自动生成,生成后可手动编辑</span>
             </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs font-normal text-muted-foreground">总预算调整原因</Label>
-              <Textarea
-                className="min-h-14 resize-y"
-                placeholder="总预算调整原因说明(导出总预算调整文档用)"
-                value={totalReason}
-                onChange={(e) => setTotalReason(e.target.value)}
-              />
-            </div>
+            {formKind !== 'ALLOCATE' && (
+              <div className="grid gap-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">总预算调整原因</Label>
+                <Textarea
+                  className="min-h-14 resize-y"
+                  placeholder="总预算调整原因说明(导出总预算调整文档用)"
+                  value={totalReason}
+                  onChange={(e) => setTotalReason(e.target.value)}
+                />
+              </div>
+            )}
             <div className="grid gap-1.5">
               <Label className="text-xs font-normal text-muted-foreground">年度预算调整原因</Label>
               <Textarea
                 className="min-h-14 resize-y"
-                placeholder="年度预算调整原因说明(导出年度预算调整文档用)"
+                placeholder={
+                  formKind === 'ALLOCATE'
+                    ? '追加下达原因说明(如:第二批经费到账,下达下一年度预算)'
+                    : '年度预算调整原因说明(导出年度预算调整文档用)'
+                }
                 value={annualReason}
                 onChange={(e) => setAnnualReason(e.target.value)}
               />
@@ -732,16 +919,26 @@ export default function AdjustmentsPage() {
         <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="min-w-52">科目</TableHead>
-                <TableHead className="w-28 text-right">原总预算</TableHead>
-                <TableHead className="w-32">总预算调整额</TableHead>
-                <TableHead className="w-32 text-right">调整后总预算</TableHead>
-                <TableHead className="w-28 text-right">原年度预算</TableHead>
-                <TableHead className="w-32">年度调整额</TableHead>
-                <TableHead className="w-32 text-right">调整后年度预算</TableHead>
-                <TableHead className="w-14" />
-              </TableRow>
+              {formKind === 'ALLOCATE' ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="min-w-52">科目</TableHead>
+                  <TableHead className="w-32 text-right">剩余可分配额</TableHead>
+                  <TableHead className="w-36">本年度下达额</TableHead>
+                  <TableHead className="w-32 text-right">下达后年度预算</TableHead>
+                  <TableHead className="w-14" />
+                </TableRow>
+              ) : (
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="min-w-52">科目</TableHead>
+                  <TableHead className="w-28 text-right">原总预算</TableHead>
+                  <TableHead className="w-32">总预算调整额</TableHead>
+                  <TableHead className="w-32 text-right">调整后总预算</TableHead>
+                  <TableHead className="w-28 text-right">原年度预算</TableHead>
+                  <TableHead className="w-32">年度调整额</TableHead>
+                  <TableHead className="w-32 text-right">调整后年度预算</TableHead>
+                  <TableHead className="w-14" />
+                </TableRow>
+              )}
             </TableHeader>
             <TableBody>
               {formLines.map((r) => (
@@ -799,50 +996,78 @@ export default function AdjustmentsPage() {
                       </Select>
                     )}
                   </TableCell>
-                  <TableCell className="text-right text-muted-foreground tabular-nums">
-                    {r.isNew
-                      ? '0.00'
-                      : r.subjectId
-                        ? (baselineMap.get(r.subjectId)?.totalCurrent ?? '0.00')
-                        : '—'}
-                  </TableCell>
-                  <TableCell>
-                    <AmountInput
-                      size="sm"
-                      allowNegative
-                      value={r.totalAdjustment}
-                      onChange={(v) => updateLine(r.key, { totalAdjustment: v ?? '' })}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
-                    {r.isNew
-                      ? (Number(r.totalAdjustment) || 0).toFixed(2)
-                      : r.subjectId
-                        ? afterTotal(r)
-                        : '—'}
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground tabular-nums">
-                    {r.isNew
-                      ? '0.00'
-                      : r.subjectId
-                        ? (baselineMap.get(r.subjectId)?.annualCurrent ?? '0.00')
-                        : '—'}
-                  </TableCell>
-                  <TableCell>
-                    <AmountInput
-                      size="sm"
-                      allowNegative
-                      value={r.annualAdjustment}
-                      onChange={(v) => updateLine(r.key, { annualAdjustment: v ?? '' })}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
-                    {r.isNew
-                      ? (Number(r.annualAdjustment) || 0).toFixed(2)
-                      : r.subjectId
-                        ? afterAnnual(r)
-                        : '—'}
-                  </TableCell>
+                  {formKind === 'ALLOCATE' ? (
+                    <>
+                      <TableCell className="text-right text-muted-foreground tabular-nums">
+                        {r.isNew
+                          ? '∞(新科目立账)'
+                          : r.subjectId
+                            ? (baselineMap.get(r.subjectId)?.remaining ?? '0.00')
+                            : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <AmountInput
+                          size="sm"
+                          value={r.annualAdjustment}
+                          onChange={(v) => updateLine(r.key, { annualAdjustment: v ?? '' })}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {r.isNew
+                          ? (Number(r.annualAdjustment) || 0).toFixed(2)
+                          : r.subjectId
+                            ? afterAnnual(r)
+                            : '—'}
+                      </TableCell>
+                    </>
+                  ) : (
+                    <>
+                      <TableCell className="text-right text-muted-foreground tabular-nums">
+                        {r.isNew
+                          ? '0.00'
+                          : r.subjectId
+                            ? (baselineMap.get(r.subjectId)?.totalCurrent ?? '0.00')
+                            : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <AmountInput
+                          size="sm"
+                          allowNegative
+                          value={r.totalAdjustment}
+                          onChange={(v) => updateLine(r.key, { totalAdjustment: v ?? '' })}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {r.isNew
+                          ? (Number(r.totalAdjustment) || 0).toFixed(2)
+                          : r.subjectId
+                            ? afterTotal(r)
+                            : '—'}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground tabular-nums">
+                        {r.isNew
+                          ? '0.00'
+                          : r.subjectId
+                            ? (baselineMap.get(r.subjectId)?.annualCurrent ?? '0.00')
+                            : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <AmountInput
+                          size="sm"
+                          allowNegative
+                          value={r.annualAdjustment}
+                          onChange={(v) => updateLine(r.key, { annualAdjustment: v ?? '' })}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {r.isNew
+                          ? (Number(r.annualAdjustment) || 0).toFixed(2)
+                          : r.subjectId
+                            ? afterAnnual(r)
+                            : '—'}
+                      </TableCell>
+                    </>
+                  )}
                   <TableCell>
                     <Button
                       variant="ghost"
@@ -859,61 +1084,93 @@ export default function AdjustmentsPage() {
               ))}
             </TableBody>
             <TableFooter>
-              <TableRow className="hover:bg-transparent">
-                <TableCell className="font-semibold">合计</TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">
-                  {sumOrigTotal.toFixed(2)}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    'text-right font-semibold tabular-nums',
-                    Math.abs(summary.totalSum) > 0.001 && 'text-error-deep',
-                  )}
-                >
-                  {summary.totalSum.toFixed(2)}
-                </TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">
-                  {(sumOrigTotal + summary.totalSum).toFixed(2)}
-                </TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">
-                  {sumOrigAnnual.toFixed(2)}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    'text-right font-semibold tabular-nums',
-                    Math.abs(summary.annualSum) > 0.001 && 'text-error-deep',
-                  )}
-                >
-                  {summary.annualSum.toFixed(2)}
-                </TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">
-                  {(sumOrigAnnual + summary.annualSum).toFixed(2)}
-                </TableCell>
-                <TableCell />
-              </TableRow>
+              {formKind === 'ALLOCATE' ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell className="font-semibold">合计下达</TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">—</TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {summary.annualSum.toFixed(2)}
+                  </TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">—</TableCell>
+                  <TableCell />
+                </TableRow>
+              ) : (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell className="font-semibold">合计</TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {sumOrigTotal.toFixed(2)}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      'text-right font-semibold tabular-nums',
+                      Math.abs(summary.totalSum) > 0.001 && 'text-error-deep',
+                    )}
+                  >
+                    {summary.totalSum.toFixed(2)}
+                  </TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {(sumOrigTotal + summary.totalSum).toFixed(2)}
+                  </TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {sumOrigAnnual.toFixed(2)}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      'text-right font-semibold tabular-nums',
+                      Math.abs(summary.annualSum) > 0.001 && 'text-error-deep',
+                    )}
+                  >
+                    {summary.annualSum.toFixed(2)}
+                  </TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {(sumOrigAnnual + summary.annualSum).toFixed(2)}
+                  </TableCell>
+                  <TableCell />
+                </TableRow>
+              )}
             </TableFooter>
           </Table>
         </div>
 
-        <Alert variant={summary.balanced ? 'success' : 'error'}>
-          <AlertDescription>
-            汇总:总预算调整合计{' '}
-            <MoneyText
-              value={summary.totalSum.toFixed(2)}
-              riskOnNegative={false}
-              className="inline"
-            />{' '}
-            · 年度调整合计{' '}
-            <MoneyText
-              value={summary.annualSum.toFixed(2)}
-              riskOnNegative={false}
-              className="inline"
-            />
-            {summary.balanced
-              ? ' · 两维度均已平衡 ✓ 可提交'
-              : ' · 调整合计须为 0 才可提交(原预算=调整后预算)'}
-          </AlertDescription>
-        </Alert>
+        {formKind === 'ALLOCATE' ? (
+          <Alert variant={allocateReady ? 'success' : 'error'}>
+            <AlertDescription>
+              本年度合计下达{' '}
+              <MoneyText
+                value={summary.annualSum.toFixed(2)}
+                riskOnNegative={false}
+                className="inline"
+              />
+              ;审批通过后自动创建未建账科目的年度预算。
+              {formExpandTotals
+                ? '已选「新经费入账」:科目总预算与项目总预算将同步调增。'
+                : '池内分配:各层总额不变,仅把科目既有总预算落地到年份。'}
+              {allocateReady
+                ? ' ✓ 可提交'
+                : ' · 至少一行正数金额,且(池内)同科目合计不超剩余可分配额'}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Alert variant={summary.balanced ? 'success' : 'error'}>
+            <AlertDescription>
+              汇总:总预算调整合计{' '}
+              <MoneyText
+                value={summary.totalSum.toFixed(2)}
+                riskOnNegative={false}
+                className="inline"
+              />{' '}
+              · 年度调整合计{' '}
+              <MoneyText
+                value={summary.annualSum.toFixed(2)}
+                riskOnNegative={false}
+                className="inline"
+              />
+              {summary.balanced
+                ? ' · 两维度均已平衡 ✓ 可提交'
+                : ' · 调整合计须为 0 才可提交(原预算=调整后预算)'}
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="flex gap-2">
           <Button
@@ -974,7 +1231,14 @@ export default function AdjustmentsPage() {
             <TableBody>
               {adjustments.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell className="tabular-nums">{row.year}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.year}
+                    {row.kind === 'ALLOCATE' && (
+                      <Badge variant="outline" className="ml-1 align-middle">
+                        追加
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_BADGE[row.status] ?? 'secondary'}>
                       {STATUS_LABEL[row.status] ?? row.status}
@@ -1050,14 +1314,16 @@ export default function AdjustmentsPage() {
                       <Button variant="ghost" size="sm" onClick={() => setDetailTarget(row)}>
                         明细
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={exporting}
-                        onClick={() => void exportDocx(row, 'total')}
-                      >
-                        导出总预算
-                      </Button>
+                      {row.kind !== 'ALLOCATE' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={exporting}
+                          onClick={() => void exportDocx(row, 'total')}
+                        >
+                          导出总预算
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
