@@ -55,6 +55,9 @@ Thumbs.db
 # Python venv(docx 导出用)
 .venv/
 
+# file-viewer 自托管静态资产(scripts/copy-file-viewer-assets.mjs 在 postinstall 生成)
+/public/file-viewer/
+
 # mimosa 安全扫描产物
 .mimosa/
 check-*.debug.mjs

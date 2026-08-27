@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "db:seed": "tsx prisma/seed.ts",
     "prepare": "husky",
-    "make-admin": "tsx scripts/make-admin.ts"
+    "make-admin": "tsx scripts/make-admin.ts",
+    "postinstall": "node scripts/copy-file-viewer-assets.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -29,6 +30,8 @@
     ]
   },
   "dependencies": {
+    "@file-viewer/preset-office": "^2.4.0",
+    "@file-viewer/react": "^2.4.0",
     "@hookform/resolvers": "^5.7.1",
     "@prisma/client": "^5.22.0",
     "@radix-ui/react-alert-dialog": "^1.1.23",
@@ -50,6 +53,7 @@
     "date-fns": "^4.4.0",
     "decimal.js": "^10.6.0",
     "exceljs": "^4.4.0",
+    "file-viewer-copy-assets": "^2.4.0",
     "jose": "^6.2.8",
     "jszip": "^3.10.1",
     "lucide-react": "^1.28.0",

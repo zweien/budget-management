@@ -6,7 +6,12 @@ import { format } from 'date-fns';
 import { Plus, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { apiFetch, downloadFile } from '@/lib/api/client';
+import {
+  AdjustmentPreviewDialog,
+  type AdjustmentPreviewTarget,
+} from '@/components/adjustments/AdjustmentPreviewDialog';
+
+import { apiFetch } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import {
   AlertDialog,
@@ -217,10 +222,11 @@ export default function AdjustmentsPage() {
 
   // 只读明细 Sheet。
   const [detailTarget, setDetailTarget] = useState<AdjustmentRow | null>(null);
+  /** 在线预览目标(§issue17):dim = 按钮点开的初始维度,窗口内仍可切换。 */
+  const [previewTarget, setPreviewTarget] = useState<AdjustmentPreviewTarget | null>(null);
   // 删除确认。
   const [deleteTarget, setDeleteTarget] = useState<AdjustmentRow | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   /** 初始预算是否已生效(发起调整的前提)。 */
   const isEffective = budgetStatus === 'APPROVED';
@@ -615,22 +621,6 @@ export default function AdjustmentsPage() {
       if (e instanceof Error) toast.error(e.message);
     } finally {
       setDeleting(false);
-    }
-  };
-
-  /** 导出该次调整为 docx(按模板填充)。dim=total 总预算维度 / annual 年度维度。 */
-  const exportDocx = async (row: AdjustmentRow, dim: 'total' | 'annual') => {
-    setExporting(true);
-    try {
-      await downloadFile(
-        `/api/projects/${projectId}/adjustments/${row.id}/export?dim=${dim}`,
-        dim === 'total' ? '总预算调整.docx' : '年度预算调整.docx',
-      );
-      toast.success('已开始下载');
-    } catch (e) {
-      if (e instanceof Error) toast.error(e.message);
-    } finally {
-      setExporting(false);
     }
   };
 
@@ -1315,24 +1305,41 @@ export default function AdjustmentsPage() {
                       <Button variant="ghost" size="sm" onClick={() => setDetailTarget(row)}>
                         明细
                       </Button>
-                      {row.kind !== 'ALLOCATE' && (
+                      {/* 总预算/年度预算:打开预览窗口(§issue17),下载在窗口内完成 */}
+                      {row.lines.length > 0 && row.kind !== 'ALLOCATE' && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled={exporting}
-                          onClick={() => void exportDocx(row, 'total')}
+                          title="预览总预算调整审批表,窗口内可下载"
+                          onClick={() =>
+                            setPreviewTarget({
+                              id: row.id,
+                              year: row.year,
+                              kind: row.kind,
+                              dim: 'total',
+                            })
+                          }
                         >
-                          导出总预算
+                          总预算
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={exporting}
-                        onClick={() => void exportDocx(row, 'annual')}
-                      >
-                        导出年度
-                      </Button>
+                      {row.lines.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="预览年度预算调整审批表,窗口内可下载"
+                          onClick={() =>
+                            setPreviewTarget({
+                              id: row.id,
+                              year: row.year,
+                              kind: row.kind,
+                              dim: 'annual',
+                            })
+                          }
+                        >
+                          年度预算
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -1364,6 +1371,14 @@ export default function AdjustmentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 在线预览(§issue17):docx 按模板实时生成,viewer 内可切维度/打印/下载 */}
+      <AdjustmentPreviewDialog
+        open={!!previewTarget}
+        onOpenChange={(o) => !o && setPreviewTarget(null)}
+        projectId={projectId}
+        adjustment={previewTarget}
+      />
 
       {/* 只读明细 Sheet */}
       <Sheet open={!!detailTarget} onOpenChange={(open) => !open && setDetailTarget(null)}>
