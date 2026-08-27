@@ -26,6 +26,7 @@ import { EmptyState } from '@/components/layout/empty-state';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Combobox } from '@/components/ui/combobox';
 import { MoneyText } from '@/components/ui/MoneyText';
 import {
   Select,
@@ -321,8 +322,21 @@ export default function AdjustmentsPage() {
       // 防御:level 异常(如历史 PATCH 写坏的 0)时不崩页,repeat 负数会抛 RangeError。
       subjectTree
         .filter((s) => !s.isLeaf)
-        .map((s) => ({ value: s.id, label: `${'　'.repeat(Math.max(0, s.level - 1))}${s.name}` })),
+        .map((s) => ({
+          value: s.id,
+          label: `${'　'.repeat(Math.max(0, s.level - 1))}${s.name}`,
+          keywords: s.name,
+        })),
     [subjectTree],
+  );
+
+  /** 明细行科目候选:叶科目(名称/编号可搜)+ 新增科目哨兵项。 */
+  const subjectPickOptions = useMemo(
+    () => [
+      ...baseline.map((s) => ({ value: s.subjectId, label: s.name, keywords: s.code })),
+      { value: NEW_SUBJECT, label: '➕ 新增科目...', keywords: '新增' },
+    ],
+    [baseline],
   );
 
   // ------------------------------------------------------------
@@ -955,45 +969,32 @@ export default function AdjustmentsPage() {
                             onChange={(e) => updateLine(r.key, { newName: e.target.value })}
                           />
                         </div>
-                        <Select
+                        <Combobox
+                          className="w-full"
+                          options={parentOptions}
                           value={r.newParentId ?? undefined}
-                          onValueChange={(v) => updateLine(r.key, { newParentId: v })}
-                        >
-                          <SelectTrigger size="sm" className="w-full">
-                            <SelectValue placeholder="选择父节点(非叶)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {parentOptions.map((o) => (
-                              <SelectItem key={o.value} value={o.value}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          onChange={(v) => updateLine(r.key, { newParentId: v })}
+                          placeholder="选择父节点(非叶)"
+                          searchPlaceholder="输入名称筛选…"
+                          emptyText="无非叶科目"
+                        />
                       </div>
                     ) : (
-                      <Select
+                      <Combobox
+                        className="w-full min-w-40"
+                        options={subjectPickOptions}
                         value={r.subjectId ?? undefined}
-                        onValueChange={(v) => {
+                        onChange={(v) => {
                           if (v === NEW_SUBJECT) {
                             updateLine(r.key, { isNew: true, subjectId: null });
                           } else {
                             updateLine(r.key, { subjectId: v });
                           }
                         }}
-                      >
-                        <SelectTrigger size="sm" className="w-full min-w-40">
-                          <SelectValue placeholder="选择科目" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {baseline.map((s) => (
-                            <SelectItem key={s.subjectId} value={s.subjectId}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                          <SelectItem value={NEW_SUBJECT}>➕ 新增科目...</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        placeholder="选择科目"
+                        searchPlaceholder="输入名称或编号筛选…"
+                        emptyText="无匹配科目"
+                      />
                     )}
                   </TableCell>
                   {formKind === 'ALLOCATE' ? (
