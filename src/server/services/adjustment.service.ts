@@ -760,6 +760,19 @@ export async function approveAdjustment(
       // 后续容量校验读到的是前一笔已提交的总额,ProjectBudget 读改写也不再丢更新。
       await tx.$queryRaw`SELECT project_id FROM project_budgets WHERE project_id = ${adj.projectId}::uuid FOR UPDATE`;
 
+      // 前提复核:初始预算编制必须已审批生效。否则后续编制审批会 current←initial
+      // 整体重置,静默清掉本次追加的额度(此前仅前端门控,API 可绕过)。
+      const initApp = await tx.initialBudgetApplication.findUnique({
+        where: { projectId: adj.projectId },
+        select: { status: true },
+      });
+      if (!initApp || initApp.status !== ApprovalStatus.APPROVED) {
+        throw new HTTPError(
+          422,
+          `初始预算编制尚未审批生效(当前:${initApp?.status ?? '无'}),不可追加下达`,
+        );
+      }
+
       const yearTotal = validateAllocate(parsedLines);
       // expandTotals=false(池内分配)才做容量护栏;开启时科目总预算随行调增,无上限。
       if (!adj.expandTotals) {

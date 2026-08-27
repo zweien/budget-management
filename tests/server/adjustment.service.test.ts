@@ -677,6 +677,41 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(err.message).toContain('零额建档');
   });
 
+  it('ALLOCATE: 初始预算未审批生效 → approve 422(防后续编制审批重置追加额度)', async () => {
+    // 只建项目 + 编制草稿(不提交审批):科目树存在但状态 DRAFT。
+    const project = await createProject(
+      { code: `ALLOC-NOINIT-${uuidv7().slice(0, 8)}`, name: 'alloc noinit' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    await createDraft(project.id, partialAllocPayload(), adminUser());
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    const leafA = subjects.find((s) => s.code === 'A')!;
+
+    // 纯 API 路径(前端按钮门控可被绕过):创建/提交放行,审批必须拦截。
+    // expandTotals 跳过容量护栏(草稿期 STB current 全 0,池内模式会先被容量拦下,
+    // 到不了审批的前提校验)。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        expandTotals: true,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '50.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    const err = await expectHTTP(() => approveAdjustment(adj.id, adminUser()), 422);
+    expect(err.message).toContain('初始预算编制尚未审批生效');
+
+    // 追加未落任何金额:2027 年不应存在 SubjectBudget 行。
+    const sbCount = await prisma.subjectBudget.count({
+      where: { projectId: project.id, year: 2027 },
+    });
+    expect(sbCount).toBe(0);
+  });
+
   it('ALLOCATE: 并发双重审批 → 恰好一个成功另一个 409,金额不重复应用', async () => {
     const { project, leafA } = await seedPartialProject('RACE');
     const adj = await createAdjustment(
