@@ -1134,4 +1134,36 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
     expect(newRow.originAnnual).toBe('0.00');
     expect(newRow.afterAnnual).toBe('30.00');
   });
+
+  it('§codex P2:同一科目多行 → 详情按科目聚合,原预算不重复计入', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('dupdetail');
+
+    // A 拆两行(-30/-30),合计 -60;B +60 平衡。审批生效按科目累加。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-30.00', annualAdjustment: '0' },
+          { subjectId: leafA.id, totalAdjustment: '-30.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '60.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+
+    const detail = await getAdjustmentDetail(adj.id, adminUser());
+    // 聚合后 A 只有一行。
+    const rowsA = detail.lines.filter((l) => l.subjectId === leafA.id);
+    expect(rowsA).toHaveLength(1);
+    expect(rowsA[0].totalAdjustment).toBe('-60.00');
+    // 原预算只计一次:600(而非 2×600)。
+    expect(rowsA[0].originTotal).toBe('600.00');
+    expect(rowsA[0].afterTotal).toBe('540.00');
+    // 合计:原预算 Σ = 600+400=1000,不虚增;调整后 Σ = 1000。
+    expect(detail.sums.originTotal).toBe('1000.00');
+    expect(detail.sums.afterTotal).toBe('1000.00');
+    expect(detail.sums.adjustTotal).toBe('0.00');
+  });
 });

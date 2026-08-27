@@ -585,19 +585,57 @@ export async function getAdjustmentDetail(
             .filter((v): v is string => !!v),
         },
       },
-      select: { id: true, name: true, code: true },
+      select: { id: true, name: true, code: true, parentId: true, createdAt: true },
     }),
     // 待审/草稿:参照提交时刻;已生效:参照审批时刻(undefined → 内部取 approvedAt)。
     buildBaselineAmounts(adj, adj.status === 'APPROVED' ? undefined : adj.createdAt),
   ]);
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
 
-  const lines: AdjustmentLineDetail[] = adj.lines.map((l) => {
+  // 本单新设科目(§codex P1,与导出口径一致):原预算恒为 0——科目因本单而生,
+  // 此前无账。新数据审批已回写 subjectId;历史单据按(父节点,名称)解析。
+  const bornSubjectIds = new Set<string>();
+  if (adj.status === 'APPROVED' && adj.approvedAt) {
+    for (const l of adj.lines) {
+      if (!l.newSubjectName) continue;
+      if (l.subjectId) {
+        bornSubjectIds.add(l.subjectId);
+        continue;
+      }
+      const born = subjects.find(
+        (s) =>
+          s.parentId === l.newSubjectParentId &&
+          s.name === l.newSubjectName &&
+          s.createdAt <= adj.approvedAt!,
+      );
+      if (born) bornSubjectIds.add(born.id);
+    }
+  }
+
+  // §codex P2:同一科目可出现在多行(表单允许、服务端接受)。审批生效是按科目
+  // 累加 delta,详情必须按科目聚合展示——逐行各配一份完整基线会让"原预算/调整后"
+  // 合计虚增,行级调整后也与审批后余额对不上。新增科目行按(父节点,名称)分组。
+  const grouped = new Map<string, { first: (typeof adj.lines)[number]; total: D; annual: D }>();
+  for (const l of adj.lines) {
+    const key = l.subjectId ?? `new:${l.newSubjectParentId}:${l.newSubjectName}`;
+    const bucket = grouped.get(key);
+    if (bucket) {
+      bucket.total = bucket.total.plus(fromStored(String(l.totalAdjustment)));
+      bucket.annual = bucket.annual.plus(fromStored(String(l.annualAdjustment)));
+    } else {
+      grouped.set(key, {
+        first: l,
+        total: fromStored(String(l.totalAdjustment)),
+        annual: fromStored(String(l.annualAdjustment)),
+      });
+    }
+  }
+
+  const lines: AdjustmentLineDetail[] = [...grouped.values()].map(({ first: l, total, annual }) => {
     const isNew = !l.subjectId;
-    const originTotal = isNew ? ZERO : (baseline.total.get(l.subjectId!) ?? ZERO);
-    const originAnnual = isNew ? ZERO : (baseline.annual.get(l.subjectId!) ?? ZERO);
-    const adjustTotal = fromStored(String(l.totalAdjustment));
-    const adjustAnnual = fromStored(String(l.annualAdjustment));
+    const born = !isNew && bornSubjectIds.has(l.subjectId!);
+    const originTotal = isNew || born ? ZERO : (baseline.total.get(l.subjectId!) ?? ZERO);
+    const originAnnual = isNew || born ? ZERO : (baseline.annual.get(l.subjectId!) ?? ZERO);
     const parent = l.newSubjectParentId ? subjectById.get(l.newSubjectParentId) : undefined;
     const subj = l.subjectId ? subjectById.get(l.subjectId) : undefined;
     return {
@@ -608,12 +646,12 @@ export async function getAdjustmentDetail(
       isNew,
       newSubjectName: l.newSubjectName,
       newSubjectParentName: parent?.name ?? null,
-      totalAdjustment: adjustTotal.toFixed(2),
-      annualAdjustment: adjustAnnual.toFixed(2),
+      totalAdjustment: total.toFixed(2),
+      annualAdjustment: annual.toFixed(2),
       originTotal: originTotal.toFixed(2),
       originAnnual: originAnnual.toFixed(2),
-      afterTotal: originTotal.plus(adjustTotal).toFixed(2),
-      afterAnnual: originAnnual.plus(adjustAnnual).toFixed(2),
+      afterTotal: originTotal.plus(total).toFixed(2),
+      afterAnnual: originAnnual.plus(annual).toFixed(2),
     };
   });
 
