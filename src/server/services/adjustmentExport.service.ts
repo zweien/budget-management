@@ -86,6 +86,34 @@ export async function exportAdjustmentDocx(
     throw new HTTPError(404, '项目不存在');
   }
 
+  // §issue12 读取兜底:汇总行账本自洽校验,防止带病文书。
+  // 只校验恒等式 current = initial + adjustment——Σ科目 ≤ 总盘的未分配余额是
+  // 编制期合法状态(validatePayload 仅要求 ≤),不做父子等值比较(会误杀合法池)。
+  // 历史脏数据(姚雯案:initial/adjustment/current = 50/25/50 万)恰以破恒等式为特征。
+  const TOLERANCE = fromStored('0.01'); // 分位容差,吸收历史 Decimal 尾差。
+  if (projectBudget) {
+    const pbI = fromStored(projectBudget.initialAmount);
+    const pbA = fromStored(projectBudget.adjustmentAmount);
+    const pbC = fromStored(projectBudget.currentAmount);
+    if (pbC.minus(pbI).minus(pbA).abs().gt(TOLERANCE)) {
+      throw new HTTPError(
+        422,
+        `汇总数据漂移,拒绝导出:项目总预算 current(${pbC.toFixed(2)}) ≠ initial(${pbI.toFixed(2)}) + adjustment(${pbA.toFixed(2)})。请用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
+      );
+    }
+  }
+  if (annualBudgetRow) {
+    const abI = fromStored(annualBudgetRow.initialAmount);
+    const abA = fromStored(annualBudgetRow.adjustmentAmount);
+    const abC = fromStored(annualBudgetRow.currentAmount);
+    if (abC.minus(abI).minus(abA).abs().gt(TOLERANCE)) {
+      throw new HTTPError(
+        422,
+        `汇总数据漂移,拒绝导出:年度预算(${adj.year}) current(${abC.toFixed(2)}) ≠ initial(${abI.toFixed(2)}) + adjustment(${abA.toFixed(2)})。请用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
+      );
+    }
+  }
+
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
   const annualCurrentBySubject = new Map(annualBudgets.map((s) => [s.subjectId, s.currentAmount]));
   const totalCurrentBySubject = new Map(totalBudgets.map((s) => [s.subjectId, s.currentAmount]));
