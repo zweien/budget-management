@@ -86,6 +86,36 @@ export async function exportAdjustmentDocx(
     throw new HTTPError(404, '项目不存在');
   }
 
+  // §issue12 读取兜底:汇总行与科目层漂移时拒绝生成文书,避免带病审批表。
+  // 恒等口径:project_budgets.current = Σ 科目总预算;annual_budgets.current = Σ 当年科目年度预算。
+  const TOLERANCE = fromStored('0.01'); // 分位容差,吸收历史 Decimal 尾差。
+  const stbSum = totalBudgets.reduce(
+    (acc, t) => acc.plus(fromStored(t.currentAmount)),
+    fromStored('0'),
+  );
+  if (projectBudget) {
+    const pbCurrent = fromStored(projectBudget.currentAmount);
+    if (pbCurrent.minus(stbSum).abs().gt(TOLERANCE)) {
+      throw new HTTPError(
+        422,
+        `汇总数据漂移,拒绝导出:项目总预算 current(${pbCurrent.toFixed(2)}) ≠ 科目总预算合计(${stbSum.toFixed(2)})。请先用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
+      );
+    }
+  }
+  const sbYearSum = annualBudgets.reduce(
+    (acc, s) => acc.plus(fromStored(s.currentAmount)),
+    fromStored('0'),
+  );
+  if (annualBudgetRow) {
+    const abCurrent = fromStored(annualBudgetRow.currentAmount);
+    if (abCurrent.minus(sbYearSum).abs().gt(TOLERANCE)) {
+      throw new HTTPError(
+        422,
+        `汇总数据漂移,拒绝导出:年度预算(${adj.year}) current(${abCurrent.toFixed(2)}) ≠ 科目年度预算合计(${sbYearSum.toFixed(2)})。请先用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
+      );
+    }
+  }
+
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
   const annualCurrentBySubject = new Map(annualBudgets.map((s) => [s.subjectId, s.currentAmount]));
   const totalCurrentBySubject = new Map(totalBudgets.map((s) => [s.subjectId, s.currentAmount]));

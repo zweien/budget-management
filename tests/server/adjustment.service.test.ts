@@ -3,6 +3,7 @@ import { ApprovalStatus, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
+import { exportAdjustmentDocx } from '@/server/services/adjustmentExport.service';
 import { fromStored } from '@/lib/decimal';
 import {
   approveApplication,
@@ -710,6 +711,95 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       where: { projectId: project.id, year: 2027 },
     });
     expect(sbCount).toBe(0);
+  });
+
+  // ---------------- §issue12 汇总漂移防线 ----------------
+
+  it('导出兜底:project_budgets 与科目层漂移 → 导出 422 拒绝生成文书', async () => {
+    const { project, leafA } = await seedApprovedProject('DRIFT');
+    // 任一调整单(草稿即可,兜底与状态无关)。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0.00', annualAdjustment: '0.00' }],
+      },
+      adminUser(),
+    );
+
+    // 健全状态可正常导出。
+    const buf = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
+    expect(buf.length).toBeGreaterThan(0);
+
+    // 人为污染 project_budgets.current(模拟历史脏数据)→ 拒绝导出。
+    await prisma.projectBudget.update({
+      where: { projectId: project.id },
+      data: { currentAmount: '500000.00' },
+    });
+    const err = await expectHTTP(() => exportAdjustmentDocx(adj.id, 'annual', adminUser()), 422);
+    expect(err.message).toContain('汇总数据漂移');
+    expect(err.message).toContain('科目总预算合计');
+
+    // 年度维度漂移同样拦截。
+    await prisma.projectBudget.update({
+      where: { projectId: project.id },
+      data: { currentAmount: '1000.00' },
+    });
+    await prisma.annualBudget.update({
+      where: { projectId_year: { projectId: project.id, year: 2026 } },
+      data: { currentAmount: '999999.00' },
+    });
+    const err2 = await expectHTTP(() => exportAdjustmentDocx(adj.id, 'annual', adminUser()), 422);
+    expect(err2.message).toContain('年度预算(2026)');
+
+    // 恢复后可再次导出(验证拦截基于实时数据)。
+    await prisma.annualBudget.update({
+      where: { projectId_year: { projectId: project.id, year: 2026 } },
+      data: { currentAmount: '1000.00' },
+    });
+    const buf2 = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
+    expect(buf2.length).toBeGreaterThan(0);
+  });
+
+  it('恒等式防线:追加审批后各层满足 current = initial + adjustment', async () => {
+    const { project, leafA } = await seedPartialProject('IDENT');
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        expandTotals: true,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '120.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    const pb = await prisma.projectBudget.findUniqueOrThrow({ where: { projectId: project.id } });
+    expect(
+      pb.currentAmount.minus(pb.initialAmount).minus(pb.adjustmentAmount).abs().toNumber(),
+    ).toBeLessThan(0.01);
+    const ab = await prisma.annualBudget.findUniqueOrThrow({
+      where: { projectId_year: { projectId: project.id, year: 2027 } },
+    });
+    expect(
+      ab.currentAmount.minus(ab.initialAmount).minus(ab.adjustmentAmount).abs().toNumber(),
+    ).toBeLessThan(0.01);
+    const sb = await prisma.subjectBudget.findUniqueOrThrow({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2027, subjectId: leafA.id },
+      },
+    });
+    expect(
+      sb.currentAmount.minus(sb.initialAmount).minus(sb.adjustmentAmount).abs().toNumber(),
+    ).toBeLessThan(0.01);
+    const stb = await prisma.subjectTotalBudget.findUniqueOrThrow({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafA.id } },
+    });
+    expect(
+      stb.currentAmount.minus(stb.initialAmount).minus(stb.adjustmentAmount).abs().toNumber(),
+    ).toBeLessThan(0.01);
   });
 
   it('ALLOCATE: 并发双重审批 → 恰好一个成功另一个 409,金额不重复应用', async () => {

@@ -714,6 +714,19 @@ async function lockAndRecheckStatus(
 }
 
 /**
+ * 账本恒等式断言(§issue12 写入防线):current = initial + adjustment。
+ * 任一写入路径破坏该恒等式(历史上曾致导出审批表金额翻倍)立即回滚。
+ */
+function assertLedgerIdentity(initial: D, adjustment: D, current: D, label: string): void {
+  if (!current.minus(initial).minus(adjustment).abs().lte(fromStored('0.005'))) {
+    throw new HTTPError(
+      500,
+      `${label} 恒等式破坏:current(${current.toFixed(2)}) ≠ initial(${initial.toFixed(2)}) + adjustment(${adjustment.toFixed(2)}),已回滚`,
+    );
+  }
+}
+
+/**
  * §7 审批通过(PENDING → APPROVED)。
  * - 复跑平衡校验。
  * - 重新校验每个年度调减叶节点的可调额度(§7.5:提交后可能新增业务占用导致不足)。
@@ -861,11 +874,15 @@ export async function approveAdjustment(
             },
           });
         } else {
+          const sbInitial = fromStored(sb.initialAmount);
+          const sbAdjustment = fromStored(sb.adjustmentAmount).plus(line.annual);
+          const sbCurrent = fromStored(sb.currentAmount).plus(line.annual);
+          assertLedgerIdentity(sbInitial, sbAdjustment, sbCurrent, '科目年度预算');
           await tx.subjectBudget.update({
             where: { id: sb.id },
             data: {
-              currentAmount: toStored(fromStored(sb.currentAmount).plus(line.annual)),
-              adjustmentAmount: toStored(fromStored(sb.adjustmentAmount).plus(line.annual)),
+              currentAmount: toStored(sbCurrent),
+              adjustmentAmount: toStored(sbAdjustment),
             },
           });
         }
@@ -894,11 +911,15 @@ export async function approveAdjustment(
               },
             });
           } else {
+            const stbInitial = fromStored(stb.initialAmount);
+            const stbAdjustment = fromStored(stb.adjustmentAmount).plus(line.annual);
+            const stbCurrent = fromStored(stb.currentAmount).plus(line.annual);
+            assertLedgerIdentity(stbInitial, stbAdjustment, stbCurrent, '科目总预算');
             await tx.subjectTotalBudget.update({
               where: { id: stb.id },
               data: {
-                currentAmount: toStored(fromStored(stb.currentAmount).plus(line.annual)),
-                adjustmentAmount: toStored(fromStored(stb.adjustmentAmount).plus(line.annual)),
+                currentAmount: toStored(stbCurrent),
+                adjustmentAmount: toStored(stbAdjustment),
               },
             });
           }
@@ -912,22 +933,30 @@ export async function approveAdjustment(
         where: { projectId_year: { projectId: adj.projectId, year: adj.year } },
       });
       if (!annualBudget) {
+        const nextInitial = yearTotal;
+        const nextAdjustment = ZERO;
+        const nextCurrent = yearTotal;
+        assertLedgerIdentity(nextInitial, nextAdjustment, nextCurrent, `年度预算(${adj.year})`);
         await tx.annualBudget.create({
           data: {
             id: uuidv7(),
             projectId: adj.projectId,
             year: adj.year,
-            initialAmount: toStored(yearTotal),
-            adjustmentAmount: toStored(ZERO),
-            currentAmount: toStored(yearTotal),
+            initialAmount: toStored(nextInitial),
+            adjustmentAmount: toStored(nextAdjustment),
+            currentAmount: toStored(nextCurrent),
           },
         });
       } else {
+        const nextInitial = fromStored(annualBudget.initialAmount);
+        const nextAdjustment = fromStored(annualBudget.adjustmentAmount).plus(yearTotal);
+        const nextCurrent = fromStored(annualBudget.currentAmount).plus(yearTotal);
+        assertLedgerIdentity(nextInitial, nextAdjustment, nextCurrent, `年度预算(${adj.year})`);
         await tx.annualBudget.update({
           where: { id: annualBudget.id },
           data: {
-            adjustmentAmount: toStored(fromStored(annualBudget.adjustmentAmount).plus(yearTotal)),
-            currentAmount: toStored(fromStored(annualBudget.currentAmount).plus(yearTotal)),
+            adjustmentAmount: toStored(nextAdjustment),
+            currentAmount: toStored(nextCurrent),
           },
         });
       }
@@ -941,11 +970,15 @@ export async function approveAdjustment(
         if (!projectBudget) {
           throw new HTTPError(422, '项目总预算不存在(须先完成初始预算编制并审批)');
         }
+        const pbInitial = fromStored(projectBudget.initialAmount);
+        const pbAdjustment = fromStored(projectBudget.adjustmentAmount).plus(yearTotal);
+        const pbCurrent = fromStored(projectBudget.currentAmount).plus(yearTotal);
+        assertLedgerIdentity(pbInitial, pbAdjustment, pbCurrent, '项目总预算');
         await tx.projectBudget.update({
           where: { projectId: adj.projectId },
           data: {
-            adjustmentAmount: toStored(fromStored(projectBudget.adjustmentAmount).plus(yearTotal)),
-            currentAmount: toStored(fromStored(projectBudget.currentAmount).plus(yearTotal)),
+            adjustmentAmount: toStored(pbAdjustment),
+            currentAmount: toStored(pbCurrent),
           },
         });
       }
@@ -1093,6 +1126,12 @@ export async function approveAdjustment(
       }
       const next = fromStored(sb.currentAmount).plus(delta);
       const nextAdj = fromStored(sb.adjustmentAmount).plus(delta);
+      assertLedgerIdentity(
+        fromStored(sb.initialAmount),
+        nextAdj,
+        next,
+        `科目年度预算(${adj.year})`,
+      );
       await tx.subjectBudget.update({
         where: { id: sb.id },
         data: { currentAmount: toStored(next), adjustmentAmount: toStored(nextAdj) },
@@ -1125,6 +1164,7 @@ export async function approveAdjustment(
       } else {
         const next = fromStored(stb.currentAmount).plus(delta);
         const nextAdj = fromStored(stb.adjustmentAmount).plus(delta);
+        assertLedgerIdentity(fromStored(stb.initialAmount), nextAdj, next, '科目总预算');
         await tx.subjectTotalBudget.update({
           where: { id: stb.id },
           data: { currentAmount: toStored(next), adjustmentAmount: toStored(nextAdj) },
