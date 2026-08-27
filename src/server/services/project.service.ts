@@ -112,12 +112,24 @@ export async function createProject(
  * v0.3.0 起普通用户全局只读 → 所有登录用户看到全部(未归档)项目;
  * 编辑权不在此处区分(由 canEditProject / requirePermission 在编辑动作上拦截)。
  */
-export async function listProjects(user: { id: string; role: User['role'] }): Promise<Project[]> {
-  void user; // 签名保持兼容;查看范围已与角色无关。
-  return prisma.project.findMany({
-    where: { archivedAt: null },
+export async function listProjects(
+  user: { id: string; role: User['role'] },
+  opts: { includeArchived?: boolean } = {},
+): Promise<(Project & { canEdit: boolean })[]> {
+  const projects = await prisma.project.findMany({
+    where: opts.includeArchived ? undefined : { archivedAt: null },
     orderBy: { createdAt: 'desc' },
   });
+  // canEdit 随行下发(项目管理页编辑/归档按钮的行级门控):ADMIN 恒可,否则需 OWNER。
+  if (user.role === 'ADMIN') {
+    return projects.map((p) => ({ ...p, canEdit: true }));
+  }
+  const owned = await prisma.projectMember.findMany({
+    where: { userId: user.id, memberRole: 'OWNER' },
+    select: { projectId: true },
+  });
+  const ownedIds = new Set(owned.map((m) => m.projectId));
+  return projects.map((p) => ({ ...p, canEdit: ownedIds.has(p.id) }));
 }
 
 /** 项目 + 当前用户权限标记(统一录入页的数据源)。 */
@@ -216,6 +228,33 @@ export async function updateProject(
         level: after.level,
         remark: after.remark,
       },
+    });
+    return after;
+  });
+}
+
+/** 恢复归档项目:清 archivedAt,审计(§issue 项目管理:误归档自助恢复)。 */
+export async function unarchiveProject(
+  id: string,
+  user: { id: string; role: User['role'] },
+): Promise<Project> {
+  await requirePermission(user, 'project:edit', id);
+  const before = await prisma.project.findUnique({ where: { id } });
+  if (!before) throw new HTTPError(404, '项目不存在');
+
+  return prisma.$transaction(async (tx) => {
+    const after = await tx.project.update({
+      where: { id },
+      data: { archivedAt: null },
+    });
+    await recordAudit(tx, {
+      projectId: id,
+      objectType: 'project',
+      objectId: id,
+      action: 'unarchive',
+      operatorId: user.id,
+      before: { archivedAt: before.archivedAt },
+      after: { archivedAt: after.archivedAt },
     });
     return after;
   });
