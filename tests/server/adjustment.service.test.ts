@@ -677,6 +677,43 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(err.message).toContain('零额建档');
   });
 
+  it('ALLOCATE: 并发双重审批 → 恰好一个成功另一个 409,金额不重复应用', async () => {
+    const { project, leafA } = await seedPartialProject('RACE');
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '100.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+
+    // 两个审批同时发起(都在事务外读到 PENDING);行锁 + 锁内复核保证只有一个生效。
+    const results = await Promise.allSettled([
+      approveAdjustment(adj.id, adminUser()),
+      approveAdjustment(adj.id, adminUser()),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected409 = results.filter(
+      (r) =>
+        r.status === 'rejected' &&
+        r.reason instanceof HTTPError &&
+        (r.reason as HTTPError).status === 409,
+    );
+    expect(fulfilled.length).toBe(1);
+    expect(rejected409.length).toBe(1);
+
+    // 金额恰好应用一次(未被第二个事务重复累加)。
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2027, subjectId: leafA.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('100.00');
+  });
+
   it('ALLOCATE: 超出剩余可分配额 → submit 422(容量护栏)', async () => {
     const { project, leafA } = await seedPartialProject('CAP');
     // A 剩余 360,申请 400 → 拒绝。

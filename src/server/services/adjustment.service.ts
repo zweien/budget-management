@@ -567,6 +567,7 @@ export async function submitAdjustment(
     // 追加下达:正向 + 非零合计;池内分配再做容量护栏(expandTotals 不设上限);无锁、无零和校验。
     validateAllocate(parsedLines);
     return prisma.$transaction(async (tx) => {
+      await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
       if (!adj.expandTotals) {
         await assertAllocateCapacity(tx, adj.projectId, parsedLines);
       }
@@ -596,6 +597,7 @@ export async function submitAdjustment(
   }
 
   return prisma.$transaction(async (tx) => {
+    await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
     // 按科目合并年度调减合计(同一科目多行可能分别调减)。
     const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
     for (const line of parsedLines) {
@@ -692,6 +694,26 @@ async function releaseLocks(tx: Prisma.TransactionClient, adjId: string, now: Da
 }
 
 /**
+ * 锁定调整单行并复核状态(双重提交/双重审批竞态防护):
+ * 事务内 FOR UPDATE 行锁串行化并发请求,锁内重读状态——第二个请求会看到
+ * 第一个已提交的状态变化并 409,而不是基于事务前读取的旧状态重复应用金额。
+ */
+async function lockAndRecheckStatus(
+  tx: Prisma.TransactionClient,
+  adjId: string,
+  expected: ApprovalStatus,
+): Promise<void> {
+  await tx.$queryRaw`SELECT status FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+  const fresh = await tx.budgetAdjustment.findUniqueOrThrow({
+    where: { id: adjId },
+    select: { status: true },
+  });
+  if (fresh.status !== expected) {
+    throw new HTTPError(409, `当前状态 ${fresh.status} 与预期 ${expected} 不符(已被并发操作处理)`);
+  }
+}
+
+/**
  * §7 审批通过(PENDING → APPROVED)。
  * - 复跑平衡校验。
  * - 重新校验每个年度调减叶节点的可调额度(§7.5:提交后可能新增业务占用导致不足)。
@@ -721,6 +743,9 @@ export async function approveAdjustment(
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
+    // 双重审批防护:行锁 + 锁内复核状态(两个并发审批只有一个能通过);
+    // 即使复核被绕过,末尾的条件化状态迁移 + 事务回滚仍保证金额不重复应用。
+    await lockAndRecheckStatus(tx, adjId, ApprovalStatus.PENDING);
     const parsedLines = adj.lines.map((l) => ({
       subjectId: l.subjectId as string | null,
       newSubjectName: l.newSubjectName,
@@ -912,11 +937,15 @@ export async function approveAdjustment(
         });
       }
 
-      // 追加只做正向下达,无锁可释放。
-      const approvedAlloc = await tx.budgetAdjustment.update({
-        where: { id: adjId },
+      // 追加只做正向下达,无锁可释放。条件化状态迁移(仅 PENDING → APPROVED 恰好一行)。
+      const upd = await tx.budgetAdjustment.updateMany({
+        where: { id: adjId, status: ApprovalStatus.PENDING },
         data: { status: ApprovalStatus.APPROVED, approverId: user.id, approvedAt: now },
       });
+      if (upd.count !== 1) {
+        throw new HTTPError(409, '调整单状态已变化,审批未生效');
+      }
+      const approvedAlloc = await tx.budgetAdjustment.findUniqueOrThrow({ where: { id: adjId } });
       await recordAudit(tx, {
         projectId: adj.projectId,
         objectType: 'budget_adjustments',
@@ -1121,15 +1150,19 @@ export async function approveAdjustment(
     // 释放锁。
     await releaseLocks(tx, adjId, now);
 
-    // 置 APPROVED + 审计。
-    const approved = await tx.budgetAdjustment.update({
-      where: { id: adjId },
+    // 置 APPROVED + 审计。条件化状态迁移(仅 PENDING → APPROVED 恰好一行)。
+    const upd = await tx.budgetAdjustment.updateMany({
+      where: { id: adjId, status: ApprovalStatus.PENDING },
       data: {
         status: ApprovalStatus.APPROVED,
         approverId: user.id,
         approvedAt: now,
       },
     });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '调整单状态已变化,审批未生效');
+    }
+    const approved = await tx.budgetAdjustment.findUniqueOrThrow({ where: { id: adjId } });
 
     await recordAudit(tx, {
       projectId: adj.projectId,
