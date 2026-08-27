@@ -6,6 +6,7 @@ import { ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
+import { AdjustmentDetailSheet } from '@/components/adjustments/AdjustmentDetailSheet';
 import { EmptyState } from '@/components/layout/empty-state';
 import { PageHeader } from '@/components/layout/page-header';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -60,7 +61,9 @@ interface AdjustmentPending {
   /** 追加下达且勾选:审批将同步调增科目总预算与项目总预算(新经费入账)。 */
   expandTotals?: boolean;
   status: string;
-  reason: string | null;
+  /** 调整原因按维度分开(与详情接口一致;旧字段 reason 从未下发过)。 */
+  totalReason: string | null;
+  annualReason: string | null;
   applicantId: string;
   createdAt: string;
   updatedAt: string;
@@ -97,6 +100,14 @@ const formatDateTime = (s: string | null): string => {
   return Number.isNaN(d.getTime()) ? '—' : format(d, 'yyyy-MM-dd HH:mm');
 };
 
+/** 调整单原因摘要:双维度合并展示(总:xx/年:xx),单维度只显其一。 */
+const adjustmentReason = (r: Pick<AdjustmentPending, 'totalReason' | 'annualReason'>): string => {
+  const parts: string[] = [];
+  if (r.totalReason) parts.push(`总:${r.totalReason}`);
+  if (r.annualReason) parts.push(`年:${r.annualReason}`);
+  return parts.join(' / ');
+};
+
 export default function ApprovalsPage() {
   const [data, setData] = useState<PendingResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,6 +120,9 @@ export default function ApprovalsPage() {
   const [opinion, setOpinion] = useState('');
   const [opinionError, setOpinionError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // 调整单详情 Sheet(§issue15):查看完整明细 + 就地办理。
+  const [detailTarget, setDetailTarget] = useState<AdjustmentPending | null>(null);
 
   const loadPending = useCallback(async () => {
     setLoading(true);
@@ -145,6 +159,21 @@ export default function ApprovalsPage() {
     setTarget(null);
     setOpinion('');
     setOpinionError(null);
+  };
+
+  /** 详情内就地办理(§issue15):复用 submitAction 的接口路径与意见语义。 */
+  const handleInSheetAction = async (nextMode: 'approve' | 'reject', sheetOpinion: string) => {
+    if (!detailTarget) throw new Error('待办不存在');
+    await apiFetch(
+      `/api/projects/${detailTarget.projectId}/adjustments/${detailTarget.id}/${nextMode}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ opinion: sheetOpinion }),
+      },
+    );
+    toast.success(nextMode === 'approve' ? '已审批通过' : '已驳回');
+    setDetailTarget(null);
+    await loadPending();
   };
 
   const submitAction = async () => {
@@ -211,6 +240,11 @@ export default function ApprovalsPage() {
 
   const actionCell = (t: ApproveTarget) => (
     <div className="flex gap-2">
+      {t.kind === 'adjustment' && (
+        <Button size="sm" variant="ghost" onClick={() => setDetailTarget(t.row)}>
+          详情
+        </Button>
+      )}
       <Button size="sm" onClick={() => openAction(t, 'approve')}>
         审批
       </Button>
@@ -333,8 +367,8 @@ export default function ApprovalsPage() {
                         )}
                       </TableCell>
                       <TableCell className="tabular-nums">{r.lineCount ?? '—'}</TableCell>
-                      <TableCell className="max-w-48 truncate" title={r.reason ?? undefined}>
-                        {r.reason ?? '—'}
+                      <TableCell className="max-w-48 truncate" title={adjustmentReason(r)}>
+                        {adjustmentReason(r) || '—'}
                       </TableCell>
                       <TableCell>{r.applicant.name}</TableCell>
                       <TableCell className="tabular-nums">{formatDateTime(r.updatedAt)}</TableCell>
@@ -449,6 +483,29 @@ export default function ApprovalsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 调整单详情 Sheet(§issue15):完整明细 + 就地 审批/驳回 */}
+      <AdjustmentDetailSheet
+        open={!!detailTarget}
+        onOpenChange={(o) => !o && setDetailTarget(null)}
+        projectId={detailTarget?.projectId ?? ''}
+        adjustmentId={detailTarget?.id ?? null}
+        applicantName={detailTarget?.applicant.name}
+        fallback={
+          detailTarget
+            ? {
+                year: detailTarget.year,
+                kind: detailTarget.kind,
+                expandTotals: detailTarget.expandTotals,
+                status: detailTarget.status,
+                totalReason: detailTarget.totalReason,
+                annualReason: detailTarget.annualReason,
+                createdAt: detailTarget.createdAt,
+              }
+            : null
+        }
+        onAction={handleInSheetAction}
+      />
     </div>
   );
 }

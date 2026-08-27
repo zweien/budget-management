@@ -17,6 +17,7 @@ import {
   createAdjustment,
   deleteDraftAdjustment,
   getAdjustment,
+  getAdjustmentDetail,
   listAdjustments,
   submitAdjustment,
   updateDraftAdjustment,
@@ -951,5 +952,186 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       where: { projectId_subjectId: { projectId: project.id, subjectId: created!.id } },
     });
     expect(stb!.currentAmount.toFixed(2)).toBe('80.00');
+  });
+});
+
+describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
+  const createdProjectIds: string[] = [];
+  let adminId: string;
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
+
+  beforeAll(async () => {
+    await prisma.$connect();
+    adminId = uuidv7();
+    await prisma.user.create({
+      data: { id: adminId, name: 'admin-adjdetail', role: UserRole.ADMIN },
+    });
+  });
+
+  afterAll(async () => {
+    for (const id of createdProjectIds.splice(0)) {
+      await cleanupProject(id);
+    }
+    await prisma.user.deleteMany({ where: { id: adminId } }).catch(() => {});
+    await prisma.$disconnect();
+  });
+
+  /** helper:admin 建项目 + 编制 + 提交 + 审批生效 → 返回 { project, leafA, leafB }。 */
+  async function seedApprovedProject(suffix: string) {
+    const code = `ADJ-${suffix}-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: `adj ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    const { appId } = await createDraft(project.id, validBudgetPayload(), adminUser());
+    await submitDraft(appId, adminUser());
+    await approveApplication(appId, adminUser());
+
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    const leafA = subjects.find((s) => s.code === 'A')!;
+    const leafB = subjects.find((s) => s.code === 'B')!;
+
+    return { project, leafA, leafB };
+  }
+
+  it('待审单:原预算 = 提交时刻快照,调整后 = 原值+调整额,合计平衡', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('det1');
+
+    // 单一:总维度 ±100,年度维度不动(Σ=0 合法)。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        totalReason: '总盘调剂',
+        annualReason: '年度不动',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+
+    const detail = await getAdjustmentDetail(adj.id, adminUser());
+    expect(detail.status).toBe(ApprovalStatus.PENDING);
+    expect(detail.lines).toHaveLength(2);
+
+    const rowA = detail.lines.find((l) => l.subjectId === leafA.id)!;
+    const rowB = detail.lines.find((l) => l.subjectId === leafB.id)!;
+    // 提交时刻快照:live 未被本单污染(待审不生效)。
+    expect(rowA.originTotal).toBe('600.00');
+    expect(rowB.originTotal).toBe('400.00');
+    expect(rowA.originAnnual).toBe('600.00');
+    expect(rowB.originAnnual).toBe('400.00');
+    // 科目名解析(服务端给出,免前端查树)。
+    expect(rowA.subjectName).toBe('叶A');
+    expect(rowB.subjectName).toBe('叶B');
+    // 调整后 = 原值 + 调整额。
+    expect(rowA.afterTotal).toBe('500.00');
+    expect(rowB.afterTotal).toBe('500.00');
+    expect(rowA.afterAnnual).toBe('600.00');
+    // 合计:调剂零和。
+    expect(detail.sums.adjustTotal).toBe('0.00');
+    expect(detail.sums.adjustAnnual).toBe('0.00');
+    expect(detail.sums.afterTotal).toBe('1000.00');
+    expect(detail.sums.afterAnnual).toBe('1000.00');
+  });
+
+  it('已生效单之后的新待审单:快照含前单生效结果;提交后他单生效不影响其基线', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('det2');
+
+    // 第一单:审批生效,A−100/B+100 → live A500/B500。
+    const first = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(first.id, adminUser());
+    await approveAdjustment(first.id, adminUser());
+
+    // 第二单:提交(PENDING)。
+    const second = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-50.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '50.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(second.id, adminUser());
+    const detailBefore = await getAdjustmentDetail(second.id, adminUser());
+    expect(detailBefore.lines.find((l) => l.subjectId === leafA.id)!.originTotal).toBe('500.00');
+
+    // 第三单(模拟"提交后他单先生效"):审批生效第二单……用第三单制造提交后的并发生效。
+    const third = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-20.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '20.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(third.id, adminUser());
+    await approveAdjustment(third.id, adminUser());
+
+    // 第二单仍是 PENDING:基线 = 提交时刻(500),不被第三单生效污染。
+    const detail = await getAdjustmentDetail(second.id, adminUser());
+    const rowA = detail.lines.find((l) => l.subjectId === leafA.id)!;
+    expect(rowA.originTotal).toBe('500.00');
+    expect(rowA.afterTotal).toBe('450.00');
+    // 导出场景同口径:第二单审批生效后,其"原预算" = 审批前一刻的 live
+    // (第三单已生效,故为 500−20=480,而非提交时刻的 500)。
+    await approveAdjustment(second.id, adminUser());
+    const detailApproved = await getAdjustmentDetail(second.id, adminUser());
+    expect(detailApproved.lines.find((l) => l.subjectId === leafA.id)!.originTotal).toBe('480.00');
+  });
+
+  it('新增科目行:父节点名服务端解析,原值为 0', async () => {
+    const { project, leafA } = await seedApprovedProject('det3');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '测试新科目',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '30.00',
+          },
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '-30.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+
+    const detail = await getAdjustmentDetail(adj.id, adminUser());
+    const newRow = detail.lines.find((l) => l.isNew)!;
+    expect(newRow.newSubjectName).toBe('测试新科目');
+    expect(newRow.newSubjectParentName).toBe('根');
+    expect(newRow.originTotal).toBe('0.00');
+    expect(newRow.originAnnual).toBe('0.00');
+    expect(newRow.afterAnnual).toBe('30.00');
   });
 });

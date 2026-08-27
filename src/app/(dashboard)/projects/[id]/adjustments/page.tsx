@@ -9,6 +9,11 @@ import { toast } from 'sonner';
 import { apiFetch, downloadFile } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import {
+  AdjustmentDetailSheet,
+  STATUS_BADGE,
+  STATUS_LABEL,
+} from '@/components/adjustments/AdjustmentDetailSheet';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -34,7 +39,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -50,23 +54,6 @@ import { Textarea } from '@/components/ui/textarea';
 // ------------------------------------------------------------
 // 枚举(本地定义,不引 @prisma/client)。
 // ------------------------------------------------------------
-const STATUS_LABEL: Record<string, string> = {
-  DRAFT: '草稿',
-  PENDING: '待审批',
-  APPROVED: '已通过',
-  REJECTED: '已驳回',
-  WITHDRAWN: '已撤回',
-};
-
-/** Badge 语义色遵循 DESIGN.md。 */
-const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'error' | 'outline'> = {
-  DRAFT: 'secondary',
-  PENDING: 'warning',
-  APPROVED: 'success',
-  REJECTED: 'error',
-  WITHDRAWN: 'outline',
-};
-
 // ------------------------------------------------------------
 // 类型
 // ------------------------------------------------------------
@@ -1364,75 +1351,26 @@ export default function AdjustmentsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 只读明细 Sheet */}
-      <Sheet open={!!detailTarget} onOpenChange={(open) => !open && setDetailTarget(null)}>
-        <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-6 sm:max-w-xl">
-          <SheetHeader className="p-0 pb-4">
-            <SheetTitle>调整单明细</SheetTitle>
-          </SheetHeader>
-          {detailTarget ? (
-            <div className="space-y-4">
-              <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border">
-                <div className="bg-card p-3">
-                  <dt className="text-xs text-mute">年度</dt>
-                  <dd className="mt-1 text-sm tabular-nums">{detailTarget.year}</dd>
-                </div>
-                <div className="bg-card p-3">
-                  <dt className="text-xs text-mute">状态</dt>
-                  <dd className="mt-1">
-                    <Badge variant={STATUS_BADGE[detailTarget.status] ?? 'secondary'}>
-                      {STATUS_LABEL[detailTarget.status] ?? detailTarget.status}
-                    </Badge>
-                  </dd>
-                </div>
-                <div className="bg-card p-3">
-                  <dt className="text-xs text-mute">总预算调整原因</dt>
-                  <dd className="mt-1 text-sm whitespace-pre-wrap">
-                    {detailTarget.totalReason ?? <span className="text-mute">—</span>}
-                  </dd>
-                </div>
-                <div className="bg-card p-3">
-                  <dt className="text-xs text-mute">年度预算调整原因</dt>
-                  <dd className="mt-1 text-sm whitespace-pre-wrap">
-                    {detailTarget.annualReason ?? <span className="text-mute">—</span>}
-                  </dd>
-                </div>
-                <div className="bg-card p-3">
-                  <dt className="text-xs text-mute">创建时间</dt>
-                  <dd className="mt-1 text-sm tabular-nums">
-                    {formatDateTime(detailTarget.createdAt)}
-                  </dd>
-                </div>
-              </dl>
-
-              <div className="overflow-hidden rounded-lg border border-border">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead>科目</TableHead>
-                      <TableHead className="text-right">总预算调整</TableHead>
-                      <TableHead className="text-right">年度预算调整</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detailTarget.lines.map((l) => (
-                      <TableRow key={l.id}>
-                        <TableCell>{subjectName(l.subjectId)}</TableCell>
-                        <TableCell>
-                          <MoneyText value={l.totalAdjustment} riskOnNegative={false} />
-                        </TableCell>
-                        <TableCell>
-                          <MoneyText value={l.annualAdjustment} riskOnNegative={false} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          ) : null}
-        </SheetContent>
-      </Sheet>
+      {/* 只读明细 Sheet(§issue15 共享组件:原预算/调整额/调整后 + 合计,懒加载) */}
+      <AdjustmentDetailSheet
+        open={!!detailTarget}
+        onOpenChange={(o) => !o && setDetailTarget(null)}
+        projectId={projectId}
+        adjustmentId={detailTarget?.id ?? null}
+        fallback={
+          detailTarget
+            ? {
+                year: detailTarget.year,
+                kind: detailTarget.kind,
+                expandTotals: detailTarget.expandTotals,
+                status: detailTarget.status,
+                totalReason: detailTarget.totalReason,
+                annualReason: detailTarget.annualReason,
+                createdAt: detailTarget.createdAt,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

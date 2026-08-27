@@ -1,13 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { Prisma } from '@prisma/client';
-
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/permissions';
 import { D, fromStored } from '@/lib/decimal';
 import { getAdjustment } from '@/server/services/adjustment.service';
+import { buildBaselineAmounts } from '@/server/services/adjustmentBaseline.service';
 import { fillAdjustmentTemplate } from '@/server/services/docxFill';
 import type { User } from '@prisma/client';
 
@@ -60,27 +59,18 @@ export async function exportAdjustmentDocx(
   const projectId = adj.projectId;
   const year = adj.year;
 
-  const [project, subjects, annualBudgets, totalBudgets, projectBudget, annualBudgetRow] =
-    await Promise.all([
-      prisma.project.findUnique({
-        where: { id: projectId },
-        include: { owner: { select: { name: true } } },
-      }),
-      prisma.budgetSubject.findMany({
-        where: { projectId },
-        orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-      }),
-      prisma.subjectBudget.findMany({
-        where: { projectId, year },
-        select: { subjectId: true, currentAmount: true },
-      }),
-      prisma.subjectTotalBudget.findMany({
-        where: { projectId },
-        select: { subjectId: true, currentAmount: true },
-      }),
-      prisma.projectBudget.findUnique({ where: { projectId } }),
-      prisma.annualBudget.findUnique({ where: { projectId_year: { projectId, year } } }),
-    ]);
+  const [project, subjects, annualBudgetRow, projectBudget] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: projectId },
+      include: { owner: { select: { name: true } } },
+    }),
+    prisma.budgetSubject.findMany({
+      where: { projectId },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+    }),
+    prisma.annualBudget.findUnique({ where: { projectId_year: { projectId, year } } }),
+    prisma.projectBudget.findUnique({ where: { projectId } }),
+  ]);
 
   if (!project) {
     throw new HTTPError(404, '项目不存在');
@@ -115,75 +105,12 @@ export async function exportAdjustmentDocx(
   }
 
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
-  const annualCurrentBySubject = new Map(annualBudgets.map((s) => [s.subjectId, s.currentAmount]));
-  const totalCurrentBySubject = new Map(totalBudgets.map((s) => [s.subjectId, s.currentAmount]));
 
-  // 导出"原预算"须为审批前基线:库内 currentAmount 已含本单(若已生效)及所有
-  // 更晚生效调整单的 delta。重建 = live − 本单 − 全部更晚生效单(同科目;年度文档
-  // 仅扣同年行),否则历史文档的原值/调整后值被后续审批污染。
-  if (adj.status === 'APPROVED' && adj.approvedAt) {
-    const laterAdjustments = await prisma.budgetAdjustment.findMany({
-      where: {
-        projectId: adj.projectId,
-        id: { not: adj.id },
-        status: 'APPROVED',
-        approvedAt: { gt: adj.approvedAt },
-      },
-      include: { lines: true },
-    });
-    const relevant: {
-      kind: string | null;
-      expandTotals: boolean;
-      lines: {
-        subjectId: string | null;
-        year: number;
-        totalAdjustment: string | Prisma.Decimal;
-        annualAdjustment: string | Prisma.Decimal;
-      }[];
-    }[] = [
-      { kind: adj.kind, expandTotals: adj.expandTotals, lines: adj.lines },
-      ...laterAdjustments.map((a) => ({
-        kind: a.kind,
-        expandTotals: a.expandTotals,
-        lines: a.lines,
-      })),
-    ];
-    const annualDelta = new Map<string, ReturnType<typeof fromStored>>();
-    const totalDelta = new Map<string, ReturnType<typeof fromStored>>();
-    for (const a of relevant) {
-      for (const line of a.lines) {
-        if (!line.subjectId) continue;
-        // 年度维度:仅同年行影响该年度文档。
-        if (line.year === adj.year) {
-          annualDelta.set(
-            line.subjectId,
-            (annualDelta.get(line.subjectId) ?? fromStored('0')).plus(
-              fromStored(line.annualAdjustment),
-            ),
-          );
-        }
-        // 总预算维度:调剂 = totalAdjustment;追加下达池内 = 0;expandTotals = 下达额。
-        const totalLineDelta =
-          a.kind === 'ALLOCATE'
-            ? a.expandTotals
-              ? fromStored(line.annualAdjustment)
-              : fromStored('0')
-            : fromStored(line.totalAdjustment);
-        totalDelta.set(
-          line.subjectId,
-          (totalDelta.get(line.subjectId) ?? fromStored('0')).plus(totalLineDelta),
-        );
-      }
-    }
-    for (const [sid, d] of annualDelta) {
-      const cur = annualCurrentBySubject.get(sid);
-      if (cur !== undefined) annualCurrentBySubject.set(sid, fromStored(String(cur)).minus(d));
-    }
-    for (const [sid, d] of totalDelta) {
-      const cur = totalCurrentBySubject.get(sid);
-      if (cur !== undefined) totalCurrentBySubject.set(sid, fromStored(String(cur)).minus(d));
-    }
-  }
+  // 导出"原预算"须为审批前基线(§issue12):重建逻辑抽至 adjustmentBaseline.service,
+  // 与审批详情(§issue15)共用;未生效单不扣减,已生效单按 approvedAt 参照。
+  const baseline = await buildBaselineAmounts(adj);
+  const annualCurrentBySubject = baseline.annual;
+  const totalCurrentBySubject = baseline.total;
 
   /** 沿 parentId 上溯找二级标题(level<=2)祖先;若自身 level<=2 则自身即标题。 */
   const findSecondLevelTitle = (subjectId: string): { id: string; name: string } | null => {

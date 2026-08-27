@@ -8,6 +8,7 @@ import { D, ZERO, fromStored, sumAmounts, toStored } from '@/lib/decimal';
 import { adjustableAmount, computeOccupancy } from '@/lib/budget';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
+import { buildBaselineAmounts } from '@/server/services/adjustmentBaseline.service';
 
 /**
  * §7 预算调整(双维度模型 + 追加下达模式)。
@@ -515,6 +516,130 @@ export async function getAdjustment(
   }
   await requirePermission(user, 'project:view', adj.projectId);
   return adj;
+}
+
+// ------------------------------------------------------------
+// §issue15 审批详情:科目行原预算/调整额/调整后金额(基线重建与导出共用)。
+// ------------------------------------------------------------
+
+/** 单行详情(金额均为元字符串,2 位小数)。 */
+export interface AdjustmentLineDetail {
+  id: string;
+  /** 现有科目 id;新增科目行为 null。 */
+  subjectId: string | null;
+  /** 科目名(新增科目行 = null,展示 newSubjectName)。 */
+  subjectName: string | null;
+  subjectCode: string | null;
+  isNew: boolean;
+  newSubjectName: string | null;
+  /** 新增科目挂靠的父节点名(服务端解析,免前端再查)。 */
+  newSubjectParentName: string | null;
+  totalAdjustment: string;
+  annualAdjustment: string;
+  /** 审批/提交时点前的基线原值(待审单 = 提交时刻快照)。 */
+  originTotal: string;
+  originAnnual: string;
+  /** 调整后 = 原值 + 调整额。 */
+  afterTotal: string;
+  afterAnnual: string;
+}
+
+/** 调整单详情(明细行 + 双维度合计)。 */
+export interface AdjustmentDetail {
+  id: string;
+  projectId: string;
+  year: number;
+  kind: 'ADJUST' | 'ALLOCATE';
+  expandTotals: boolean;
+  status: string;
+  totalReason: string | null;
+  annualReason: string | null;
+  createdAt: Date;
+  lines: AdjustmentLineDetail[];
+  sums: {
+    originTotal: string;
+    originAnnual: string;
+    adjustTotal: string;
+    adjustAnnual: string;
+    afterTotal: string;
+    afterAnnual: string;
+  };
+}
+
+/**
+ * 审批详情(§issue15):在 getAdjustment 权限校验之上,额外重建每行的
+ * 原预算基线(待审单取提交时刻快照,已生效单取审批前),供审批人对照决策。
+ */
+export async function getAdjustmentDetail(
+  adjId: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<AdjustmentDetail> {
+  const adj = await getAdjustment(adjId, user);
+
+  const [subjects, baseline] = await Promise.all([
+    prisma.budgetSubject.findMany({
+      where: {
+        id: {
+          in: adj.lines
+            .flatMap((l) => [l.subjectId, l.newSubjectParentId])
+            .filter((v): v is string => !!v),
+        },
+      },
+      select: { id: true, name: true, code: true },
+    }),
+    // 待审/草稿:参照提交时刻;已生效:参照审批时刻(undefined → 内部取 approvedAt)。
+    buildBaselineAmounts(adj, adj.status === 'APPROVED' ? undefined : adj.createdAt),
+  ]);
+  const subjectById = new Map(subjects.map((s) => [s.id, s]));
+
+  const lines: AdjustmentLineDetail[] = adj.lines.map((l) => {
+    const isNew = !l.subjectId;
+    const originTotal = isNew ? ZERO : (baseline.total.get(l.subjectId!) ?? ZERO);
+    const originAnnual = isNew ? ZERO : (baseline.annual.get(l.subjectId!) ?? ZERO);
+    const adjustTotal = fromStored(String(l.totalAdjustment));
+    const adjustAnnual = fromStored(String(l.annualAdjustment));
+    const parent = l.newSubjectParentId ? subjectById.get(l.newSubjectParentId) : undefined;
+    const subj = l.subjectId ? subjectById.get(l.subjectId) : undefined;
+    return {
+      id: l.id,
+      subjectId: l.subjectId,
+      subjectName: subj?.name ?? null,
+      subjectCode: subj?.code ?? null,
+      isNew,
+      newSubjectName: l.newSubjectName,
+      newSubjectParentName: parent?.name ?? null,
+      totalAdjustment: adjustTotal.toFixed(2),
+      annualAdjustment: adjustAnnual.toFixed(2),
+      originTotal: originTotal.toFixed(2),
+      originAnnual: originAnnual.toFixed(2),
+      afterTotal: originTotal.plus(adjustTotal).toFixed(2),
+      afterAnnual: originAnnual.plus(adjustAnnual).toFixed(2),
+    };
+  });
+
+  const sumBy = (pick: (l: AdjustmentLineDetail) => string) =>
+    lines.reduce((acc, l) => acc.plus(fromStored(pick(l))), ZERO).toFixed(2);
+
+  return {
+    id: adj.id,
+    projectId: adj.projectId,
+    year: adj.year,
+    kind: adj.kind,
+    expandTotals: adj.expandTotals,
+    status: adj.status,
+    totalReason: adj.totalReason,
+    annualReason: adj.annualReason,
+    createdAt: adj.createdAt,
+    lines,
+    sums: {
+      originTotal: sumBy((l) => l.originTotal),
+      originAnnual: sumBy((l) => l.originAnnual),
+      adjustTotal: sumBy((l) => l.totalAdjustment),
+      adjustAnnual: sumBy((l) => l.annualAdjustment),
+      afterTotal: sumBy((l) => l.afterTotal),
+      afterAnnual: sumBy((l) => l.afterAnnual),
+    },
+  };
 }
 
 /** 查询某 (year, subjectId) 上已存在且未释放的待审批锁合计。 */
