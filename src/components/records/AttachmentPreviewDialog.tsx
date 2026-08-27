@@ -116,6 +116,9 @@ export function AttachmentPreviewDialog({
               key={attachment.id}
               buffer={buffer}
               filename={fileName}
+              // 损坏/不可渲染文件:下载成功但渲染失败时,把错误交给既有
+              // 错误兜底(提示 + 下载原文件),避免"渲染中"遮罩永不消失。
+              onError={setError}
               className="h-full w-full"
             />
           ) : null}
