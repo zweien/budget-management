@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Download } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -9,12 +10,20 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   downloadAttachment,
-  fetchAttachmentBlobUrl,
+  fetchAttachmentBlob,
   type AttachmentMeta,
 } from '@/lib/api/attachments';
 
+// file-viewer 装配(Worker/WASM)只能在浏览器加载:禁用 SSR,骨架占位。
+const ViewerCanvas = dynamic(() => import('@/components/file-viewer/ViewerCanvas'), {
+  ssr: false,
+  loading: () => <Skeleton className="h-full w-full" />,
+});
+
 /**
- * 浏览器原生支持的预览前缀。Office(doc/xls/ppt)无原生预览 → 直接走下载提示,不 fetch。
+ * 预览白名单:浏览器原生支持的预览前缀。
+ * 本次仅把渲染层切换为 file-viewer(§issue18),类型范围不扩大;
+ * 放开 docx/xlsx 附件上传是另一个议题,届时白名单放开即得在线预览。
  */
 const SUPPORTED_PREFIXES = ['image/', 'application/pdf'];
 
@@ -27,11 +36,14 @@ interface AttachmentPreviewDialogProps {
 }
 
 /**
- * 预览 Dialog:鉴权 fetch 拉 Blob → createObjectURL → 按 contentType 用 <img>/<iframe> 渲染。
- * Office 等不支持原生预览的格式直接展示下载提示(不 fetch,省一次无谓请求)。
+ * 预览 Dialog(§issue18):渲染层统一为 file-viewer(与调整单预览同一底座)。
+ * 取数鉴权附件 blob → ArrayBuffer 直喂 ViewerCanvas,不再有 <img>/<iframe>
+ * 分支与 object URL 生命周期管理;图片/PDF 由内建基线 + preset-office 覆盖。
  *
- * React 19 的 react-hooks `set-state-in-effect` 规则:setState 全部放进 fetch 的异步回调,
- * cleanup(异步执行,不受规则约束)负责 revoke + 清状态。loading 由渲染期派生。
+ * 交互与失败提示沿用现状:白名单外仍提示"不支持在线预览"+ 下载兜底。
+ *
+ * React 19 的 react-hooks `set-state-in-effect` 规则:setState 全部放进 fetch 的
+ * 异步回调;加载中由渲染期派生(有附件、白名单内、尚无 buffer 与 error)。
  */
 export function AttachmentPreviewDialog({
   projectId,
@@ -39,47 +51,41 @@ export function AttachmentPreviewDialog({
   attachment,
   onOpenChange,
 }: AttachmentPreviewDialogProps) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const attachmentId = attachment?.id;
   const contentType = attachment?.contentType ?? '';
+  const fileName = attachment?.fileName ?? '';
   const supported = SUPPORTED_PREFIXES.some((p) => contentType.startsWith(p));
 
   useEffect(() => {
     if (!attachmentId || !supported) return;
     let cancelled = false;
-    let createdUrl: string | null = null;
-    fetchAttachmentBlobUrl(projectId, recordId, attachmentId)
-      .then((url) => {
-        // 无论是否已取消都记录 url:若 cleanup 已跑(取消),这里立即 revoke,
-        // 防止飞行中 fetch resolve 后创建的 blob URL 无人释放(最大 50MB 泄漏)。
-        createdUrl = url;
-        if (cancelled) {
-          URL.revokeObjectURL(url);
-          return;
+    fetchAttachmentBlob(projectId, recordId, attachmentId)
+      .then((blob) => blob.arrayBuffer())
+      .then((buf) => {
+        if (!cancelled) {
+          setBuffer(buf);
+          setError(null);
         }
-        setBlobUrl(url);
-        setError(null);
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          setBlobUrl(null);
+          setBuffer(null);
           setError(e instanceof Error ? e.message : '加载失败');
         }
       });
     return () => {
-      // cleanup 在卸载/切换附件时执行:revoke blob URL 释放大文件字节引用,
-      // 并清状态。cancelled 防止已卸载/已切换的 fetch 回调 setState。
+      // 卸载/切换附件:作废飞行中回调,清字节引用(ArrayBuffer 无 object URL 需 revoke)。
       cancelled = true;
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
-      setBlobUrl(null);
+      setBuffer(null);
       setError(null);
     };
   }, [attachmentId, projectId, recordId, supported]);
 
-  // 渲染期派生 loading:支持预览、有附件、尚无 blobUrl 与 error = 加载中。
-  const loading = !!attachment && supported && blobUrl === null && error === null;
+  // 渲染期派生 loading:支持预览、有附件、尚无 buffer 与 error = 加载中。
+  const loading = !!attachment && supported && buffer === null && error === null;
 
   return (
     <Dialog open={!!attachment} onOpenChange={onOpenChange}>
@@ -104,20 +110,17 @@ export function AttachmentPreviewDialog({
               recordId={recordId}
               attachment={attachment}
             />
-          ) : blobUrl && attachment ? (
-            contentType.startsWith('image/') ? (
-              <img
-                src={blobUrl}
-                alt={attachment.fileName}
-                className="max-h-full max-w-full object-contain"
-              />
-            ) : (
-              <iframe
-                src={blobUrl}
-                title={attachment.fileName}
-                className="h-full w-full border-0"
-              />
-            )
+          ) : buffer && attachment ? (
+            <ViewerCanvas
+              // 附件切换即重挂载,重置 viewer 内部 Worker 状态。
+              key={attachment.id}
+              buffer={buffer}
+              filename={fileName}
+              // 损坏/不可渲染文件:下载成功但渲染失败时,把错误交给既有
+              // 错误兜底(提示 + 下载原文件),避免"渲染中"遮罩永不消失。
+              onError={setError}
+              className="h-full w-full"
+            />
           ) : null}
         </div>
       </DialogContent>
