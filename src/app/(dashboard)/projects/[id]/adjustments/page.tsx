@@ -970,6 +970,7 @@ export default function AdjustmentsPage() {
                           />
                         </div>
                         <Combobox
+                          className="w-full"
                           options={parentOptions}
                           value={r.newParentId ?? undefined}
                           onChange={(v) => updateLine(r.key, { newParentId: v })}
@@ -980,6 +981,7 @@ export default function AdjustmentsPage() {
                       </div>
                     ) : (
                       <Combobox
+                        className="w-full min-w-40"
                         options={subjectPickOptions}
                         value={r.subjectId ?? undefined}
                         onChange={(v) => {
