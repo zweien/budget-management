@@ -1162,4 +1162,86 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     const xmlSecond = await unzip(await exportAdjustmentDocx(second.id, 'total', adminUser()));
     expect(xmlSecond.split('时点科目乙').length - 1).toBe(1);
   });
+
+  it('§codex P1:待审/草稿单导出包含新设科目行(未建档不丢行)', async () => {
+    const { project } = await seedPartialProject('PENDINGNEW');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+
+    // 待审单(提交但不审批):含新设科目行。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '待审新设科目',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '80.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+
+    const JSZip = (await import('jszip')).default;
+    const unzip = async (buf: Buffer) => {
+      const zip = await JSZip.loadAsync(buf);
+      return zip.file('word/document.xml')!.async('text');
+    };
+    // 年度维度:新设科目在列,调整额 80 元 = 0.01 万。
+    const xmlAnnual = await unzip(await exportAdjustmentDocx(adj.id, 'annual', adminUser()));
+    expect(xmlAnnual).toContain('待审新设科目');
+    expect(xmlAnnual).toContain('0.01');
+    // 总维度:同样在列(池内分配 0/0/0)。
+    const xmlTotal = await unzip(await exportAdjustmentDocx(adj.id, 'total', adminUser()));
+    expect(xmlTotal).toContain('待审新设科目');
+  });
+
+  it('§codex P1:历史单据(subjectId 未回写)导出仍含新设科目(解析不受时钟截断)', async () => {
+    const { project } = await seedPartialProject('LEGACYNEW');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '历史新设科目',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '50.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    // 模拟历史数据:清掉审批回写的 subjectId(旧行为不回写)。
+    await prisma.budgetAdjustmentLine.updateMany({
+      where: { adjustmentId: adj.id },
+      data: { subjectId: null },
+    });
+
+    const JSZip = (await import('jszip')).default;
+    const unzip = async (buf: Buffer) => {
+      const zip = await JSZip.loadAsync(buf);
+      return zip.file('word/document.xml')!.async('text');
+    };
+    const xml = await unzip(await exportAdjustmentDocx(adj.id, 'total', adminUser()));
+    // 解析回 born 科目,恰好成行一次。
+    expect(xml.split('历史新设科目').length - 1).toBe(1);
+  });
 });

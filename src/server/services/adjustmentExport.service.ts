@@ -140,12 +140,12 @@ export async function exportAdjustmentDocx(
       }
       if (!line.subjectId && line.newSubjectName) {
         // 历史数据:审批时未回写 subjectId,按(父节点,名称)解析到已建科目。
+        // 不加 createdAt 截断:approvedAt 取自事务前时钟,科目 createdAt 是事务内
+        // DB 时钟,必然晚于 approvedAt,截断会恰好排除目标科目。
+        // (父节点,名称)在同父下唯一(validateNewSubject 保证),匹配安全。
         const born = subjects.find(
           (s) =>
-            s.isLeaf &&
-            s.parentId === line.newSubjectParentId &&
-            s.name === line.newSubjectName &&
-            s.createdAt <= adj.approvedAt!,
+            s.isLeaf && s.parentId === line.newSubjectParentId && s.name === line.newSubjectName,
         );
         if (born) bornSubjectIds.add(born.id);
       }
@@ -234,8 +234,10 @@ export async function exportAdjustmentDocx(
   };
 
   const hasChildren = (subjectId: string): boolean =>
-    // 用审批时点目录判断(§issue16):之后新增的子科目不改变历史文书的品名口径。
-    catalogSubjects.some((s) => s.parentId === subjectId);
+    // 用审批时点目录判断(§issue16):之后新增的子科目不改变历史文书的品名口径;
+    // 本单新设科目计入(它们在审批时点已存在,否则唯一子节点会被误判为无子)。
+    catalogSubjects.some((s) => s.parentId === subjectId) ||
+    [...bornSubjectIds].some((id) => subjectById.get(id)?.parentId === subjectId);
 
   type AdjLine = (typeof adj.lines)[number];
 
@@ -314,8 +316,18 @@ export async function exportAdjustmentDocx(
           });
           bornId = born ?? null;
         }
-        if (!bornId) return null;
-        return renderRow({ subjectId: bornId, adjustYuan: pickAdjust(line) });
+        if (bornId) return renderRow({ subjectId: bornId, adjustYuan: pickAdjust(line) });
+        // 未生效单(草稿/待审):新设科目尚未建档 → 按新增行渲染(标题=父节点,原值 0),
+        // 否则该行及其金额会从文书中静默消失。
+        if (!line.subjectId) {
+          return renderRow({
+            subjectId: null,
+            newSubjectName: line.newSubjectName,
+            newSubjectParentId: line.newSubjectParentId,
+            adjustYuan: pickAdjust(line),
+          });
+        }
+        return null;
       })
       .filter((r): r is ReturnType<typeof renderRow> => r !== null);
 
