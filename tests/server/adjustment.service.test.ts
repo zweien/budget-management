@@ -521,7 +521,7 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     };
   }
 
-  it('ALLOCATE: 新年度提交审批生效 → 自动建 AnnualBudget/SubjectBudget + ProjectBudget 联动累加,SubjectTotalBudget 不变', async () => {
+  it('ALLOCATE: 新年度提交审批生效 → 自动建 AnnualBudget/SubjectBudget;池内分配不动 ProjectBudget', async () => {
     const { project, leafA, leafB } = await seedPartialProject('NEWYEAR');
 
     const adj = await createAdjustment(
@@ -529,7 +529,7 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       {
         year: 2027, // 编制未声明的新年度
         kind: 'ALLOCATE',
-        annualReason: '第二批经费到账,下达2027年预算',
+        annualReason: '把科目既有总预算分批落地到2027年',
         lines: [
           { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '200.00' },
           { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '100.00' },
@@ -538,17 +538,20 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       adminUser(),
     );
     expect(adj.kind).toBe('ALLOCATE');
+    expect(adj.expandTotals).toBe(false);
     const submitted = await submitAdjustment(adj.id, adminUser());
     expect(submitted.status).toBe(ApprovalStatus.PENDING);
     const approved = await approveAdjustment(adj.id, adminUser());
     expect(approved.status).toBe(ApprovalStatus.APPROVED);
 
-    // 该年未建账 → AnnualBudget(2027) 自动创建 initial=current=300。
+    // 该年未建账 → AnnualBudget(2027) 自动创建:initial=300, adjustment=0, current=300
+    // (维持 current = initial + adjustment 恒等式,追加额不重复计入 initial)。
     const ab = await prisma.annualBudget.findUnique({
       where: { projectId_year: { projectId: project.id, year: 2027 } },
     });
     expect(ab).not.toBeNull();
     expect(ab!.initialAmount.toFixed(2)).toBe('300.00');
+    expect(ab!.adjustmentAmount.toFixed(2)).toBe('0.00');
     expect(ab!.currentAmount.toFixed(2)).toBe('300.00');
 
     // SubjectBudget(2027) 按行创建(initial=0,adjustment=current=分配额)。
@@ -566,10 +569,10 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     });
     expect(sbB!.currentAmount.toFixed(2)).toBe('100.00');
 
-    // ProjectBudget 随追加同步增长:1000 → 1300。
+    // 池内分配:项目总盘不变(钱本就在 1000 总预算内,只是落地到年份)。
     const pb = await prisma.projectBudget.findUniqueOrThrow({ where: { projectId: project.id } });
-    expect(pb.currentAmount.toFixed(2)).toBe('1300.00');
-    expect(pb.adjustmentAmount.toFixed(2)).toBe('300.00');
+    expect(pb.currentAmount.toFixed(2)).toBe('1000.00');
+    expect(pb.initialAmount.toFixed(2)).toBe('1000.00');
 
     // SubjectTotalBudget 不受追加影响。
     const stbA = await prisma.subjectTotalBudget.findUnique({
@@ -578,9 +581,48 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(stbA!.currentAmount.toFixed(2)).toBe('600.00');
   });
 
+  it('ALLOCATE + expandTotals(新经费入账): 跳过容量护栏,STB/ProjectBudget 同步调增且 initial 不动', async () => {
+    const { project, leafA } = await seedPartialProject('EXPAND');
+    // A 剩余 360,申请 400(超剩余)→ expandTotals 放行,总预算随之增长。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2028,
+        kind: 'ALLOCATE',
+        expandTotals: true,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '400.00' }],
+      },
+      adminUser(),
+    );
+    expect(adj.expandTotals).toBe(true);
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2028, subjectId: leafA.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('400.00');
+    const stbA = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafA.id } },
+    });
+    expect(stbA!.currentAmount.toFixed(2)).toBe('1000.00'); // 600 + 400
+    expect(stbA!.initialAmount.toFixed(2)).toBe('600.00'); // initial 不动
+    const pb = await prisma.projectBudget.findUniqueOrThrow({ where: { projectId: project.id } });
+    expect(pb.currentAmount.toFixed(2)).toBe('1400.00'); // 1000 + 400
+    expect(pb.initialAmount.toFixed(2)).toBe('1000.00');
+    const ab = await prisma.annualBudget.findUnique({
+      where: { projectId_year: { projectId: project.id, year: 2028 } },
+    });
+    expect(ab!.currentAmount.toFixed(2)).toBe('400.00');
+    expect(ab!.adjustmentAmount.toFixed(2)).toBe('0.00');
+    expect(ab!.initialAmount.toFixed(2)).toBe('400.00');
+  });
+
   it('ALLOCATE: 已有年份累加到 AnnualBudget 与既有 SubjectBudget 上', async () => {
     const { project, leafA } = await seedPartialProject('SAMEYEAR');
-    // 2026 已有 A=240;追加下达同一年 +60 → 300,AnnualBudget 400→460。
+    // 2026 已有 A=240;追加下达同一年 +60 → 300,AnnualBudget current 400→460。
     const adj = await createAdjustment(
       project.id,
       {
@@ -603,8 +645,36 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       where: { projectId_year: { projectId: project.id, year: 2026 } },
     });
     expect(ab!.currentAmount.toFixed(2)).toBe('460.00'); // 400 + 60
+    expect(ab!.initialAmount.toFixed(2)).toBe('400.00'); // initial 不动
+    expect(ab!.adjustmentAmount.toFixed(2)).toBe('60.00');
     const pb = await prisma.projectBudget.findUniqueOrThrow({ where: { projectId: project.id } });
-    expect(pb.currentAmount.toFixed(2)).toBe('1060.00'); // 1000 + 60
+    expect(pb.currentAmount.toFixed(2)).toBe('1000.00'); // 池内分配,总盘不变
+  });
+
+  it('ALLOCATE: 新增科目零额行 → submit 422(不接受零额建档)', async () => {
+    const { project } = await seedPartialProject('ZERONEW');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '零额新科目',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '0.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    const err = await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
+    expect(err.message).toContain('零额建档');
   });
 
   it('ALLOCATE: 超出剩余可分配额 → submit 422(容量护栏)', async () => {

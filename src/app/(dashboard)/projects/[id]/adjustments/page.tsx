@@ -23,6 +23,7 @@ import { AmountInput } from '@/components/ui/AmountInput';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/layout/empty-state';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { MoneyText } from '@/components/ui/MoneyText';
@@ -114,6 +115,7 @@ interface AdjustmentRow {
   id: string;
   year: number;
   kind?: 'ADJUST' | 'ALLOCATE';
+  expandTotals?: boolean;
   status: string;
   totalReason: string | null;
   annualReason: string | null;
@@ -198,6 +200,8 @@ export default function AdjustmentsPage() {
   const [formYear, setFormYear] = useState<number>(() => new Date().getFullYear());
   // 调整单类型:ADJUST=调剂(零和);ALLOCATE=追加下达(净增,可新建年度账)。
   const [formKind, setFormKind] = useState<'ADJUST' | 'ALLOCATE'>('ADJUST');
+  // 仅追加下达:追加的同时调增科目总预算与项目总预算(新经费入账);缺省=池内分配。
+  const [formExpandTotals, setFormExpandTotals] = useState(false);
   const [baseline, setBaseline] = useState<SubjectBaseline[]>([]);
   const [formLines, setFormLines] = useState<EditLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -327,6 +331,7 @@ export default function AdjustmentsPage() {
   const openCreate = async () => {
     setEditingId(null);
     setFormKind('ADJUST');
+    setFormExpandTotals(false);
     const y = new Date().getFullYear();
     setFormYear(y);
     setTotalReason('');
@@ -339,6 +344,7 @@ export default function AdjustmentsPage() {
   const openEdit = async (row: AdjustmentRow) => {
     setEditingId(row.id);
     setFormKind(row.kind === 'ALLOCATE' ? 'ALLOCATE' : 'ADJUST');
+    setFormExpandTotals(row.expandTotals === true);
     setFormYear(row.year);
     setTotalReason(row.totalReason ?? '');
     setAnnualReason(row.annualReason ?? '');
@@ -397,34 +403,54 @@ export default function AdjustmentsPage() {
     }
 
     if (formKind === 'ALLOCATE') {
-      // 追加下达:每行年度下达额必填且 ≥ 0,合计 > 0;不超剩余可分配额度。
-      for (const [i, l] of valid.entries()) {
-        if (l.annualAdjustment === '') {
-          return { ok: false, error: `第 ${i + 1} 行的「本年度下达额」需填写(追加单不可调减)` };
-        }
-        if ((Number(l.annualAdjustment) || 0) < 0) {
-          return {
-            ok: false,
-            error: `第 ${i + 1} 行不能为负——要减预算请改用「调剂」类型(有额度护栏)`,
-          };
-        }
-        if (!l.isNew && l.subjectId) {
-          const remaining = Number(baselineMap.get(l.subjectId)?.remaining ?? '0');
-          if ((Number(l.annualAdjustment) || 0) > remaining + 1e-9) {
+      // 提交级校验(requireBalance=true):行值 ≥ 0、合计 > 0、同科目合计 ≤ 剩余可分配额、
+      // 新增科目行 > 0。草稿(=false)允许留空按 0 落库的中间态,校验推迟到提交。
+      if (requireBalance) {
+        for (const [i, l] of valid.entries()) {
+          if (l.annualAdjustment === '') {
+            return { ok: false, error: `第 ${i + 1} 行的「本年度下达额」需填写(追加单不可调减)` };
+          }
+          if ((Number(l.annualAdjustment) || 0) < 0) {
             return {
               ok: false,
-              error: `第 ${i + 1} 行超出剩余可分配额度 ${remaining.toFixed(2)}(总预算 − 历年已分配)`,
+              error: `第 ${i + 1} 行不能为负——要减预算请改用「调剂」类型(有额度护栏)`,
+            };
+          }
+          if (l.isNew && (Number(l.annualAdjustment) || 0) <= 0) {
+            return {
+              ok: false,
+              error: `第 ${i + 1} 行新增科目"${l.newName.trim()}"的分配额须大于 0(不接受零额建档)`,
             };
           }
         }
-      }
-      const allocSum = valid.reduce((a, l) => a + (Number(l.annualAdjustment) || 0), 0);
-      if (!(allocSum > 0.001)) {
-        return { ok: false, error: '追加下达至少需要一行正数金额' };
+        // 同科目多行合并后再比剩余额度(与后端聚合口径一致)。
+        if (!formExpandTotals) {
+          const sumBySubject = new Map<string, number>();
+          for (const l of valid) {
+            if (l.isNew || !l.subjectId) continue;
+            sumBySubject.set(
+              l.subjectId,
+              (sumBySubject.get(l.subjectId) ?? 0) + (Number(l.annualAdjustment) || 0),
+            );
+          }
+          for (const [sid, sum] of sumBySubject) {
+            const remaining = Number(baselineMap.get(sid)?.remaining ?? '0');
+            if (sum > remaining + 1e-9) {
+              return {
+                ok: false,
+                error: `${baselineMap.get(sid)?.name ?? '科目'} 合计下达 ${sum.toFixed(2)} 超出剩余可分配额度 ${remaining.toFixed(2)}(总预算 − 历年已分配)`,
+              };
+            }
+          }
+        }
+        const allocSum = valid.reduce((a, l) => a + (Number(l.annualAdjustment) || 0), 0);
+        if (!(allocSum > 0.001)) {
+          return { ok: false, error: '追加下达至少需要一行正数金额' };
+        }
       }
       const lines = valid.map((l) => ({
         totalAdjustment: '0',
-        annualAdjustment: Number(l.annualAdjustment).toFixed(2),
+        annualAdjustment: l.annualAdjustment === '' ? '0' : Number(l.annualAdjustment).toFixed(2),
         ...(l.isNew
           ? {
               subjectId: null,
@@ -438,6 +464,7 @@ export default function AdjustmentsPage() {
         payload: {
           year: formYear,
           kind: 'ALLOCATE',
+          expandTotals: formExpandTotals || undefined,
           totalReason: null,
           annualReason: annualReason.trim() || null,
           lines,
@@ -667,23 +694,30 @@ export default function AdjustmentsPage() {
     };
   }, [formLines]);
 
-  /** 追加下达就绪:有正数行且每行都在剩余可分配额度内。 */
+  /** 追加下达就绪:有正数行,且(池内模式)每科目合计下达不超剩余可分配额。 */
   const allocateReady = useMemo(() => {
     const lines = formLines.filter(
       (l) => l.subjectId || (l.isNew && l.newName.trim() && l.newParentId),
     );
     if (lines.length === 0) return false;
-    if (!(lines.reduce((a, l) => a + (Number(l.annualAdjustment) || 0), 0) > 0.001)) return false;
+    const sumBySubject = new Map<string, number>();
+    let hasPositive = false;
     for (const l of lines) {
       const v = Number(l.annualAdjustment) || 0;
       if (v < 0) return false;
+      if (v > 0) hasPositive = true;
       if (!l.isNew && l.subjectId) {
-        const remaining = Number(baselineMap.get(l.subjectId)?.remaining ?? '0');
-        if (v > remaining + 1e-9) return false;
+        sumBySubject.set(l.subjectId, (sumBySubject.get(l.subjectId) ?? 0) + v);
       }
     }
+    if (!hasPositive) return false;
+    if (formExpandTotals) return true;
+    for (const [sid, sum] of sumBySubject) {
+      const remaining = Number(baselineMap.get(sid)?.remaining ?? '0');
+      if (sum > remaining + 1e-9) return false;
+    }
     return true;
-  }, [formLines, baselineMap]);
+  }, [formLines, baselineMap, formExpandTotals]);
 
   // ------------------------------------------------------------
   // 渲染
@@ -785,9 +819,25 @@ export default function AdjustmentsPage() {
               </SelectContent>
             </Select>
             {formKind === 'ALLOCATE' && (
-              <p className="text-xs leading-relaxed text-mute">
-                为选定年度下达此前未分配的预算;该年未建账会在审批通过时自动创建。调减请改用「调剂」。
-              </p>
+              <div className="mt-1 grid gap-1.5">
+                <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+                  <Checkbox
+                    checked={formExpandTotals}
+                    onCheckedChange={(v) => setFormExpandTotals(v === true)}
+                    aria-label="同步调增科目总预算与项目总预算"
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium text-foreground">新经费入账</span>
+                    (同步调增科目总预算与项目总预算)
+                    <br />
+                    勾选后不受「剩余可分配额」限制;不勾选则只把科目既有总预算分批落地到年份,各层总额不变。
+                  </span>
+                </label>
+                <p className="text-xs leading-relaxed text-mute">
+                  为选定年度下达此前未分配的预算;该年未建账会在审批通过时自动创建。调减请改用「调剂」。
+                </p>
+              </div>
             )}
           </div>
           <div className="grid content-start gap-1.5">
@@ -1091,8 +1141,13 @@ export default function AdjustmentsPage() {
                 riskOnNegative={false}
                 className="inline"
               />
-              ,项目总预算与该年度盘子将同步增加;审批通过后自动创建未建账科目的年度预算。
-              {allocateReady ? ' ✓ 可提交' : ' · 至少一行正数金额,且各行不超过剩余可分配额'}
+              ;审批通过后自动创建未建账科目的年度预算。
+              {formExpandTotals
+                ? '已选「新经费入账」:科目总预算与项目总预算将同步调增。'
+                : '池内分配:各层总额不变,仅把科目既有总预算落地到年份。'}
+              {allocateReady
+                ? ' ✓ 可提交'
+                : ' · 至少一行正数金额,且(池内)同科目合计不超剩余可分配额'}
             </AlertDescription>
           </Alert>
         ) : (

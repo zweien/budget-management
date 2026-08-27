@@ -88,6 +88,34 @@ export async function exportAdjustmentDocx(
   const annualCurrentBySubject = new Map(annualBudgets.map((s) => [s.subjectId, s.currentAmount]));
   const totalCurrentBySubject = new Map(totalBudgets.map((s) => [s.subjectId, s.currentAmount]));
 
+  // 追加下达单审批生效后,库内 currentAmount 已含本次下达额;导出的"原预算"
+  // 须回扣本次 delta,否则原值/调整后值重复计算(expandTotals 单的总维度同理)。
+  if (adj.kind === 'ALLOCATE' && adj.status === 'APPROVED') {
+    const annualDelta = new Map<string, ReturnType<typeof fromStored>>();
+    const totalDelta = new Map<string, ReturnType<typeof fromStored>>();
+    for (const line of adj.lines) {
+      if (!line.subjectId) continue;
+      annualDelta.set(
+        line.subjectId,
+        (annualDelta.get(line.subjectId) ?? fromStored('0')).plus(
+          fromStored(line.annualAdjustment),
+        ),
+      );
+      totalDelta.set(
+        line.subjectId,
+        (totalDelta.get(line.subjectId) ?? fromStored('0')).plus(fromStored(line.totalAdjustment)),
+      );
+    }
+    for (const [sid, d] of annualDelta) {
+      const cur = annualCurrentBySubject.get(sid);
+      if (cur !== undefined) annualCurrentBySubject.set(sid, fromStored(String(cur)).minus(d));
+    }
+    for (const [sid, d] of totalDelta) {
+      const cur = totalCurrentBySubject.get(sid);
+      if (cur !== undefined) totalCurrentBySubject.set(sid, fromStored(String(cur)).minus(d));
+    }
+  }
+
   /** 沿 parentId 上溯找二级标题(level<=2)祖先;若自身 level<=2 则自身即标题。 */
   const findSecondLevelTitle = (subjectId: string): { id: string; name: string } | null => {
     let cur = subjectById.get(subjectId);

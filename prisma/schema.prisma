@@ -233,6 +233,9 @@ model BudgetAdjustment {
   year        Int
   // 调整单类型(§追加下达):ADJUST=调剂(默认,零和);ALLOCATE=追加(净增,可新建年度账)。
   kind        AdjustmentKind  @default(ADJUST)
+  // 仅 ALLOCATE 有意义:追加的同时调增科目总预算与项目总预算(新经费入账)。
+  // 关闭=池内分配(默认):只把科目既有总预算落地到年份,各层总额不变。
+  expandTotals Boolean @default(false) @map("expand_totals")
   // 调整原因按维度分开(对应总预算/年度预算两份导出文档)。
   totalReason  String? @map("total_reason")
   annualReason String? @map("annual_reason")
