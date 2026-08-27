@@ -556,6 +556,7 @@ export async function submitAdjustment(
   }
 
   const parsedLines = adj.lines.map((l) => ({
+    id: l.id,
     subjectId: l.subjectId,
     newSubjectName: l.newSubjectName,
     newSubjectParentId: l.newSubjectParentId,
@@ -760,6 +761,7 @@ export async function approveAdjustment(
     // 即使复核被绕过,末尾的条件化状态迁移 + 事务回滚仍保证金额不重复应用。
     await lockAndRecheckStatus(tx, adjId, ApprovalStatus.PENDING);
     const parsedLines = adj.lines.map((l) => ({
+      id: l.id,
       subjectId: l.subjectId as string | null,
       newSubjectName: l.newSubjectName,
       newSubjectParentId: l.newSubjectParentId,
@@ -844,6 +846,11 @@ export async function approveAdjustment(
           },
         });
         line.subjectId = newSubjectId;
+        // 回写明细行 subjectId:导出/详情按科目口径渲染时不再重复成行。
+        await tx.budgetAdjustmentLine.update({
+          where: { id: line.id },
+          data: { subjectId: newSubjectId },
+        });
         createdNewSubjects.add(newSubjectId);
       }
 
@@ -1060,6 +1067,11 @@ export async function approveAdjustment(
         },
       });
       line.subjectId = newSubjectId;
+      // 回写明细行 subjectId(§issue16 导出防重复成行;提交时已建,审批前作废亦无害)。
+      await tx.budgetAdjustmentLine.update({
+        where: { id: line.id },
+        data: { subjectId: newSubjectId },
+      });
     }
 
     // 按科目合并年度调减合计,逐个重新校验可调额度(§7.5)。

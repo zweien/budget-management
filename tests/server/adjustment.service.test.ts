@@ -1053,4 +1053,113 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     const xml2 = await unzip(await exportAdjustmentDocx(adj.id, 'total', adminUser()));
     expect(xml2).toBe(xml1);
   });
+
+  it('§codex P1:审批后新设科目只成行一次,且原预算为 0(建档回写 subjectId)', async () => {
+    const { project } = await seedPartialProject('DUPSUBJ');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '重复校验科目',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '80.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    // 审批回写:明细行 subjectId 指向新科目(导出按科目口径渲染的前提)。
+    const created = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, name: '重复校验科目' },
+    });
+    const line = await prisma.budgetAdjustmentLine.findFirstOrThrow({
+      where: { adjustmentId: adj.id },
+    });
+    expect(line.subjectId).toBe(created!.id);
+
+    // 总维度导出:新设科目只出现一次(修复前:目录循环 + isNew 分支各一次)。
+    // 池内分配不调总盘,行内容为 0/0/0(与既有语义一致)。
+    const JSZip = (await import('jszip')).default;
+    const unzip = async (buf: Buffer) => {
+      const zip = await JSZip.loadAsync(buf);
+      return zip.file('word/document.xml')!.async('text');
+    };
+    const xml = await unzip(await exportAdjustmentDocx(adj.id, 'total', adminUser()));
+    const occurrences = xml.split('重复校验科目').length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it('§codex P1:目录按审批时点取景——他单后建科目不出现在本单历史文书', async () => {
+    const { project } = await seedPartialProject('CATALOG');
+    const root = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    });
+
+    // 第一单:新增科目甲(80),审批生效。
+    const first = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '时点科目甲',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '80.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(first.id, adminUser());
+    await approveAdjustment(first.id, adminUser());
+
+    // 第二单:再新增科目乙(20),审批生效。
+    const second = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '时点科目乙',
+            newSubjectParentId: root!.id,
+            totalAdjustment: '0',
+            annualAdjustment: '20.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(second.id, adminUser());
+    await approveAdjustment(second.id, adminUser());
+
+    const JSZip = (await import('jszip')).default;
+    const unzip = async (buf: Buffer) => {
+      const zip = await JSZip.loadAsync(buf);
+      return zip.file('word/document.xml')!.async('text');
+    };
+    // 重新导出第一单:含甲(本单新设,原值 0),不含乙(他单后建)。
+    const xmlFirst = await unzip(await exportAdjustmentDocx(first.id, 'total', adminUser()));
+    expect(xmlFirst.split('时点科目甲').length - 1).toBe(1);
+    expect(xmlFirst).not.toContain('时点科目乙');
+    // 乙出现在第二单自己的文书里。
+    const xmlSecond = await unzip(await exportAdjustmentDocx(second.id, 'total', adminUser()));
+    expect(xmlSecond.split('时点科目乙').length - 1).toBe(1);
+  });
 });

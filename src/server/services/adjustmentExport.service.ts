@@ -118,6 +118,37 @@ export async function exportAdjustmentDocx(
   const annualCurrentBySubject = new Map(annualBudgets.map((s) => [s.subjectId, s.currentAmount]));
   const totalCurrentBySubject = new Map(totalBudgets.map((s) => [s.subjectId, s.currentAmount]));
 
+  // §issue16(codex P1)科目目录按审批时点取景:之后他单新增的科目不得出现在
+  // 本单的历史文书里(其 live 金额也不得混入基线)。未生效单(草稿/待审预览)
+  // 不做裁剪,按当前目录渲染。
+  const catalogSubjects =
+    adj.status === 'APPROVED' && adj.approvedAt
+      ? subjects.filter((s) => s.createdAt <= adj.approvedAt!)
+      : subjects;
+
+  // 本单"新设科目"集合:审批时建档的科目(新数据审批回写 subjectId;历史单据按
+  // 父节点+名称解析)。其原预算恒为 0——科目因本单而生,此前无账。
+  const bornSubjectIds = new Set<string>();
+  if (adj.status === 'APPROVED' && adj.approvedAt) {
+    for (const line of adj.lines) {
+      if (line.subjectId && line.newSubjectName) {
+        bornSubjectIds.add(line.subjectId);
+        continue;
+      }
+      if (!line.subjectId && line.newSubjectName) {
+        // 历史数据:审批时未回写 subjectId,按(父节点,名称)解析到已建科目。
+        const born = subjects.find(
+          (s) =>
+            s.isLeaf &&
+            s.parentId === line.newSubjectParentId &&
+            s.name === line.newSubjectName &&
+            s.createdAt <= adj.approvedAt!,
+        );
+        if (born) bornSubjectIds.add(born.id);
+      }
+    }
+  }
+
   // 导出"原预算"须为审批前基线:库内 currentAmount 已含本单(若已生效)及所有
   // 更晚生效调整单的 delta。重建 = live − 本单 − 全部更晚生效单(同科目;年度文档
   // 仅扣同年行),否则历史文档的原值/调整后值被后续审批污染。
@@ -200,7 +231,10 @@ export async function exportAdjustmentDocx(
   };
 
   const hasChildren = (subjectId: string): boolean =>
-    subjects.some((s) => s.parentId === subjectId);
+    // 用审批时点目录判断(§issue16):之后新增的子科目不改变历史文书的品名口径。
+    catalogSubjects.some((s) => s.parentId === subjectId);
+
+  type AdjLine = (typeof adj.lines)[number];
 
   /** 单行渲染(总/年度共用);金额单位:元(D)/万元(string)。 */
   const renderRow = (args: {
@@ -209,7 +243,7 @@ export async function exportAdjustmentDocx(
     newSubjectParentId?: string | null;
     adjustYuan: D;
   }) => {
-    // 新增科目行(subjectId 为空):标题=父节点名,品名=新科目名,原预算=0。
+    // 新增科目行(subjectId 为空,草稿/待审预览):标题=父节点名,品名=新科目名,原预算=0。
     if (!args.subjectId) {
       const parent = subjectById.get(args.newSubjectParentId ?? '');
       const adjustWan = toWan(args.adjustYuan);
@@ -225,6 +259,18 @@ export async function exportAdjustmentDocx(
     const title = findSecondLevelTitle(args.subjectId);
     const titleHasChildren = title ? hasChildren(title.id) : false;
     const productName = titleHasChildren ? (leaf?.name ?? '') : '';
+
+    // 本单新设科目:原预算恒为 0(无历史文书口径可言)。
+    if (bornSubjectIds.has(args.subjectId)) {
+      const adjustWan = toWan(args.adjustYuan);
+      return {
+        subjectTitle: title?.name ?? '',
+        productName,
+        originWan: '0.00',
+        adjustedWan: adjustWan,
+        adjustWan,
+      };
+    }
 
     const originYuanRaw =
       dimension === 'total'
@@ -246,10 +292,28 @@ export async function exportAdjustmentDocx(
     };
   };
 
+  // 本单新设科目行(按明细顺序):新数据审批已回写 subjectId;历史单据按
+  // (父节点,名称)解析到 bornSubjectIds。渲染为 原值0/调整额/调整额。
+  const bornLineRows = (pickAdjust: (l: AdjLine) => D): ReturnType<typeof renderRow>[] =>
+    adj.lines
+      .map((line) => {
+        let bornId = line.subjectId && bornSubjectIds.has(line.subjectId) ? line.subjectId : null;
+        if (!bornId && !line.subjectId && line.newSubjectName && bornSubjectIds.size > 0) {
+          const born = [...bornSubjectIds].find((id) => {
+            const s = subjectById.get(id);
+            return s?.parentId === line.newSubjectParentId && s?.name === line.newSubjectName;
+          });
+          bornId = born ?? null;
+        }
+        if (!bornId) return null;
+        return renderRow({ subjectId: bornId, adjustYuan: pickAdjust(line) });
+      })
+      .filter((r): r is ReturnType<typeof renderRow> => r !== null);
+
   let rows: ReturnType<typeof renderRow>[];
   if (dimension === 'total') {
-    // §issue16 总预算维度:覆盖全部叶科目(科目表 sortOrder 顺序),未调整科目
-    // 成行为 基线/0.00/基线;新增科目行(尚无 code/sortOrder)按明细顺序追加在末尾。
+    // §issue16 总预算维度:覆盖审批时点目录内的全部叶科目(科目表 sortOrder 顺序),
+    // 未调整科目成行为 基线/0.00/基线;本单新设科目按明细顺序追加在末尾(原值 0)。
     const adjustBySubject = new Map<string, D>();
     for (const line of adj.lines) {
       if (!line.subjectId) continue;
@@ -260,36 +324,54 @@ export async function exportAdjustmentDocx(
         ),
       );
     }
+    // 历史单据(未回写 subjectId):把新设科目行的本单 delta 并入其已建科目,
+    // 供 bornLineRows 渲染调整额(目录循环不会为其成行,bornSubjectIds 已排除)。
+    if (bornSubjectIds.size > 0) {
+      for (const line of adj.lines) {
+        if (line.subjectId || !line.newSubjectName) continue;
+        const born = [...bornSubjectIds].find((id) => {
+          const s = subjectById.get(id);
+          return s?.parentId === line.newSubjectParentId && s?.name === line.newSubjectName;
+        });
+        if (born) {
+          adjustBySubject.set(
+            born,
+            (adjustBySubject.get(born) ?? fromStored('0')).plus(fromStored(line.totalAdjustment)),
+          );
+        }
+      }
+    }
     rows = [
-      ...subjects
-        .filter((s) => s.isLeaf)
+      ...catalogSubjects
+        .filter((s) => s.isLeaf && !bornSubjectIds.has(s.id))
         .map((s) =>
           renderRow({
             subjectId: s.id,
             adjustYuan: adjustBySubject.get(s.id) ?? fromStored('0'),
           }),
         ),
+      ...bornLineRows((l) => fromStored(l.totalAdjustment)),
+    ];
+  } else {
+    // 年度维度维持现状:仅调整单明细(getAdjustment 已按 id 稳定排序);
+    // 本单新设科目按科目口径渲染(原值 0),其余行原样。
+    rows = bornLineRows((l) => fromStored(l.annualAdjustment));
+    const bornLineIds = new Set(
+      adj.lines
+        .filter((l) => (l.subjectId && bornSubjectIds.has(l.subjectId)) || !l.subjectId)
+        .map((l) => l.id),
+    );
+    rows = [
+      ...rows,
       ...adj.lines
-        .filter((l) => !l.subjectId)
-        .map((l) =>
+        .filter((l) => !bornLineIds.has(l.id))
+        .map((line) =>
           renderRow({
-            subjectId: null,
-            newSubjectName: l.newSubjectName,
-            newSubjectParentId: l.newSubjectParentId,
-            adjustYuan: fromStored(l.totalAdjustment),
+            subjectId: line.subjectId,
+            adjustYuan: fromStored(line.annualAdjustment),
           }),
         ),
     ];
-  } else {
-    // 年度维度维持现状:仅调整单明细(getAdjustment 已按 id 稳定排序)。
-    rows = adj.lines.map((line) =>
-      renderRow({
-        subjectId: line.subjectId,
-        newSubjectName: line.newSubjectName,
-        newSubjectParentId: line.newSubjectParentId,
-        adjustYuan: fromStored(line.annualAdjustment),
-      }),
-    );
   }
 
   // 合计行:各行金额已是万元字符串,直接累加(不要再 toWan,否则会再除一次 10000)。
