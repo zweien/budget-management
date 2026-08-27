@@ -16,6 +16,8 @@ export interface AdjustmentPreviewTarget {
   id: string;
   year: number;
   kind?: 'ADJUST' | 'ALLOCATE';
+  /** 打开预览的初始维度(操作栏按钮各带各的);窗口内仍可切换。 */
+  dim?: 'total' | 'annual';
 }
 
 interface AdjustmentPreviewDialogProps {
@@ -56,6 +58,7 @@ export function AdjustmentPreviewDialog({
             projectId={projectId}
             adjId={adjustment.id}
             kind={adjustment.kind ?? 'ADJUST'}
+            initialDim={adjustment.dim}
           />
         )}
       </DialogContent>
