@@ -14,6 +14,9 @@ import type { User } from '@prisma/client';
 /** 导出维度。 */
 export type ExportDimension = 'total' | 'annual';
 
+/** 零元常量(合计求和初值)。 */
+const ZERO_D = fromStored('0');
+
 /** 万元换算:元 → 万元字符串(2 位小数)。 */
 function toWan(yuan: D): string {
   return yuan.div(10000).toFixed(2);
@@ -253,6 +256,8 @@ export async function exportAdjustmentDocx(
         originWan: '0.00',
         adjustedWan: adjustWan,
         adjustWan,
+        originYuan: ZERO_D,
+        adjustYuan: args.adjustYuan,
       };
     }
     const leaf = subjectById.get(args.subjectId);
@@ -269,6 +274,8 @@ export async function exportAdjustmentDocx(
         originWan: '0.00',
         adjustedWan: adjustWan,
         adjustWan,
+        originYuan: ZERO_D,
+        adjustYuan: args.adjustYuan,
       };
     }
 
@@ -289,6 +296,8 @@ export async function exportAdjustmentDocx(
       originWan,
       adjustedWan,
       adjustWan,
+      originYuan,
+      adjustYuan: args.adjustYuan,
     };
   };
 
@@ -374,12 +383,13 @@ export async function exportAdjustmentDocx(
     ];
   }
 
-  // 合计行:各行金额已是万元字符串,直接累加(不要再 toWan,否则会再除一次 10000)。
-  const sumWan = (sel: 'originWan' | 'adjustedWan' | 'adjustWan') =>
-    rows.reduce((acc, r) => acc.plus(fromStored(r[sel])), fromStored('0')).toFixed(2);
-  const totalOriginWan = sumWan('originWan');
-  const totalAdjustedWan = sumWan('adjustedWan');
-  const totalAdjustWan = sumWan('adjustWan');
+  // 合计行:对原始元值求和后一次转万元(§codex P2——逐行万元取整再累加会在
+  // 大量小额科目上放大误差,如 100 行 49 元会合计成 0.00 万)。
+  const sumYuan = (sel: 'originYuan' | 'adjustYuan') =>
+    rows.reduce((acc, r) => acc.plus(r[sel]), ZERO_D);
+  const totalOriginWan = toWan(sumYuan('originYuan'));
+  const totalAdjustWan = toWan(sumYuan('adjustYuan'));
+  const totalAdjustedWan = toWan(sumYuan('originYuan').plus(sumYuan('adjustYuan')));
 
   const researchPeriod =
     project.startDate && project.endDate
