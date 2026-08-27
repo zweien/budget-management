@@ -57,3 +57,4 @@ Thumbs.db
 
 # mimosa 安全扫描产物
 .mimosa/
+check-*.debug.mjs
