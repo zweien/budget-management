@@ -4,11 +4,15 @@ import { HTTPError, requireUser } from '@/lib/auth/session';
 import {
   deleteDraftAdjustment,
   getAdjustment,
+  getAdjustmentDetail,
   updateDraftAdjustment,
   type AdjustmentPayload,
 } from '@/server/services/adjustment.service';
 
-/** GET /api/projects/:id/adjustments/:adjId — 取单个调整单(含明细 + 锁)。 */
+/**
+ * GET /api/projects/:id/adjustments/:adjId — 取单个调整单(含明细 + 锁)。
+ * 另带 `detail`:科目行原预算/调整额/调整后金额(§issue15 审批详情,基线重建)。
+ */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; adjId: string }> },
@@ -16,8 +20,11 @@ export async function GET(
   try {
     const user = await requireUser();
     const { adjId } = await params;
-    const adjustment = await getAdjustment(adjId, user);
-    return NextResponse.json({ adjustment });
+    const [adjustment, detail] = await Promise.all([
+      getAdjustment(adjId, user),
+      getAdjustmentDetail(adjId, user),
+    ]);
+    return NextResponse.json({ adjustment, detail });
   } catch (e) {
     if (e instanceof HTTPError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
