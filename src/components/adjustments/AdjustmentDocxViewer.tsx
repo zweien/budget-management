@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Printer, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 
-// 本文件整体经外层 next/dynamic(ssr:false)引入:preset/renderer 含 Web Worker 与
-// WASM 装配逻辑,不能进入 SSR 打包求值路径。
-import FileViewer, { type FileViewerHandle } from '@file-viewer/react';
-import officePreset from '@file-viewer/preset-office';
+// 本文件整体经外层 next/dynamic(ssr:false)引入,ViewerCanvas(file-viewer 装配)
+// 因此也不会进入 SSR 打包求值路径。
+import { ViewerCanvas, type ViewerCanvasProps } from '@/components/file-viewer/ViewerCanvas';
+import type { FileViewerHandle } from '@file-viewer/react';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -90,12 +90,10 @@ export default function AdjustmentDocxViewer({
   // 渲染期派生:请求中/已切维度但新文档未到/上次失败后的重试中,均视为加载中。
   const pending = !!error || !loaded || loaded.dim !== dim || loaded.attempt !== attempt;
 
-  const options = useMemo(
+  // 独占注册表:审批表预览只需要 docx,preset-office + replace 起步最干净。
+  const viewerOptions = useMemo<ViewerCanvasProps['viewerOptions']>(
     () => ({
-      preset: officePreset,
-      // 非 Vite 项目显式注入 preset 后从空注册表起步,避免内建基线重复装配。
       rendererMode: 'replace' as const,
-      theme: 'light' as const,
       // 页式预览贴合"审批表"纸质排版观感。
       docx: { visualPagination: true },
     }),
@@ -171,24 +169,16 @@ export default function AdjustmentDocxViewer({
           </div>
         ) : (
           <>
-            {!docReady && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/60">
-                <Loader2 className="size-6 animate-spin text-mute" />
-                <p className="text-sm text-mute">渲染中…</p>
-              </div>
-            )}
             {/* key 随维度/重试变化而重挂载,确保 Worker 状态与当前文档一一对应。
-                注意:不可传 type(MIME)——core 取扩展名时 type 优先于 filename,
-                MIME 串会被误当扩展名导致"格式不支持"兜底;格式识别只靠 filename 后缀。 */}
-            <FileViewer
+                渲染中遮罩与错误上浮由 ViewerCanvas 内部处理。 */}
+            <ViewerCanvas
               key={requestId}
               ref={viewerRef}
               buffer={loaded.buf}
               filename={filename}
-              options={options}
-              onEvent={(e) => {
-                if (e.type === 'load-complete') setReadyId(requestId);
-              }}
+              viewerOptions={viewerOptions}
+              onReady={() => setReadyId(requestId)}
+              onError={setError}
               className="h-full w-full"
             />
           </>
