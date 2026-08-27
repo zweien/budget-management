@@ -602,11 +602,11 @@ export async function getAdjustmentDetail(
         bornSubjectIds.add(l.subjectId);
         continue;
       }
+      // 不加 createdAt 截断:approvedAt 取自事务前时钟,科目 createdAt 是事务内
+      // DB 时钟,必然晚于 approvedAt,截断会恰好排除目标科目。(父节点,名称)
+      // 在同父下唯一(validateNewSubject 保证),匹配安全。
       const born = subjects.find(
-        (s) =>
-          s.parentId === l.newSubjectParentId &&
-          s.name === l.newSubjectName &&
-          s.createdAt <= adj.approvedAt!,
+        (s) => s.parentId === l.newSubjectParentId && s.name === l.newSubjectName,
       );
       if (born) bornSubjectIds.add(born.id);
     }
