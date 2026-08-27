@@ -29,6 +29,8 @@ interface AdjustmentDocxViewerProps {
   adjId: string;
   /** 调整单类型:ALLOCATE(追加下达)只有年度维度文档。 */
   kind: 'ADJUST' | 'ALLOCATE';
+  /** 初始维度(操作栏哪个按钮点开的);缺省取该单可用维度的第一个。 */
+  initialDim?: Dimension;
   className?: string;
 }
 
@@ -47,13 +49,14 @@ export default function AdjustmentDocxViewer({
   projectId,
   adjId,
   kind,
+  initialDim,
   className,
 }: AdjustmentDocxViewerProps) {
   // ALLOCATE 单的 total 维度行金额恒为 0,无文书意义——与列表页"导出总预算"
   // 按钮的可见性规则(kind !== 'ALLOCATE')保持一致。
   const dims: Dimension[] = kind === 'ALLOCATE' ? ['annual'] : ['total', 'annual'];
 
-  const [dim, setDim] = useState<Dimension>(dims[0]);
+  const [dim, setDim] = useState<Dimension>(initialDim ?? dims[0]);
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<LoadedDoc | null>(null);
   const [error, setError] = useState<string | null>(null);
