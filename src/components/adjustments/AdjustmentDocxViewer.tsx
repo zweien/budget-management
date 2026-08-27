@@ -143,7 +143,12 @@ export default function AdjustmentDocxViewer({
             <Printer className="size-4" />
             打印
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void handleDownload()}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!docReady}
+            onClick={() => void handleDownload()}
+          >
             <Download className="size-4" />
             下载
           </Button>
@@ -188,6 +193,13 @@ export default function AdjustmentDocxViewer({
               options={options}
               onEvent={(e) => {
                 if (e.type === 'load-complete') setReadyId(requestId);
+              }}
+              // 渲染器自身失败(Worker/WASM 资产缺失、文档解析失败等):进入可重试
+              // 错误态,避免"渲染中"遮罩永不消失。
+              onStateChange={(state) => {
+                if (state.error && !error) {
+                  setError(state.error instanceof Error ? state.error.message : '文档渲染失败');
+                }
               }}
               className="h-full w-full"
             />
