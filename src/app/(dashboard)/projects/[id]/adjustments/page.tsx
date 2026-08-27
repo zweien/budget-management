@@ -3,8 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Eye, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+
+import {
+  AdjustmentPreviewDialog,
+  type AdjustmentPreviewTarget,
+} from '@/components/adjustments/AdjustmentPreviewDialog';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
@@ -216,6 +221,8 @@ export default function AdjustmentsPage() {
 
   // 只读明细 Sheet。
   const [detailTarget, setDetailTarget] = useState<AdjustmentRow | null>(null);
+  /** 在线预览目标(§issue17):与明细同构取整行,viewer 只用其中最小字段。 */
+  const [previewTarget, setPreviewTarget] = useState<AdjustmentPreviewTarget | null>(null);
   // 删除确认。
   const [deleteTarget, setDeleteTarget] = useState<AdjustmentRow | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1314,6 +1321,18 @@ export default function AdjustmentsPage() {
                       <Button variant="ghost" size="sm" onClick={() => setDetailTarget(row)}>
                         明细
                       </Button>
+                      {row.lines.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setPreviewTarget({ id: row.id, year: row.year, kind: row.kind })
+                          }
+                        >
+                          <Eye className="size-4" />
+                          预览
+                        </Button>
+                      )}
                       {row.kind !== 'ALLOCATE' && (
                         <Button
                           variant="ghost"
@@ -1363,6 +1382,14 @@ export default function AdjustmentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 在线预览(§issue17):docx 按模板实时生成,viewer 内可切维度/打印/下载 */}
+      <AdjustmentPreviewDialog
+        open={!!previewTarget}
+        onOpenChange={(o) => !o && setPreviewTarget(null)}
+        projectId={projectId}
+        adjustment={previewTarget}
+      />
 
       {/* 只读明细 Sheet */}
       <Sheet open={!!detailTarget} onOpenChange={(open) => !open && setDetailTarget(null)}>

@@ -110,20 +110,15 @@ export function bootstrapMockUser(): Promise<string | null> {
 export type ApiFetchOptions = RequestInit;
 
 /**
- * 下载文件(xlsx 等二进制响应,§10.5 导出场景)。
+ * 拉取二进制文件(预览场景:§issue17 调整单 docx 在线预览)。
  *
- * 与 `apiFetch` 的差异:响应是二进制 blob(非 JSON),因此不能走 apiFetch 的
- * JSON 解析路径。这里仍以同样的方式注入 `x-mock-user-id` header(服务端鉴权
- * 需要),拿到 blob 后用 `URL.createObjectURL` + 临时 `<a>` 触发浏览器下载。
- *
- * - filename:浏览器下载文件名(若服务端未给或调用方需自定义时使用)。
- * - 非 OK 响应:尝试读 JSON body 的 error 字段,否则抛通用错误。
- *
- * 仅在浏览器环境可用(SSR 无 window 时直接抛错,调用方不应在 SSR 调用)。
+ * 与 `downloadFile` 同一套鉴权注入与错误规范化(x-mock-user-id header、
+ * SSO 401 跳登录、JSON error 字段提取),但不触发浏览器下载,
+ * 返回 blob 与服务端 Content-Disposition 文件名(可能为 null)。
  */
-export async function downloadFile(path: string, filename: string): Promise<void> {
+export async function fetchFile(path: string): Promise<FetchedFile> {
   if (typeof window === 'undefined') {
-    throw new Error('downloadFile 仅在浏览器环境可用');
+    throw new Error('fetchFile 仅在浏览器环境可用');
   }
   const mockUserId = await bootstrapMockUser();
   const headers = new Headers({ Accept: 'application/octet-stream' });
@@ -153,9 +148,32 @@ export async function downloadFile(path: string, filename: string): Promise<void
   }
 
   const blob = await res.blob();
+  return {
+    blob,
+    filename: parseFilenameFromDisposition(res.headers.get('Content-Disposition')),
+  };
+}
+
+/** fetchFile 的返回:原始 blob + 服务端建议文件名(Content-Disposition 解析)。 */
+export interface FetchedFile {
+  blob: Blob;
+  filename: string | null;
+}
+
+/**
+ * 下载文件(xlsx 等二进制响应,§10.5 导出场景)。
+ *
+ * 复用 `fetchFile` 完成取数与鉴权,拿到 blob 后用
+ * `URL.createObjectURL` + 临时 `<a>` 触发浏览器下载。
+ *
+ * - filename:浏览器下载文件名(若服务端未给或调用方需自定义时使用)。
+ *
+ * 仅在浏览器环境可用(SSR 无 window 时直接抛错,调用方不应在 SSR 调用)。
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const { blob, filename: serverName } = await fetchFile(path);
   // 优先用响应头 Content-Disposition 里的文件名,回退到调用方传入的 filename。
-  const finalName =
-    parseFilenameFromDisposition(res.headers.get('Content-Disposition')) ?? filename;
+  const finalName = serverName ?? filename;
   const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement('a');
