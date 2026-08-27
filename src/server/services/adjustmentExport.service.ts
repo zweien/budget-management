@@ -86,32 +86,30 @@ export async function exportAdjustmentDocx(
     throw new HTTPError(404, '项目不存在');
   }
 
-  // §issue12 读取兜底:汇总行与科目层漂移时拒绝生成文书,避免带病审批表。
-  // 恒等口径:project_budgets.current = Σ 科目总预算;annual_budgets.current = Σ 当年科目年度预算。
+  // §issue12 读取兜底:汇总行账本自洽校验,防止带病文书。
+  // 只校验恒等式 current = initial + adjustment——Σ科目 ≤ 总盘的未分配余额是
+  // 编制期合法状态(validatePayload 仅要求 ≤),不做父子等值比较(会误杀合法池)。
+  // 历史脏数据(姚雯案:initial/adjustment/current = 50/25/50 万)恰以破恒等式为特征。
   const TOLERANCE = fromStored('0.01'); // 分位容差,吸收历史 Decimal 尾差。
-  const stbSum = totalBudgets.reduce(
-    (acc, t) => acc.plus(fromStored(t.currentAmount)),
-    fromStored('0'),
-  );
   if (projectBudget) {
-    const pbCurrent = fromStored(projectBudget.currentAmount);
-    if (pbCurrent.minus(stbSum).abs().gt(TOLERANCE)) {
+    const pbI = fromStored(projectBudget.initialAmount);
+    const pbA = fromStored(projectBudget.adjustmentAmount);
+    const pbC = fromStored(projectBudget.currentAmount);
+    if (pbC.minus(pbI).minus(pbA).abs().gt(TOLERANCE)) {
       throw new HTTPError(
         422,
-        `汇总数据漂移,拒绝导出:项目总预算 current(${pbCurrent.toFixed(2)}) ≠ 科目总预算合计(${stbSum.toFixed(2)})。请先用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
+        `汇总数据漂移,拒绝导出:项目总预算 current(${pbC.toFixed(2)}) ≠ initial(${pbI.toFixed(2)}) + adjustment(${pbA.toFixed(2)})。请用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
       );
     }
   }
-  const sbYearSum = annualBudgets.reduce(
-    (acc, s) => acc.plus(fromStored(s.currentAmount)),
-    fromStored('0'),
-  );
   if (annualBudgetRow) {
-    const abCurrent = fromStored(annualBudgetRow.currentAmount);
-    if (abCurrent.minus(sbYearSum).abs().gt(TOLERANCE)) {
+    const abI = fromStored(annualBudgetRow.initialAmount);
+    const abA = fromStored(annualBudgetRow.adjustmentAmount);
+    const abC = fromStored(annualBudgetRow.currentAmount);
+    if (abC.minus(abI).minus(abA).abs().gt(TOLERANCE)) {
       throw new HTTPError(
         422,
-        `汇总数据漂移,拒绝导出:年度预算(${adj.year}) current(${abCurrent.toFixed(2)}) ≠ 科目年度预算合计(${sbYearSum.toFixed(2)})。请先用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
+        `汇总数据漂移,拒绝导出:年度预算(${adj.year}) current(${abC.toFixed(2)}) ≠ initial(${abI.toFixed(2)}) + adjustment(${abA.toFixed(2)})。请用 scripts/recalc-summary-budgets.ts 修复存量数据。`,
       );
     }
   }

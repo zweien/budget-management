@@ -731,14 +731,14 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     const buf = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
     expect(buf.length).toBeGreaterThan(0);
 
-    // 人为污染 project_budgets.current(模拟历史脏数据)→ 拒绝导出。
+    // 人为污染 project_budgets.current(破坏恒等式,模拟历史脏数据)→ 拒绝导出。
     await prisma.projectBudget.update({
       where: { projectId: project.id },
       data: { currentAmount: '500000.00' },
     });
     const err = await expectHTTP(() => exportAdjustmentDocx(adj.id, 'annual', adminUser()), 422);
     expect(err.message).toContain('汇总数据漂移');
-    expect(err.message).toContain('科目总预算合计');
+    expect(err.message).toContain('initial(');
 
     // 年度维度漂移同样拦截。
     await prisma.projectBudget.update({
@@ -759,6 +759,15 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     });
     const buf2 = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
     expect(buf2.length).toBeGreaterThan(0);
+
+    // 合法未分配池不受拦截:恒等式自洽(1500=1500+0)且 current > Σ科目总预算
+    // (编制仅要求 Σ科目 ≤ 总盘,差额是合法池,不得误判为漂移)。
+    await prisma.projectBudget.update({
+      where: { projectId: project.id },
+      data: { initialAmount: '1500.00', currentAmount: '1500.00' },
+    });
+    const buf3 = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
+    expect(buf3.length).toBeGreaterThan(0);
   });
 
   it('恒等式防线:追加审批后各层满足 current = initial + adjustment', async () => {
