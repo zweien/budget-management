@@ -56,7 +56,7 @@ export interface AdjustmentPayload {
 
 /** 调整单 + 明细 + 锁的展开类型(getAdjustment / listAdjustments 返回)。 */
 export type AdjustmentWithRelations = Prisma.BudgetAdjustmentGetPayload<{
-  include: { lines: true; locks: true };
+  include: { lines: { orderBy: { id: 'asc' } }; locks: true };
 }>;
 
 /** 把 BudgetAdjustment 行序列化为快照对象(用于审计)。 */
@@ -496,7 +496,7 @@ export async function listAdjustments(
   await requirePermission(user, 'project:view', projectId);
   return prisma.budgetAdjustment.findMany({
     where: { projectId },
-    include: { lines: true, locks: true },
+    include: { lines: { orderBy: { id: 'asc' } }, locks: true },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -508,7 +508,7 @@ export async function getAdjustment(
 ): Promise<AdjustmentWithRelations> {
   const adj = await prisma.budgetAdjustment.findUnique({
     where: { id: adjId },
-    include: { lines: true, locks: true },
+    include: { lines: { orderBy: { id: 'asc' } }, locks: true },
   });
   if (!adj) {
     throw new HTTPError(404, '调整单不存在');

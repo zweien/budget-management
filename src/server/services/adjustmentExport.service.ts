@@ -202,39 +202,39 @@ export async function exportAdjustmentDocx(
   const hasChildren = (subjectId: string): boolean =>
     subjects.some((s) => s.parentId === subjectId);
 
-  const rows = adj.lines.map((line) => {
+  /** 单行渲染(总/年度共用);金额单位:元(D)/万元(string)。 */
+  const renderRow = (args: {
+    subjectId: string | null;
+    newSubjectName?: string | null;
+    newSubjectParentId?: string | null;
+    adjustYuan: D;
+  }) => {
     // 新增科目行(subjectId 为空):标题=父节点名,品名=新科目名,原预算=0。
-    if (!line.subjectId) {
-      const parent = subjectById.get(line.newSubjectParentId ?? '');
-      const adjustYuan =
-        dimension === 'total'
-          ? fromStored(line.totalAdjustment)
-          : fromStored(line.annualAdjustment);
-      const adjustWan = toWan(adjustYuan);
+    if (!args.subjectId) {
+      const parent = subjectById.get(args.newSubjectParentId ?? '');
+      const adjustWan = toWan(args.adjustYuan);
       return {
         subjectTitle: parent?.name ?? '',
-        productName: line.newSubjectName ?? '',
+        productName: args.newSubjectName ?? '',
         originWan: '0.00',
         adjustedWan: adjustWan,
         adjustWan,
       };
     }
-    const leaf = subjectById.get(line.subjectId);
-    const title = findSecondLevelTitle(line.subjectId);
+    const leaf = subjectById.get(args.subjectId);
+    const title = findSecondLevelTitle(args.subjectId);
     const titleHasChildren = title ? hasChildren(title.id) : false;
     const productName = titleHasChildren ? (leaf?.name ?? '') : '';
 
     const originYuanRaw =
       dimension === 'total'
-        ? (totalCurrentBySubject.get(line.subjectId) ?? fromStored('0'))
-        : (annualCurrentBySubject.get(line.subjectId) ?? fromStored('0'));
+        ? (totalCurrentBySubject.get(args.subjectId) ?? fromStored('0'))
+        : (annualCurrentBySubject.get(args.subjectId) ?? fromStored('0'));
     const originYuan =
       originYuanRaw instanceof D ? originYuanRaw : fromStored(String(originYuanRaw));
     const originWan = toWan(originYuan);
 
-    const adjustYuan =
-      dimension === 'total' ? fromStored(line.totalAdjustment) : fromStored(line.annualAdjustment);
-    const adjustWan = toWan(adjustYuan);
+    const adjustWan = toWan(args.adjustYuan);
     const adjustedWan = fromStored(originWan).plus(fromStored(adjustWan)).toFixed(2);
 
     return {
@@ -244,7 +244,53 @@ export async function exportAdjustmentDocx(
       adjustedWan,
       adjustWan,
     };
-  });
+  };
+
+  let rows: ReturnType<typeof renderRow>[];
+  if (dimension === 'total') {
+    // §issue16 总预算维度:覆盖全部叶科目(科目表 sortOrder 顺序),未调整科目
+    // 成行为 基线/0.00/基线;新增科目行(尚无 code/sortOrder)按明细顺序追加在末尾。
+    const adjustBySubject = new Map<string, D>();
+    for (const line of adj.lines) {
+      if (!line.subjectId) continue;
+      adjustBySubject.set(
+        line.subjectId,
+        (adjustBySubject.get(line.subjectId) ?? fromStored('0')).plus(
+          fromStored(line.totalAdjustment),
+        ),
+      );
+    }
+    rows = [
+      ...subjects
+        .filter((s) => s.isLeaf)
+        .map((s) =>
+          renderRow({
+            subjectId: s.id,
+            adjustYuan: adjustBySubject.get(s.id) ?? fromStored('0'),
+          }),
+        ),
+      ...adj.lines
+        .filter((l) => !l.subjectId)
+        .map((l) =>
+          renderRow({
+            subjectId: null,
+            newSubjectName: l.newSubjectName,
+            newSubjectParentId: l.newSubjectParentId,
+            adjustYuan: fromStored(l.totalAdjustment),
+          }),
+        ),
+    ];
+  } else {
+    // 年度维度维持现状:仅调整单明细(getAdjustment 已按 id 稳定排序)。
+    rows = adj.lines.map((line) =>
+      renderRow({
+        subjectId: line.subjectId,
+        newSubjectName: line.newSubjectName,
+        newSubjectParentId: line.newSubjectParentId,
+        adjustYuan: fromStored(line.annualAdjustment),
+      }),
+    );
+  }
 
   // 合计行:各行金额已是万元字符串,直接累加(不要再 toWan,否则会再除一次 10000)。
   const sumWan = (sel: 'originWan' | 'adjustedWan' | 'adjustWan') =>
