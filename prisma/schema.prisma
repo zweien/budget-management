@@ -1,5 +1,8 @@
 generator client {
   provider = "prisma-client-js"
+  // 本机(native)+ Docker node:20-alpine(musl/openssl3)双目标:
+  // alpine 上自动探测会误下 openssl1.1 引擎导致运行期加载失败,显式钉死。
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
