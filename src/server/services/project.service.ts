@@ -112,12 +112,32 @@ export async function createProject(
  * v0.3.0 起普通用户全局只读 → 所有登录用户看到全部(未归档)项目;
  * 编辑权不在此处区分(由 canEditProject / requirePermission 在编辑动作上拦截)。
  */
-export async function listProjects(user: { id: string; role: User['role'] }): Promise<Project[]> {
-  void user; // 签名保持兼容;查看范围已与角色无关。
-  return prisma.project.findMany({
-    where: { archivedAt: null },
+export async function listProjects(
+  user: { id: string; role: User['role'] },
+  opts: { includeArchived?: boolean } = {},
+): Promise<(Project & { canEdit: boolean })[]> {
+  const projects = await prisma.project.findMany({
+    where: opts.includeArchived ? undefined : { archivedAt: null },
     orderBy: { createdAt: 'desc' },
+    // 负责人展示取当前 OWNER 成员(§codex P2):成员管理可降级/移除原负责人,
+    // Project.ownerId 不会随之回写,按 ownerId 展示会与实际编辑权漂移。
+    include: {
+      members: {
+        where: { memberRole: 'OWNER' },
+        select: { user: { select: { id: true, name: true } } },
+      },
+    },
   });
+  // canEdit 随行下发(项目管理页编辑/归档按钮的行级门控):ADMIN 恒可,否则需 OWNER。
+  if (user.role === 'ADMIN') {
+    return projects.map((p) => ({ ...p, canEdit: true }));
+  }
+  const owned = await prisma.projectMember.findMany({
+    where: { userId: user.id, memberRole: 'OWNER' },
+    select: { projectId: true },
+  });
+  const ownedIds = new Set(owned.map((m) => m.projectId));
+  return projects.map((p) => ({ ...p, canEdit: ownedIds.has(p.id) }));
 }
 
 /** 项目 + 当前用户权限标记(统一录入页的数据源)。 */
@@ -168,7 +188,15 @@ export async function getProject(
   user: { id: string; role: User['role'] },
 ): Promise<Project & { canEdit: boolean; canWriteRecords: boolean }> {
   await requirePermission(user, 'project:view', id);
-  const project = await prisma.project.findUnique({ where: { id } });
+  const project = await prisma.project.findUnique({
+    where: { id },
+    include: {
+      members: {
+        where: { memberRole: 'OWNER' },
+        select: { user: { select: { id: true, name: true } } },
+      },
+    },
+  });
   if (!project) throw new HTTPError(404, '项目不存在');
   // 编辑权随详情下发,供前端门控:
   // canEdit=预算/项目维护(OWNER);canWriteRecords=业务记录录入(OWNER/HANDLER)。
@@ -176,7 +204,8 @@ export async function getProject(
     canEditProject(user, id),
     canWriteRecordsFn(user, id),
   ]);
-  return { ...project, canEdit, canWriteRecords };
+  // 归档项目只读:录入类写按钮全部隐藏(服务端 requirePermission 另有 409 兜底)。
+  return { ...project, canEdit, canWriteRecords: canWriteRecords && !project.archivedAt };
 }
 
 /** 更新项目:权限校验后更新可改字段并审计。 */
@@ -188,6 +217,10 @@ export async function updateProject(
   await requirePermission(user, 'project:edit', id);
   const before = await prisma.project.findUnique({ where: { id } });
   if (!before) throw new HTTPError(404, '项目不存在');
+  // 已归档项目不可编辑(§codex P2):归档=只读快照,须先恢复。
+  if (before.archivedAt) {
+    throw new HTTPError(409, '项目已归档,请先恢复后再编辑');
+  }
 
   const data: Prisma.ProjectUpdateInput = {};
   if (input.name !== undefined) data.name = input.name;
@@ -206,16 +239,52 @@ export async function updateProject(
       objectId: id,
       action: 'update',
       operatorId: user.id,
+      // 快照覆盖全部可编辑字段(§codex P2):否则只改承担单位/日期时日志看不出变化。
       before: {
         name: before.name,
         level: before.level,
+        projectType: before.projectType,
+        undertakingUnit: before.undertakingUnit,
+        startDate: before.startDate,
+        endDate: before.endDate,
         remark: before.remark,
       },
       after: {
         name: after.name,
         level: after.level,
+        projectType: after.projectType,
+        undertakingUnit: after.undertakingUnit,
+        startDate: after.startDate,
+        endDate: after.endDate,
         remark: after.remark,
       },
+    });
+    return after;
+  });
+}
+
+/** 恢复归档项目:清 archivedAt,审计(§issue 项目管理:误归档自助恢复)。 */
+export async function unarchiveProject(
+  id: string,
+  user: { id: string; role: User['role'] },
+): Promise<Project> {
+  await requirePermission(user, 'project:edit', id);
+  const before = await prisma.project.findUnique({ where: { id } });
+  if (!before) throw new HTTPError(404, '项目不存在');
+
+  return prisma.$transaction(async (tx) => {
+    const after = await tx.project.update({
+      where: { id },
+      data: { archivedAt: null },
+    });
+    await recordAudit(tx, {
+      projectId: id,
+      objectType: 'project',
+      objectId: id,
+      action: 'unarchive',
+      operatorId: user.id,
+      before: { archivedAt: before.archivedAt },
+      after: { archivedAt: after.archivedAt },
     });
     return after;
   });

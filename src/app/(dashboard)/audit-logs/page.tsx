@@ -95,6 +95,7 @@ const ACTION_OPTIONS: { value: string; label: string }[] = [
   { value: 'reject', label: '驳回' },
   { value: 'withdraw', label: '撤回' },
   { value: 'archive', label: '归档' },
+  { value: 'unarchive', label: '恢复归档' },
   { value: 'void', label: '作废' },
   { value: 'status_switch', label: '状态切换' },
   { value: 'import', label: '导入' },

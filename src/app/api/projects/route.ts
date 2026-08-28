@@ -4,10 +4,12 @@ import { requireUser, HTTPError } from '@/lib/auth/session';
 import { createProject, listProjects } from '@/server/services/project.service';
 
 /** GET /api/projects — 列出全部项目(v0.3.0 起普通用户全局只读)。 */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await requireUser();
-    const projects = await listProjects(user);
+    // includeArchived=1:含已归档项目(项目管理页「显示已归档」开关)。
+    const includeArchived = new URL(req.url).searchParams.get('includeArchived') === '1';
+    const projects = await listProjects(user, { includeArchived });
     return NextResponse.json(projects);
   } catch (e) {
     if (e instanceof HTTPError) {

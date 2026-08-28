@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { FolderSearch } from 'lucide-react';
+import { FolderSearch, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
@@ -21,6 +21,10 @@ import {
 } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/layout/empty-state';
 import { MembersCard } from '@/components/projects/members-card';
+import {
+  ProjectFormDialog,
+  type ProjectFormTarget,
+} from '@/components/projects/project-form-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -30,10 +34,15 @@ interface ProjectDetail {
   code: string;
   name: string;
   level: string | null;
+  projectType: string | null;
+  undertakingUnit: string | null;
   startDate: string | null;
   endDate: string | null;
   ownerId: string;
+  /** 项目负责人 = 当前 OWNER 成员(与列表页同口径)。 */
+  members: { user: { id: string; name: string } }[];
   remark: string | null;
+  archivedAt: string | null;
   createdAt: string;
   /** 服务端随详情下发:当前用户是否可编辑该项目(ADMIN 或 OWNER 成员)。 */
   canEdit: boolean;
@@ -113,6 +122,10 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
+  // 编辑项目信息弹窗(§项目管理);保存后 bump 版本触发详情重拉。
+  const [editOpen, setEditOpen] = useState(false);
+  const [detailVersion, setDetailVersion] = useState(0);
+
   // §8.7 跨年结转 Dialog。
   const [carryoverOpen, setCarryoverOpen] = useState(false);
   const [carryoverSubmitting, setCarryoverSubmitting] = useState(false);
@@ -152,7 +165,7 @@ export default function ProjectDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, detailVersion]);
 
   if (loading) {
     return (
@@ -219,17 +232,24 @@ export default function ProjectDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold tracking-[-0.3px]">项目信息</h2>
-        {project.canEdit ? (
-          <Button
-            variant="outline"
-            onClick={() => {
-              setCarryoverResult(null);
-              setCarryoverError(null);
-              setCarryoverOpen(true);
-            }}
-          >
-            跨年结转
-          </Button>
+        {project.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
+        {project.canEdit && !project.archivedAt ? (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil className="size-4" />
+              编辑项目信息
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCarryoverResult(null);
+                setCarryoverError(null);
+                setCarryoverOpen(true);
+              }}
+            >
+              跨年结转
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -239,6 +259,9 @@ export default function ProjectDetailPage() {
           <span className="font-mono text-[13px]">{project.code}</span>
         </DescCell>
         <DescCell label="项目名称">{project.name}</DescCell>
+        <DescCell label="项目负责人">
+          {project.members?.length ? project.members.map((m) => m.user.name).join('/') : '—'}
+        </DescCell>
         <DescCell label="级别">{project.level ?? '—'}</DescCell>
         <DescCell label="起止时间">
           <span className="tabular-nums">
@@ -265,7 +288,12 @@ export default function ProjectDetailPage() {
       </dl>
 
       {/* 成员管理:仅管理员可见(服务端 member:manage 二次拦截)。 */}
-      {me?.role === 'ADMIN' ? <MembersCard projectId={project.id} /> : null}
+      {me?.role === 'ADMIN' ? (
+        <MembersCard
+          projectId={project.id}
+          onMembersChanged={() => setDetailVersion((v) => v + 1)}
+        />
+      ) : null}
 
       {isEffective ? (
         <Alert variant="success">
@@ -346,6 +374,18 @@ export default function ProjectDetailPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* 编辑项目信息弹窗(§项目管理):与列表页共用同一组件 */}
+      {project ? (
+        <ProjectFormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          editing={project as ProjectFormTarget}
+          me={me}
+          userOptions={[]}
+          onSaved={() => setDetailVersion((v) => v + 1)}
+        />
+      ) : null}
     </div>
   );
 }

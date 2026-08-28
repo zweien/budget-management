@@ -3,7 +3,15 @@ import { UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
-import { createProject, listProjects, getProject } from '@/server/services/project.service';
+import {
+  archiveProject,
+  createProject,
+  listProjects,
+  getProject,
+  unarchiveProject,
+  updateProject,
+} from '@/server/services/project.service';
+import { requirePermission } from '@/lib/auth/permissions';
 
 // 集成测试直连真实 PG(:5434)。createProject 在事务内建 project + budget + member,
 // 需级联清理;ProjectBudget / ProjectMember 无独立查询入口,通过 projectId 一并清。
@@ -145,6 +153,199 @@ describe('project.service (integration, real PG)', () => {
       createProject({ code, name: 'forbidden' }, { id: outsiderId, role: UserRole.USER }),
     ).rejects.toMatchObject({ status: 403 });
     expect.assertions(1);
+  });
+
+  it('§项目管理:updateProject 改可改字段;code 不可改;canEdit 随行下发', async () => {
+    const code = `UPD-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'before', level: '校级' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    const after = await updateProject(
+      project.id,
+      { name: 'after', level: '国家级', remark: 'updated' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    expect(after.name).toBe('after');
+    expect(after.level).toBe('国家级');
+    expect(after.code).toBe(code); // 编号不可改
+
+    // 审计:update。
+    const audit = await prisma.auditLog.findFirst({
+      where: { objectId: project.id, action: 'update' },
+    });
+    expect(audit).not.toBeNull();
+
+    // 列表行带 canEdit:ADMIN 恒 true;非 OWNER 普通用户 false。
+    const adminList = await listProjects({ id: adminId, role: UserRole.ADMIN });
+    expect(adminList.find((p) => p.id === project.id)?.canEdit).toBe(true);
+    const outsiderList = await listProjects({ id: outsiderId, role: UserRole.USER });
+    expect(outsiderList.find((p) => p.id === project.id)?.canEdit).toBe(false);
+  });
+
+  it('§项目管理:归档后默认列表隐藏,includeArchived 可见,恢复后回归默认列表', async () => {
+    const code = `ARC-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'archive me' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    // 归档。
+    const archived = await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    expect(archived.archivedAt).not.toBeNull();
+
+    // 默认列表不含;includeArchived 含(带 archivedAt)。
+    const visible = await listProjects({ id: adminId, role: UserRole.ADMIN });
+    expect(visible.map((p) => p.id)).not.toContain(project.id);
+    const withArchived = await listProjects(
+      { id: adminId, role: UserRole.ADMIN },
+      {
+        includeArchived: true,
+      },
+    );
+    const row = withArchived.find((p) => p.id === project.id);
+    expect(row).toBeDefined();
+    expect(row!.archivedAt).not.toBeNull();
+
+    // 审计:archive。
+    const archiveAudit = await prisma.auditLog.findFirst({
+      where: { objectId: project.id, action: 'archive' },
+    });
+    expect(archiveAudit).not.toBeNull();
+
+    // 恢复。
+    const restored = await unarchiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    expect(restored.archivedAt).toBeNull();
+    const visibleAgain = await listProjects({ id: adminId, role: UserRole.ADMIN });
+    expect(visibleAgain.map((p) => p.id)).toContain(project.id);
+    const unarchiveAudit = await prisma.auditLog.findFirst({
+      where: { objectId: project.id, action: 'unarchive' },
+    });
+    expect(unarchiveAudit).not.toBeNull();
+  });
+
+  it('§codex P2:归档项目拒绝编辑(409),恢复后可编辑', async () => {
+    const code = `ARCDENY-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'archived edit deny' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    await expect(
+      updateProject(project.id, { name: 'x' }, { id: adminId, role: UserRole.ADMIN }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    await unarchiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    const after = await updateProject(
+      project.id,
+      { name: 'editable again' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    expect(after.name).toBe('editable again');
+  });
+
+  it('§codex P1:归档项目拦截一切写动作(豁免 project:edit/member:manage)', async () => {
+    const code = `FROZEN-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'frozen writes' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+
+    const admin = { id: adminId, role: UserRole.ADMIN };
+    // 写动作 → 409。
+    await expect(requirePermission(admin, 'record:create', project.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(requirePermission(admin, 'budget:adjust', project.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(requirePermission(admin, 'budget:approve', project.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    // 豁免动作 → 通过(不抛)。
+    await expect(requirePermission(admin, 'project:view', project.id)).resolves.toBeUndefined();
+    await expect(requirePermission(admin, 'project:edit', project.id)).resolves.toBeUndefined();
+    await expect(requirePermission(admin, 'member:manage', project.id)).resolves.toBeUndefined();
+
+    // 恢复后写动作放行。
+    await unarchiveProject(project.id, admin);
+    await expect(requirePermission(admin, 'record:create', project.id)).resolves.toBeUndefined();
+  });
+
+  it('§codex P1:归档项目详情 canWriteRecords 下发 false(shell 隐藏写按钮)', async () => {
+    const code = `RODETAIL-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'readonly detail' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    const before = await getProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    expect(before.canWriteRecords).toBe(true);
+
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    const after = await getProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    expect(after.archivedAt).not.toBeNull();
+    expect(after.canWriteRecords).toBe(false);
+    expect(after.canEdit).toBe(true); // canEdit 保持,恢复操作仍可达
+  });
+
+  it('§codex P2:审计快照覆盖承担单位/起止时间等全部可编辑字段', async () => {
+    const code = `AUD-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'audit fields' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    await updateProject(
+      project.id,
+      {
+        undertakingUnit: '新单位',
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2027-01-01'),
+      },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { objectId: project.id, action: 'update' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect(audit).not.toBeNull();
+    const beforeData = (audit!.beforeData ?? {}) as Record<string, unknown>;
+    const afterData = (audit!.afterData ?? {}) as Record<string, unknown>;
+    // before 里承担单位为空、after 有值——快照能体现变化。
+    expect(beforeData['undertakingUnit']).toBeNull();
+    expect(afterData['undertakingUnit']).toBe('新单位');
+    expect(afterData['startDate']).not.toBeNull();
+  });
+
+  it('§项目管理:普通用户(非 OWNER)归档/恢复/更新均 403', async () => {
+    const code = `DENY-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'deny me' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    await expect(
+      updateProject(project.id, { name: 'x' }, { id: outsiderId, role: UserRole.USER }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      archiveProject(project.id, { id: outsiderId, role: UserRole.USER }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      unarchiveProject(project.id, { id: outsiderId, role: UserRole.USER }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect.assertions(3);
   });
 
   it('getProject: 有权限(admin)可正常取回', async () => {
