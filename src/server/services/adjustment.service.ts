@@ -185,6 +185,70 @@ function validateAndParseLines(payload: AdjustmentPayload): ParsedLine[] {
 }
 
 /**
+ * §总维度调减护栏:现有科目的总预算调整后不得为负
+ * (用户反馈:外部协作费总经费被调成 -200——年度维度有可调额度护栏,总维度此前缺失)。
+ *
+ * 投影 = live 科目总预算 + 其他 PENDING 单的同科目净调减(保守:仅计调减侧,
+ * 不计未审批的调增)+ 本单该科目 delta;投影 < 0 → 422。
+ * 提交与审批两处都调:提交时拦截明显超调,审批时兜底并发(两单在途后先批一张
+ * 挤占额度,后批的在本事务内被拒并回滚)。
+ */
+async function assertTotalDecreaseFloor(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  excludeAdjId: string | null,
+  lines: { subjectId: string | null; total: D }[],
+): Promise<void> {
+  // 本单按科目聚合负 delta(正 delta 不参与,避免放宽他单的投影)。
+  const decreases = new Map<string, D>();
+  for (const l of lines) {
+    if (!l.subjectId || !l.total.isNeg()) continue;
+    decreases.set(l.subjectId, (decreases.get(l.subjectId) ?? ZERO).plus(l.total));
+  }
+  if (decreases.size === 0) return;
+
+  // 其他 PENDING 单的同科目净 delta(保守:仅负数部分计入)。
+  const pendingOthers = await tx.budgetAdjustment.findMany({
+    where: {
+      projectId,
+      status: ApprovalStatus.PENDING,
+      ...(excludeAdjId ? { id: { not: excludeAdjId } } : {}),
+    },
+    select: { lines: { select: { subjectId: true, totalAdjustment: true } } },
+  });
+  const pendingNeg = new Map<string, D>();
+  for (const a of pendingOthers) {
+    for (const line of a.lines) {
+      if (!line.subjectId) continue;
+      const d = fromStored(String(line.totalAdjustment));
+      if (d.isNeg()) {
+        pendingNeg.set(line.subjectId, (pendingNeg.get(line.subjectId) ?? ZERO).plus(d));
+      }
+    }
+  }
+
+  for (const [subjectId, delta] of decreases.entries()) {
+    const stb = await tx.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId, subjectId } },
+    });
+    const current = stb ? fromStored(stb.currentAmount) : ZERO;
+    const projected = current.plus(pendingNeg.get(subjectId) ?? ZERO).plus(delta);
+    if (projected.isNeg()) {
+      const subject = await tx.budgetSubject.findUnique({
+        where: { id: subjectId },
+        select: { name: true },
+      });
+      const pendingPart = pendingNeg.get(subjectId) ?? ZERO;
+      throw new HTTPError(
+        422,
+        `科目"${subject?.name ?? subjectId}"总预算调整后将为 ${projected.toFixed(2)} 元,不能为负` +
+          `(现总预算 ${current.toFixed(2)},在途调减 ${pendingPart.abs().toFixed(2)},本单调减 ${delta.abs().toFixed(2)})`,
+      );
+    }
+  }
+}
+
+/**
  * §7 双维度收支平衡校验(仅 ADJUST):Σ total === 0 且 Σ annual === 0。
  * 不平衡 → 422。
  */
@@ -762,6 +826,8 @@ export async function submitAdjustment(
 
   return prisma.$transaction(async (tx) => {
     await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
+    // 总维度调减护栏:调整后不得为负(§总维度调减护栏)。
+    await assertTotalDecreaseFloor(tx, adj.projectId, null, parsedLines);
     // 按科目合并年度调减合计(同一科目多行可能分别调减)。
     const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
     for (const line of parsedLines) {
@@ -1236,6 +1302,10 @@ export async function approveAdjustment(
         data: { subjectId: newSubjectId },
       });
     }
+
+    // 总维度调减护栏(审批时兜底):以事务内实时余额复核,并发审批先批的单
+    // 挤占额度后,本单投影为负则整单回滚(§总维度调减护栏)。
+    await assertTotalDecreaseFloor(tx, adj.projectId, adj.id, parsedLines);
 
     // 按科目合并年度调减合计,逐个重新校验可调额度(§7.5)。
     const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();

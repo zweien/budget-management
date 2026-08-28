@@ -1427,6 +1427,148 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
     expect(newRow.afterAnnual).toBe('30.00');
   });
 
+  it('§总维度调减护栏:调减超过科目总预算 → submit 422;恰好归零允许', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('floor1');
+
+    // A 总预算 600,调减 700 → 超调。
+    const over = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-700.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '700.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await expectHTTP(() => submitAdjustment(over.id, adminUser()), 422);
+
+    // 恰好归零(600)允许;审批生效后 A 总预算 = 0。
+    const exact = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-600.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '600.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(exact.id, adminUser());
+    await approveAdjustment(exact.id, adminUser());
+    const stb = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafA.id } },
+    });
+    expect(stb!.currentAmount.toFixed(2)).toBe('0.00');
+  });
+
+  it('§总维度调减护栏:在途 PENDING 调减计入投影,并发提交被拦', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('floor2');
+
+    // 单1:A -500(600→100)提交在途。
+    const first = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-500.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '500.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(first.id, adminUser());
+
+    // 单2:A 再 -200 → 投影 100-200 < 0 → 提交被拦。
+    const second = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-200.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '200.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await expectHTTP(() => submitAdjustment(second.id, adminUser()), 422);
+
+    // 单1审批生效(A=100)后,-100 恰好归零可以;再 -200 仍被拦。
+    await approveAdjustment(first.id, adminUser());
+    const third = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-100.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '100.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(third.id, adminUser());
+    await approveAdjustment(third.id, adminUser());
+    const stb = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafA.id } },
+    });
+    expect(stb!.currentAmount.toFixed(2)).toBe('0.00');
+  });
+
+  it('§总维度调减护栏:两单在途挤压(投影归零边界)按序审批终值归零', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('floor3');
+
+    // 单2 先提交(无在途:600-50=550 ✓);单1 后提交(计入单2 在途 -50:600-50-550=0 边界 ✓)。
+    // 两张都在途 → 挤压审批:无论先后顺序,任何一张都不会把 A 推成负数。
+    const second = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-50.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '50.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(second.id, adminUser());
+    const first = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-550.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '550.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(first.id, adminUser());
+
+    // 先批大调减(A 600→50),再批小调减(50→0)。
+    await approveAdjustment(first.id, adminUser());
+    await approveAdjustment(second.id, adminUser());
+    const stb = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafA.id } },
+    });
+    expect(stb!.currentAmount.toFixed(2)).toBe('0.00');
+
+    // 归零后再想调减 → 被拦。
+    const fourth = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-1.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '1.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await expectHTTP(() => submitAdjustment(fourth.id, adminUser()), 422);
+  });
+
   it('§codex P2:同一科目多行 → 详情按科目聚合,原预算不重复计入', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('dupdetail');
 
