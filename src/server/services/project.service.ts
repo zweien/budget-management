@@ -188,7 +188,8 @@ export async function getProject(
     canEditProject(user, id),
     canWriteRecordsFn(user, id),
   ]);
-  return { ...project, canEdit, canWriteRecords };
+  // 归档项目只读:录入类写按钮全部隐藏(服务端 requirePermission 另有 409 兜底)。
+  return { ...project, canEdit, canWriteRecords: canWriteRecords && !project.archivedAt };
 }
 
 /** 更新项目:权限校验后更新可改字段并审计。 */

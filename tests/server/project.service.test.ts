@@ -11,6 +11,7 @@ import {
   unarchiveProject,
   updateProject,
 } from '@/server/services/project.service';
+import { requirePermission } from '@/lib/auth/permissions';
 
 // 集成测试直连真实 PG(:5434)。createProject 在事务内建 project + budget + member,
 // 需级联清理;ProjectBudget / ProjectMember 无独立查询入口,通过 projectId 一并清。
@@ -246,6 +247,54 @@ describe('project.service (integration, real PG)', () => {
       { id: adminId, role: UserRole.ADMIN },
     );
     expect(after.name).toBe('editable again');
+  });
+
+  it('§codex P1:归档项目拦截一切写动作(豁免 project:edit/member:manage)', async () => {
+    const code = `FROZEN-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'frozen writes' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+
+    const admin = { id: adminId, role: UserRole.ADMIN };
+    // 写动作 → 409。
+    await expect(requirePermission(admin, 'record:create', project.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(requirePermission(admin, 'budget:adjust', project.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(requirePermission(admin, 'budget:approve', project.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    // 豁免动作 → 通过(不抛)。
+    await expect(requirePermission(admin, 'project:view', project.id)).resolves.toBeUndefined();
+    await expect(requirePermission(admin, 'project:edit', project.id)).resolves.toBeUndefined();
+    await expect(requirePermission(admin, 'member:manage', project.id)).resolves.toBeUndefined();
+
+    // 恢复后写动作放行。
+    await unarchiveProject(project.id, admin);
+    await expect(requirePermission(admin, 'record:create', project.id)).resolves.toBeUndefined();
+  });
+
+  it('§codex P1:归档项目详情 canWriteRecords 下发 false(shell 隐藏写按钮)', async () => {
+    const code = `RODETAIL-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'readonly detail' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    const before = await getProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    expect(before.canWriteRecords).toBe(true);
+
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    const after = await getProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    expect(after.archivedAt).not.toBeNull();
+    expect(after.canWriteRecords).toBe(false);
+    expect(after.canEdit).toBe(true); // canEdit 保持,恢复操作仍可达
   });
 
   it('§codex P2:审计快照覆盖承担单位/起止时间等全部可编辑字段', async () => {

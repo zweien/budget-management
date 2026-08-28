@@ -120,6 +120,24 @@ export async function requirePermission(
   action: Action,
   projectId?: string,
 ): Promise<void> {
+  // 归档项目只读(§codex P1):除豁免动作外,一切项目写动作在归档期间拒绝。
+  // 前置执行(OWNER_EDIT/RECORD_WRITE 分支内有提前 return,放后面会被绕过)。
+  // 豁免:查看、project:edit(恢复归档本身依赖它;updateProject 另有自己的 409)、
+  // 成员管理(项目行政事务)。project:view 不查询,读路径零额外开销。
+  if (
+    projectId &&
+    action !== 'project:view' &&
+    action !== 'project:edit' &&
+    action !== 'member:manage'
+  ) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { archivedAt: true },
+    });
+    if (project?.archivedAt) {
+      throw new HTTPError(409, '项目已归档,数据只读;恢复后才能执行此操作');
+    }
+  }
   if (OWNER_EDIT_ACTIONS.has(action)) {
     if (!projectId) {
       throw new HTTPError(403, `操作 ${action} 需要指定项目`);
