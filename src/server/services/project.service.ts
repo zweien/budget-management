@@ -119,7 +119,14 @@ export async function listProjects(
   const projects = await prisma.project.findMany({
     where: opts.includeArchived ? undefined : { archivedAt: null },
     orderBy: { createdAt: 'desc' },
-    include: { owner: { select: { id: true, name: true } } },
+    // 负责人展示取当前 OWNER 成员(§codex P2):成员管理可降级/移除原负责人,
+    // Project.ownerId 不会随之回写,按 ownerId 展示会与实际编辑权漂移。
+    include: {
+      members: {
+        where: { memberRole: 'OWNER' },
+        select: { user: { select: { id: true, name: true } } },
+      },
+    },
   });
   // canEdit 随行下发(项目管理页编辑/归档按钮的行级门控):ADMIN 恒可,否则需 OWNER。
   if (user.role === 'ADMIN') {
@@ -183,7 +190,12 @@ export async function getProject(
   await requirePermission(user, 'project:view', id);
   const project = await prisma.project.findUnique({
     where: { id },
-    include: { owner: { select: { id: true, name: true } } },
+    include: {
+      members: {
+        where: { memberRole: 'OWNER' },
+        select: { user: { select: { id: true, name: true } } },
+      },
+    },
   });
   if (!project) throw new HTTPError(404, '项目不存在');
   // 编辑权随详情下发,供前端门控:

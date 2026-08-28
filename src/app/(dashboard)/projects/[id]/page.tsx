@@ -39,7 +39,8 @@ interface ProjectDetail {
   startDate: string | null;
   endDate: string | null;
   ownerId: string;
-  owner: { id: string; name: string } | null;
+  /** 项目负责人 = 当前 OWNER 成员(与列表页同口径)。 */
+  members: { user: { id: string; name: string } }[];
   remark: string | null;
   archivedAt: string | null;
   createdAt: string;
@@ -258,7 +259,9 @@ export default function ProjectDetailPage() {
           <span className="font-mono text-[13px]">{project.code}</span>
         </DescCell>
         <DescCell label="项目名称">{project.name}</DescCell>
-        <DescCell label="项目负责人">{project.owner?.name ?? '—'}</DescCell>
+        <DescCell label="项目负责人">
+          {project.members?.length ? project.members.map((m) => m.user.name).join('/') : '—'}
+        </DescCell>
         <DescCell label="级别">{project.level ?? '—'}</DescCell>
         <DescCell label="起止时间">
           <span className="tabular-nums">
