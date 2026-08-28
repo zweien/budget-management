@@ -39,7 +39,14 @@ const MEMBER_ROLE_LABEL: Record<string, string> = {
  * 项目成员管理卡片(仅管理员渲染;服务端 member:manage 二次拦截)。
  * 项目编辑权由此驱动:OWNER=可编辑,HANDLER=只读。
  */
-export function MembersCard({ projectId }: { projectId: string }) {
+export function MembersCard({
+  projectId,
+  onMembersChanged,
+}: {
+  projectId: string;
+  /** 成员/OWNER 变更成功后通知父级(如详情页刷新负责人摘要)。 */
+  onMembersChanged?: () => void;
+}) {
   const [members, setMembers] = React.useState<MemberRow[] | null>(null);
   const [allUsers, setAllUsers] = React.useState<UserOption[]>([]);
   const [pickUser, setPickUser] = React.useState<string>('');
@@ -71,6 +78,7 @@ export function MembersCard({ projectId }: { projectId: string }) {
       await fn();
       toast.success(ok);
       await load();
+      onMembersChanged?.();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {

@@ -288,7 +288,12 @@ export default function ProjectDetailPage() {
       </dl>
 
       {/* 成员管理:仅管理员可见(服务端 member:manage 二次拦截)。 */}
-      {me?.role === 'ADMIN' ? <MembersCard projectId={project.id} /> : null}
+      {me?.role === 'ADMIN' ? (
+        <MembersCard
+          projectId={project.id}
+          onMembersChanged={() => setDetailVersion((v) => v + 1)}
+        />
+      ) : null}
 
       {isEffective ? (
         <Alert variant="success">
