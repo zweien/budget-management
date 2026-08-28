@@ -49,6 +49,8 @@ interface ProjectRow {
   endDate: string | null;
   remark: string | null;
   archivedAt: string | null;
+  /** 项目负责人(创建时指定;编辑暂不支持变更)。 */
+  owner: { id: string; name: string } | null;
   /** 行级编辑权(ADMIN 或该项目 OWNER):编辑/归档/恢复按钮的门控。 */
   canEdit: boolean;
 }
@@ -160,6 +162,9 @@ export default function ProjectsPage() {
           startDate: (project.startDate as string | null) ?? null,
           endDate: (project.endDate as string | null) ?? null,
           remark: (project.remark as string | null) ?? null,
+          owner:
+            (project.owner as { id: string; name: string } | null) ??
+            (me ? { id: me.id, name: me.name } : null),
           archivedAt: null,
           canEdit: true,
         };
@@ -281,7 +286,8 @@ export default function ProjectsPage() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-40">项目编号</TableHead>
                 <TableHead>项目名称</TableHead>
-                <TableHead className="w-28">级别</TableHead>
+                <TableHead className="w-28">负责人</TableHead>
+                <TableHead className="w-24">级别</TableHead>
                 <TableHead className="w-56">起止时间</TableHead>
                 <TableHead className="w-64">操作</TableHead>
               </TableRow>
@@ -289,7 +295,7 @@ export default function ProjectsPage() {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                     无匹配「{keyword}」的项目
                   </TableCell>
                 </TableRow>
@@ -304,6 +310,7 @@ export default function ProjectsPage() {
                         {r.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
                       </span>
                     </TableCell>
+                    <TableCell>{r.owner?.name ?? '—'}</TableCell>
                     <TableCell>{r.level ?? '—'}</TableCell>
                     <TableCell className="tabular-nums">
                       {formatDate(r.startDate)} ~ {formatDate(r.endDate)}
