@@ -46,6 +46,14 @@ function parseDateOnly(s?: string | null): Date | undefined {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
+/** 本地 Date → YYYY-MM-DD(不做 UTC 转换;toISOString 在东八区会退回前一天)。 */
+function formatDateOnly(d?: Date): string | null {
+  if (!d) return null;
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 const projectFormSchema = z.object({
   code: z.string().trim().min(1, '请输入项目编号'),
   name: z.string().trim().min(1, '请输入项目名称'),
@@ -174,8 +182,8 @@ export function ProjectFormDialog({
               level: values.level || null,
               projectType: values.projectType || null,
               undertakingUnit: values.undertakingUnit || null,
-              startDate: values.range?.from?.toISOString() ?? null,
-              endDate: values.range?.to?.toISOString() ?? null,
+              startDate: formatDateOnly(values.range?.from),
+              endDate: formatDateOnly(values.range?.to),
               remark: values.remark || null,
             }),
           },
@@ -192,8 +200,8 @@ export function ProjectFormDialog({
             level: values.level || null,
             projectType: values.projectType || null,
             undertakingUnit: values.undertakingUnit || null,
-            startDate: values.range?.from?.toISOString() ?? null,
-            endDate: values.range?.to?.toISOString() ?? null,
+            startDate: formatDateOnly(values.range?.from),
+            endDate: formatDateOnly(values.range?.to),
             remark: values.remark || null,
             ownerId: values.ownerId || undefined,
           }),

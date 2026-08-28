@@ -74,20 +74,9 @@ export default function ProjectsPage() {
   // 当前用户(角色决定新建入口可见性)+ 负责人候选(仅管理员可拉取用户列表)。
   const [me, setMe] = useState<DialogCurrentUser | null>(null);
   const [userOptions, setUserOptions] = useState<DialogUserOption[]>([]);
-
-  const loadProjects = async (includeArchived: boolean, showLoading = true) => {
-    if (showLoading) setLoading(true);
-    try {
-      const data = await apiFetch<ProjectRow[]>(
-        `/api/projects${includeArchived ? '?includeArchived=1' : ''}`,
-      );
-      setRows(data);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // 归档/恢复等动作完成后 bump,触发下方唯一加载点重拉(§codex P2:
+  // 手动 reload 不参与 effect 的取消守卫,与开关切换并发时会互相覆盖)。
+  const [listVersion, setListVersion] = useState(0);
 
   useEffect(() => {
     // 当前用户(新建入口门控);管理员顺带预拉负责人候选(仅 ADMIN 可调 /api/users)。
@@ -104,8 +93,8 @@ export default function ProjectsPage() {
       .catch(() => undefined);
   }, []);
 
-  // 项目列表唯一加载点:首拉 + 「显示已归档」切换都走这里(loading 初始 true,
-  // 首拉完成后关闭;setState 全在 await 之后,规避 set-state-in-effect)。
+  // 项目列表唯一加载点:首拉 + 「显示已归档」切换 + 动作后重拉
+  // (loading 初始 true,首拉完成后关闭;setState 全在 await 之后)。
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -124,7 +113,7 @@ export default function ProjectsPage() {
     return () => {
       cancelled = true;
     };
-  }, [showArchived]);
+  }, [showArchived, listVersion]);
 
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -201,7 +190,7 @@ export default function ProjectsPage() {
       await apiFetch(`/api/projects/${archiveTarget.id}`, { method: 'DELETE' });
       toast.success(`已归档「${archiveTarget.name}」`);
       setArchiveTarget(null);
-      await loadProjects(showArchived, false);
+      setListVersion((v) => v + 1);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -213,7 +202,7 @@ export default function ProjectsPage() {
     try {
       await apiFetch(`/api/projects/${r.id}/unarchive`, { method: 'POST' });
       toast.success(`已恢复「${r.name}」`);
-      await loadProjects(showArchived, false);
+      setListVersion((v) => v + 1);
     } catch (e) {
       toast.error((e as Error).message);
     }
