@@ -200,6 +200,10 @@ export async function updateProject(
   await requirePermission(user, 'project:edit', id);
   const before = await prisma.project.findUnique({ where: { id } });
   if (!before) throw new HTTPError(404, '项目不存在');
+  // 已归档项目不可编辑(§codex P2):归档=只读快照,须先恢复。
+  if (before.archivedAt) {
+    throw new HTTPError(409, '项目已归档,请先恢复后再编辑');
+  }
 
   const data: Prisma.ProjectUpdateInput = {};
   if (input.name !== undefined) data.name = input.name;
@@ -218,14 +222,23 @@ export async function updateProject(
       objectId: id,
       action: 'update',
       operatorId: user.id,
+      // 快照覆盖全部可编辑字段(§codex P2):否则只改承担单位/日期时日志看不出变化。
       before: {
         name: before.name,
         level: before.level,
+        projectType: before.projectType,
+        undertakingUnit: before.undertakingUnit,
+        startDate: before.startDate,
+        endDate: before.endDate,
         remark: before.remark,
       },
       after: {
         name: after.name,
         level: after.level,
+        projectType: after.projectType,
+        undertakingUnit: after.undertakingUnit,
+        startDate: after.startDate,
+        endDate: after.endDate,
         remark: after.remark,
       },
     });

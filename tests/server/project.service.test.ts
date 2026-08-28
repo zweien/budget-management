@@ -226,6 +226,59 @@ describe('project.service (integration, real PG)', () => {
     expect(unarchiveAudit).not.toBeNull();
   });
 
+  it('§codex P2:归档项目拒绝编辑(409),恢复后可编辑', async () => {
+    const code = `ARCDENY-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'archived edit deny' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    await expect(
+      updateProject(project.id, { name: 'x' }, { id: adminId, role: UserRole.ADMIN }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    await unarchiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    const after = await updateProject(
+      project.id,
+      { name: 'editable again' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    expect(after.name).toBe('editable again');
+  });
+
+  it('§codex P2:审计快照覆盖承担单位/起止时间等全部可编辑字段', async () => {
+    const code = `AUD-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'audit fields' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    await updateProject(
+      project.id,
+      {
+        undertakingUnit: '新单位',
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2027-01-01'),
+      },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { objectId: project.id, action: 'update' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect(audit).not.toBeNull();
+    const beforeData = (audit!.beforeData ?? {}) as Record<string, unknown>;
+    const afterData = (audit!.afterData ?? {}) as Record<string, unknown>;
+    // before 里承担单位为空、after 有值——快照能体现变化。
+    expect(beforeData['undertakingUnit']).toBeNull();
+    expect(afterData['undertakingUnit']).toBe('新单位');
+    expect(afterData['startDate']).not.toBeNull();
+  });
+
   it('§项目管理:普通用户(非 OWNER)归档/恢复/更新均 403', async () => {
     const code = `DENY-${uuidv7().slice(0, 8)}`;
     const project = await createProject(

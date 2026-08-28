@@ -36,6 +36,16 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
+/**
+ * 把 @db.Date 的 ISO 串(YYYY-MM-DDT00:00:00Z)按**日历日**解析成本地 Date。
+ * 直接 new Date(iso) 在 UTC 以西时区会后退一天(§codex P2)。
+ */
+function parseDateOnly(s?: string | null): Date | undefined {
+  const m = s ? /^(\d{4})-(\d{2})-(\d{2})/.exec(s) : null;
+  if (!m) return undefined;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 const projectFormSchema = z.object({
   code: z.string().trim().min(1, '请输入项目编号'),
   name: z.string().trim().min(1, '请输入项目名称'),
@@ -132,8 +142,8 @@ export function ProjectFormDialog({
         ownerId: '',
         range: editing.startDate
           ? {
-              from: new Date(editing.startDate),
-              to: editing.endDate ? new Date(editing.endDate) : undefined,
+              from: parseDateOnly(editing.startDate),
+              to: parseDateOnly(editing.endDate),
             }
           : undefined,
       });

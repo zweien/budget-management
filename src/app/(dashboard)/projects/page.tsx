@@ -90,11 +90,9 @@ export default function ProjectsPage() {
   };
 
   useEffect(() => {
-    // 首次加载 loading 已为 true,无需同步 setState;后续 setState 均在 await 之后(异步)。
-    // 数据拉取是 effect 的合法用途,禁用 set-state-in-effect(本场景无级联渲染风险)。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadProjects(false);
     // 当前用户(新建入口门控);管理员顺带预拉负责人候选(仅 ADMIN 可调 /api/users)。
+    // 项目列表首拉由下方 showArchived effect 统一负责(§codex P2:两个 effect 各自
+    // 发请求会互相覆盖——先发出的默认列表请求可能晚于含归档请求返回)。
     apiFetch<DialogCurrentUser>('/api/me')
       .then((u) => {
         setMe(u);
@@ -106,16 +104,23 @@ export default function ProjectsPage() {
       .catch(() => undefined);
   }, []);
 
-  // 「显示已归档」切换 → 重新拉取(含/不含归档);setState 全在异步回调。
+  // 项目列表唯一加载点:首拉 + 「显示已归档」切换都走这里(loading 初始 true,
+  // 首拉完成后关闭;setState 全在 await 之后,规避 set-state-in-effect)。
   useEffect(() => {
     let cancelled = false;
-    apiFetch<ProjectRow[]>(`/api/projects${showArchived ? '?includeArchived=1' : ''}`)
-      .then((data) => {
+    const load = async () => {
+      try {
+        const data = await apiFetch<ProjectRow[]>(
+          `/api/projects${showArchived ? '?includeArchived=1' : ''}`,
+        );
         if (!cancelled) setRows(data);
-      })
-      .catch((e: unknown) => {
+      } catch (e) {
         if (!cancelled) toast.error(e instanceof Error ? e.message : '加载项目失败');
-      });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
     return () => {
       cancelled = true;
     };

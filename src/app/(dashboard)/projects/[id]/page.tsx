@@ -40,6 +40,7 @@ interface ProjectDetail {
   endDate: string | null;
   ownerId: string;
   remark: string | null;
+  archivedAt: string | null;
   createdAt: string;
   /** 服务端随详情下发:当前用户是否可编辑该项目(ADMIN 或 OWNER 成员)。 */
   canEdit: boolean;
@@ -229,7 +230,8 @@ export default function ProjectDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold tracking-[-0.3px]">项目信息</h2>
-        {project.canEdit ? (
+        {project.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
+        {project.canEdit && !project.archivedAt ? (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil className="size-4" />
