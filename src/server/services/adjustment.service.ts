@@ -212,6 +212,13 @@ async function assertTotalDecreaseFloor(
   }
   if (decreases.size === 0) return;
 
+  // 锁定涉及科目的总预算行(§codex P2):并发提交/审批在此串行化——
+  // 否则两张 DRAFT 同时提交时,护栏的普通读看不到对方刚置的 PENDING,双双漏过。
+  // 按 id 排序加锁,避免多科目交叉死锁。
+  for (const subjectId of [...decreases.keys()].sort()) {
+    await tx.$queryRaw`SELECT subject_id FROM subject_total_budgets WHERE project_id = ${projectId}::uuid AND subject_id = ${subjectId}::uuid FOR UPDATE`;
+  }
+
   // 其他 PENDING 单:同样按科目聚合全部 delta 取净额,仅净调减计入投影。
   const pendingOthers = await tx.budgetAdjustment.findMany({
     where: {

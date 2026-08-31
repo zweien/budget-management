@@ -1603,6 +1603,44 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
     await expectHTTP(() => submitAdjustment(over.id, adminUser()), 422);
   });
 
+  it('§总维度调减护栏:同科目净调减的两单并发提交 → 恰好一个成功', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('floorrace');
+    // A 600:单1 净 -500 合法;单2 净 -200 只有在看不见单1 PENDING 时才会漏过。
+    const first = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-500.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '500.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    const second = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-200.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '200.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+
+    const results = await Promise.allSettled([
+      submitAdjustment(first.id, adminUser()),
+      submitAdjustment(second.id, adminUser()),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter(
+      (r) => r.status === 'rejected' && (r as PromiseRejectedResult).reason?.status === 422,
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+  });
+
   it('§codex P2:同一科目多行 → 详情按科目聚合,原预算不重复计入', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('dupdetail');
 
