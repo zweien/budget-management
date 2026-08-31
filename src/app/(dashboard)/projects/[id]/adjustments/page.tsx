@@ -12,6 +12,7 @@ import {
 } from '@/components/adjustments/AdjustmentPreviewDialog';
 
 import { apiFetch } from '@/lib/api/client';
+import { D } from '@/lib/decimal';
 import { cn } from '@/lib/utils';
 import {
   AdjustmentDetailSheet,
@@ -614,18 +615,17 @@ export default function AdjustmentsPage() {
   // ------------------------------------------------------------
   // 自动生成调整原因说明
   // ------------------------------------------------------------
-  /** 元字符串 → 万元去尾零(0.5、5、1.2),用于原因文本的自然语言金额。 */
-  function yuanToWanTrim(yuanStr: string): string {
-    const n = Number(yuanStr) / 10000;
-    if (!Number.isFinite(n) || n === 0) return '0';
-    // 去尾零:toFixed(2) 后剥末尾 0 和多余小数点。
-    return Number(n.toFixed(2)).toString();
+  /** 元字符串 → 万元,精确换算不取整(§功能调整:1.2345 万元不再四舍五入成 1.23)。 */
+  function yuanToWanExact(yuanStr: string): string {
+    const wan = new D(yuanStr || '0').div(10000);
+    // Decimal 归一化天然去尾零;0 恒显示 "0"。
+    return wan.isZero() ? '0' : wan.toString();
   }
 
   /**
    * 按维度生成调整原因说明。
    * 规则:逐品名(明细行)描述,原预算为0的调增用"新增",否则用"调增/调减";
-   * 金额用万元去尾零;该维度无任何调整(全0或无行)→ 返回空串。
+   * 金额用精确万元(不取整);该维度无任何调整(全0或无行)→ 返回空串。
    */
   const generateReason = (dim: 'total' | 'annual'): string => {
     const field = dim === 'total' ? 'totalAdjustment' : 'annualAdjustment';
@@ -633,7 +633,7 @@ export default function AdjustmentsPage() {
     for (const l of formLines) {
       const amt = Number(l[field]) || 0;
       if (amt === 0) continue; // 该维度此行无调整
-      const wan = yuanToWanTrim(l[field]);
+      const wan = yuanToWanExact(l[field]);
       // 新增科目行:原预算必为 0,调增即"新增"。
       if (l.isNew) {
         const name = l.newName.trim() || '新科目';
