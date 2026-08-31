@@ -199,15 +199,20 @@ async function assertTotalDecreaseFloor(
   excludeAdjId: string | null,
   lines: { subjectId: string | null; total: D }[],
 ): Promise<void> {
-  // 本单按科目聚合负 delta(正 delta 不参与,避免放宽他单的投影)。
-  const decreases = new Map<string, D>();
+  // §codex P2:审批按科目**净额**生效,护栏必须同口径——同一科目多行(如 -700/+200)
+  // 先聚合净 delta,仅对净调减的科目校验;逐行按负数累计会误杀净额合法的单。
+  const netBySubject = new Map<string, D>();
   for (const l of lines) {
-    if (!l.subjectId || !l.total.isNeg()) continue;
-    decreases.set(l.subjectId, (decreases.get(l.subjectId) ?? ZERO).plus(l.total));
+    if (!l.subjectId) continue;
+    netBySubject.set(l.subjectId, (netBySubject.get(l.subjectId) ?? ZERO).plus(l.total));
+  }
+  const decreases = new Map<string, D>();
+  for (const [subjectId, net] of netBySubject.entries()) {
+    if (net.isNeg()) decreases.set(subjectId, net);
   }
   if (decreases.size === 0) return;
 
-  // 其他 PENDING 单的同科目净 delta(保守:仅负数部分计入)。
+  // 其他 PENDING 单:同样按科目聚合全部 delta 取净额,仅净调减计入投影。
   const pendingOthers = await tx.budgetAdjustment.findMany({
     where: {
       projectId,
@@ -218,11 +223,17 @@ async function assertTotalDecreaseFloor(
   });
   const pendingNeg = new Map<string, D>();
   for (const a of pendingOthers) {
+    const net = new Map<string, D>();
     for (const line of a.lines) {
       if (!line.subjectId) continue;
-      const d = fromStored(String(line.totalAdjustment));
+      net.set(
+        line.subjectId,
+        (net.get(line.subjectId) ?? ZERO).plus(fromStored(String(line.totalAdjustment))),
+      );
+    }
+    for (const [subjectId, d] of net.entries()) {
       if (d.isNeg()) {
-        pendingNeg.set(line.subjectId, (pendingNeg.get(line.subjectId) ?? ZERO).plus(d));
+        pendingNeg.set(subjectId, (pendingNeg.get(subjectId) ?? ZERO).plus(d));
       }
     }
   }
@@ -242,7 +253,7 @@ async function assertTotalDecreaseFloor(
       throw new HTTPError(
         422,
         `科目"${subject?.name ?? subjectId}"总预算调整后将为 ${projected.toFixed(2)} 元,不能为负` +
-          `(现总预算 ${current.toFixed(2)},在途调减 ${pendingPart.abs().toFixed(2)},本单调减 ${delta.abs().toFixed(2)})`,
+          `(现总预算 ${current.toFixed(2)},在途调减 ${pendingPart.abs().toFixed(2)},本单净调减 ${delta.abs().toFixed(2)})`,
       );
     }
   }

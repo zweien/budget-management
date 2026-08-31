@@ -1569,6 +1569,40 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
     await expectHTTP(() => submitAdjustment(fourth.id, adminUser()), 422);
   });
 
+  it('§codex P2:同科目多行净额护栏——净调减合法不误杀,净超调仍拦截', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('netfloor');
+
+    // A 拆两行 -700/+200(净 -500 ≤ 600 合法),B +500 平衡 → 提交应放行。
+    const ok = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-700.00', annualAdjustment: '0' },
+          { subjectId: leafA.id, totalAdjustment: '200.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '500.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(ok.id, adminUser());
+
+    // 净调减超限:A -700/+100(净 -600 > 600? 净 -600 ≤ 600 边界)改 -800/+100 → 净 -700 超调 → 拦。
+    const over = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '-800.00', annualAdjustment: '0' },
+          { subjectId: leafA.id, totalAdjustment: '100.00', annualAdjustment: '0' },
+          { subjectId: leafB.id, totalAdjustment: '700.00', annualAdjustment: '0' },
+        ],
+      },
+      adminUser(),
+    );
+    await expectHTTP(() => submitAdjustment(over.id, adminUser()), 422);
+  });
+
   it('§codex P2:同一科目多行 → 详情按科目聚合,原预算不重复计入', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('dupdetail');
 
