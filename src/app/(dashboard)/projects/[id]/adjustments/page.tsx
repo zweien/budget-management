@@ -615,11 +615,11 @@ export default function AdjustmentsPage() {
   // ------------------------------------------------------------
   // 自动生成调整原因说明
   // ------------------------------------------------------------
-  /** 元字符串 → 万元,精确换算不取整(§功能调整:1.2345 万元不再四舍五入成 1.23)。 */
-  function yuanToWanExact(yuanStr: string): string {
-    const wan = new D(yuanStr || '0').div(10000);
-    // Decimal 归一化天然去尾零;0 恒显示 "0"。
-    return wan.isZero() ? '0' : wan.toString();
+  /** 元字符串 → 精确万元(不取整);原值与绝对值都以 Decimal 字符串给出(不经 Number,防大额丢精度)。 */
+  function yuanToWanParts(yuanStr: string): { wan: string; abs: string } {
+    const d = new D(yuanStr || '0').div(10000);
+    if (d.isZero()) return { wan: '0', abs: '0' };
+    return { wan: d.toString(), abs: d.abs().toString() };
   }
 
   /**
@@ -633,14 +633,14 @@ export default function AdjustmentsPage() {
     for (const l of formLines) {
       const amt = Number(l[field]) || 0;
       if (amt === 0) continue; // 该维度此行无调整
-      const wan = yuanToWanExact(l[field]);
+      const { wan, abs } = yuanToWanParts(l[field]);
       // 新增科目行:原预算必为 0,调增即"新增"。
       if (l.isNew) {
         const name = l.newName.trim() || '新科目';
         if (amt > 0) {
           parts.push(`新增${name}预算${wan}万元`);
         } else {
-          parts.push(`${name}预算调减${Math.abs(Number(wan))}万元`);
+          parts.push(`${name}预算调减${abs}万元`);
         }
         continue;
       }
@@ -654,7 +654,7 @@ export default function AdjustmentsPage() {
       } else if (amt > 0) {
         parts.push(`${productName}预算调增${wan}万元`);
       } else {
-        parts.push(`${productName}预算调减${Math.abs(Number(wan))}万元`);
+        parts.push(`${productName}预算调减${abs}万元`);
       }
     }
     if (parts.length === 0) return '';
