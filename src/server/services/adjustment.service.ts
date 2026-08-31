@@ -185,6 +185,93 @@ function validateAndParseLines(payload: AdjustmentPayload): ParsedLine[] {
 }
 
 /**
+ * §总维度调减护栏:现有科目的总预算调整后不得为负
+ * (用户反馈:外部协作费总经费被调成 -200——年度维度有可调额度护栏,总维度此前缺失)。
+ *
+ * 投影 = live 科目总预算 + 其他 PENDING 单的同科目净调减(保守:仅计调减侧,
+ * 不计未审批的调增)+ 本单该科目 delta;投影 < 0 → 422。
+ * 提交与审批两处都调:提交时拦截明显超调,审批时兜底并发(两单在途后先批一张
+ * 挤占额度,后批的在本事务内被拒并回滚)。
+ */
+async function assertTotalDecreaseFloor(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  excludeAdjId: string | null,
+  lines: { subjectId: string | null; total: D }[],
+): Promise<void> {
+  // §codex P2:审批按科目**净额**生效,护栏必须同口径——同一科目多行(如 -700/+200)
+  // 先聚合净 delta,仅对净调减的科目校验;逐行按负数累计会误杀净额合法的单。
+  const netBySubject = new Map<string, D>();
+  for (const l of lines) {
+    if (!l.subjectId) continue;
+    netBySubject.set(l.subjectId, (netBySubject.get(l.subjectId) ?? ZERO).plus(l.total));
+  }
+  const decreases = new Map<string, D>();
+  for (const [subjectId, net] of netBySubject.entries()) {
+    if (net.isNeg()) decreases.set(subjectId, net);
+  }
+  if (decreases.size === 0) return;
+
+  // 锁定所有 total 非零的涉事科目总预算行(§codex P2):并发提交/审批在此串行化——
+  // 否则两张 DRAFT 同时提交时,护栏的普通读看不到对方刚置的 PENDING,双双漏过。
+  // 只锁净调减科目会在方向相反的两单间形成 A→B / B→A 锁环(delta 应用阶段会更新
+  // 对方科目),故按统一排序预锁全部受影响科目。
+  const affectedSubjects = [...netBySubject.entries()]
+    .filter(([, net]) => !net.isZero())
+    .map(([subjectId]) => subjectId)
+    .sort();
+  for (const subjectId of affectedSubjects) {
+    await tx.$queryRaw`SELECT subject_id FROM subject_total_budgets WHERE project_id = ${projectId}::uuid AND subject_id = ${subjectId}::uuid FOR UPDATE`;
+  }
+
+  // 其他 PENDING 单:同样按科目聚合全部 delta 取净额,仅净调减计入投影。
+  const pendingOthers = await tx.budgetAdjustment.findMany({
+    where: {
+      projectId,
+      status: ApprovalStatus.PENDING,
+      ...(excludeAdjId ? { id: { not: excludeAdjId } } : {}),
+    },
+    select: { lines: { select: { subjectId: true, totalAdjustment: true } } },
+  });
+  const pendingNeg = new Map<string, D>();
+  for (const a of pendingOthers) {
+    const net = new Map<string, D>();
+    for (const line of a.lines) {
+      if (!line.subjectId) continue;
+      net.set(
+        line.subjectId,
+        (net.get(line.subjectId) ?? ZERO).plus(fromStored(String(line.totalAdjustment))),
+      );
+    }
+    for (const [subjectId, d] of net.entries()) {
+      if (d.isNeg()) {
+        pendingNeg.set(subjectId, (pendingNeg.get(subjectId) ?? ZERO).plus(d));
+      }
+    }
+  }
+
+  for (const [subjectId, delta] of decreases.entries()) {
+    const stb = await tx.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId, subjectId } },
+    });
+    const current = stb ? fromStored(stb.currentAmount) : ZERO;
+    const projected = current.plus(pendingNeg.get(subjectId) ?? ZERO).plus(delta);
+    if (projected.isNeg()) {
+      const subject = await tx.budgetSubject.findUnique({
+        where: { id: subjectId },
+        select: { name: true },
+      });
+      const pendingPart = pendingNeg.get(subjectId) ?? ZERO;
+      throw new HTTPError(
+        422,
+        `科目"${subject?.name ?? subjectId}"总预算调整后将为 ${projected.toFixed(2)} 元,不能为负` +
+          `(现总预算 ${current.toFixed(2)},在途调减 ${pendingPart.abs().toFixed(2)},本单净调减 ${delta.abs().toFixed(2)})`,
+      );
+    }
+  }
+}
+
+/**
  * §7 双维度收支平衡校验(仅 ADJUST):Σ total === 0 且 Σ annual === 0。
  * 不平衡 → 422。
  */
@@ -762,6 +849,8 @@ export async function submitAdjustment(
 
   return prisma.$transaction(async (tx) => {
     await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
+    // 总维度调减护栏:调整后不得为负(§总维度调减护栏)。
+    await assertTotalDecreaseFloor(tx, adj.projectId, null, parsedLines);
     // 按科目合并年度调减合计(同一科目多行可能分别调减)。
     const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
     for (const line of parsedLines) {
@@ -1236,6 +1325,10 @@ export async function approveAdjustment(
         data: { subjectId: newSubjectId },
       });
     }
+
+    // 总维度调减护栏(审批时兜底):以事务内实时余额复核,并发审批先批的单
+    // 挤占额度后,本单投影为负则整单回滚(§总维度调减护栏)。
+    await assertTotalDecreaseFloor(tx, adj.projectId, adj.id, parsedLines);
 
     // 按科目合并年度调减合计,逐个重新校验可调额度(§7.5)。
     const decreaseBySubject = new Map<string, { year: number; subjectId: string; amount: D }>();
