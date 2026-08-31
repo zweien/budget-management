@@ -18,7 +18,9 @@ const ZERO_D = fromStored('0');
 
 /** 万元换算:元 → 万元字符串(2 位小数)。 */
 function toWan(yuan: D): string {
-  return yuan.div(10000).toFixed(2);
+  // 精确换算不截断(§用户反馈:12345.67 元应显示 1.234567 而非 1.23);
+  // Decimal 归一化天然去尾零(2000 元 → "0.2" 而非 "0.20")。
+  return yuan.div(10000).toString();
 }
 
 /** 元字符串 → 万元字符串。 */
@@ -217,7 +219,7 @@ export async function exportAdjustmentDocx(
     const originWan = toWan(originYuan);
 
     const adjustWan = toWan(args.adjustYuan);
-    const adjustedWan = fromStored(originWan).plus(fromStored(adjustWan)).toFixed(2);
+    const adjustedWan = toWan(originYuan.plus(args.adjustYuan));
 
     return {
       subjectTitle: title?.name ?? '',

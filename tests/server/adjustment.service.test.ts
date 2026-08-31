@@ -1195,10 +1195,10 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       const zip = await JSZip.loadAsync(buf);
       return zip.file('word/document.xml')!.async('text');
     };
-    // 年度维度:新设科目在列,调整额 80 元 = 0.01 万。
+    // 年度维度:新设科目在列,调整额 80 元 = 0.008 万(精确换算,不截断)。
     const xmlAnnual = await unzip(await exportAdjustmentDocx(adj.id, 'annual', adminUser()));
     expect(xmlAnnual).toContain('待审新设科目');
-    expect(xmlAnnual).toContain('0.01');
+    expect(xmlAnnual).toContain('0.008');
     // 总维度:同样在列(池内分配 0/0/0)。
     const xmlTotal = await unzip(await exportAdjustmentDocx(adj.id, 'total', adminUser()));
     expect(xmlTotal).toContain('待审新设科目');
