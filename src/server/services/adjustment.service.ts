@@ -475,6 +475,8 @@ export async function updateDraftAdjustment(
   const parsedLines = validateAndParseLines(payload);
 
   return prisma.$transaction(async (tx) => {
+    // 行锁:与提交互斥(§codex P2——驳回单被并发编辑+提交时,校验必须基于同一份明细)。
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
     const existing = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
     if (!existing) {
       throw new HTTPError(404, '调整单不存在');
@@ -810,35 +812,46 @@ export async function submitAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({
+  const adjRef = await prisma.budgetAdjustment.findUnique({
     where: { id: adjId },
-    include: { lines: true },
+    select: { projectId: true },
   });
-  if (!adj) {
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:adjust', adj.projectId);
+  await requirePermission(user, 'budget:adjust', adjRef.projectId);
 
-  // DRAFT 首次提交;REJECTED 驳回后修改可再次提交(锁已在驳回时释放,此处重建)。
-  if (adj.status !== ApprovalStatus.DRAFT && adj.status !== ApprovalStatus.REJECTED) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可提交,仅 草稿/已驳回 可提交`);
-  }
+  // 读单/守卫/解析全部移入事务并先锁单行(§codex P2):与并发编辑互斥,
+  // 校验/锁/状态迁移基于同一份明细与状态。
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({
+      where: { id: adjId },
+      include: { lines: true },
+    });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
 
-  const parsedLines = adj.lines.map((l) => ({
-    id: l.id,
-    subjectId: l.subjectId,
-    newSubjectName: l.newSubjectName,
-    newSubjectParentId: l.newSubjectParentId,
-    total: fromStored(l.totalAdjustment),
-    annual: fromStored(l.annualAdjustment),
-  }));
+    // DRAFT 首次提交;REJECTED 驳回后修改可再次提交(锁已在驳回时释放,此处重建)。
+    if (adj.status !== ApprovalStatus.DRAFT && adj.status !== ApprovalStatus.REJECTED) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可提交,仅 草稿/已驳回 可提交`);
+    }
 
-  // 并发复核预期 = 提交前的状态(DRAFT 首次提交 / REJECTED 驳回后再提交)。
-  const expectedStatus = adj.status;
-  if (adj.kind === AdjustmentKind.ALLOCATE) {
-    // 追加下达:正向 + 非零合计;池内分配再做容量护栏(expandTotals 不设上限);无锁、无零和校验。
-    validateAllocate(parsedLines);
-    return prisma.$transaction(async (tx) => {
+    const parsedLines = adj.lines.map((l) => ({
+      id: l.id,
+      subjectId: l.subjectId,
+      newSubjectName: l.newSubjectName,
+      newSubjectParentId: l.newSubjectParentId,
+      total: fromStored(l.totalAdjustment),
+      annual: fromStored(l.annualAdjustment),
+    }));
+
+    // 并发复核预期 = 提交前的状态(DRAFT 首次提交 / REJECTED 驳回后再提交)。
+    const expectedStatus = adj.status;
+    if (adj.kind === AdjustmentKind.ALLOCATE) {
+      // 追加下达:正向 + 非零合计;池内分配再做容量护栏(expandTotals 不设上限);无锁、无零和校验。
+      validateAllocate(parsedLines);
       await lockAndRecheckStatus(tx, adjId, expectedStatus);
       if (!adj.expandTotals) {
         await assertAllocateCapacity(tx, adj.projectId, parsedLines);
@@ -857,18 +870,16 @@ export async function submitAdjustment(
         after: snapshotAdjustment(submitted),
       });
       return submitted;
-    });
-  }
-
-  assertBalanced(parsedLines);
-  // 新增科目行原预算为 0,调减无意义(应只调增)。
-  for (const line of parsedLines) {
-    if (!line.subjectId && (line.total.isNeg() || line.annual.isNeg())) {
-      throw new HTTPError(422, `新增科目"${line.newSubjectName}"原预算为 0,不可调减`);
     }
-  }
 
-  return prisma.$transaction(async (tx) => {
+    assertBalanced(parsedLines);
+    // 新增科目行原预算为 0,调减无意义(应只调增)。
+    for (const line of parsedLines) {
+      if (!line.subjectId && (line.total.isNeg() || line.annual.isNeg())) {
+        throw new HTTPError(422, `新增科目"${line.newSubjectName}"原预算为 0,不可调减`);
+      }
+    }
+
     await lockAndRecheckStatus(tx, adjId, expectedStatus);
     // 总维度调减护栏:调整后不得为负(§总维度调减护栏)。
     await assertTotalDecreaseFloor(tx, adj.projectId, null, parsedLines);
