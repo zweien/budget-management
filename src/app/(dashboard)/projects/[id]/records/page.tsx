@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 
 import {
+  getSortedRowModel,
   flexRender,
   getCoreRowModel,
   getFacetedRowModel,
@@ -18,6 +19,7 @@ import {
   useReactTable,
   type ColumnDef,
   type ColumnFiltersState,
+  type SortingState,
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
@@ -232,6 +234,8 @@ function BusinessRecordsPageInner() {
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
   // Excel 式表头筛选(TanStack columnFilters)。
   // 初始值:状态默认排除已作废 + URL 深链(台账叶科目跳转:?subjectId=xx&year=yyyy)。
+  // 单列排序(§Q4:后点覆盖;不持久化;取消=回到服务端默认序:业务发生日期降序)。
+  const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(() => {
     const init: ColumnFiltersState = [
       { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
@@ -694,8 +698,10 @@ function BusinessRecordsPageInner() {
       {
         id: 'budgetYear',
         accessorKey: 'budgetYear',
+        // §codex P2:数值列 TanStack 自动首次降序;与其他列统一为首次升序。
+        sortDescFirst: false,
         header: ({ column }) => (
-          <HeaderFilter column={column} title="年度" type="values" options={yearOptions} />
+          <HeaderFilter column={column} title="年度" type="values" options={yearOptions} sortable />
         ),
         cell: ({ row }) => <span className="tabular-nums">{row.original.budgetYear}</span>,
         filterFn: multiSelect<BusinessRecordRow>(),
@@ -710,6 +716,7 @@ function BusinessRecordsPageInner() {
             type="values"
             valueLabels={subjectLabels}
             options={subjectOptions}
+            sortable
           />
         ),
         cell: ({ row }) => {
@@ -722,6 +729,11 @@ function BusinessRecordsPageInner() {
             </span>
           );
         },
+        sortingFn: (a, b, id) =>
+          (subjectMap.get(a.getValue<string>(id))?.name ?? '').localeCompare(
+            subjectMap.get(b.getValue<string>(id))?.name ?? '',
+            'zh-Hans-CN',
+          ),
         filterFn: multiSelect<BusinessRecordRow>(),
       },
       {
@@ -729,17 +741,22 @@ function BusinessRecordsPageInner() {
         accessorKey: 'amount',
         header: ({ column }) => (
           <span className="block text-right">
-            <HeaderFilter column={column} title="金额" type="range" />
+            <HeaderFilter column={column} title="金额" type="range" sortable />
           </span>
         ),
         cell: ({ row }) => <MoneyText value={row.original.amount} riskOnNegative={false} />,
+        sortingFn: (a, b, id) => {
+          const va = Number(a.getValue<string>(id)) || 0;
+          const vb = Number(b.getValue<string>(id)) || 0;
+          return va === vb ? 0 : va < vb ? -1 : 1;
+        },
         filterFn: numberRange<BusinessRecordRow>(),
       },
       {
         id: 'businessDate',
         accessorKey: 'businessDate',
         header: ({ column }) => (
-          <HeaderFilter column={column} title="业务发生日期" type="dateRange" />
+          <HeaderFilter column={column} title="业务发生日期" type="dateRange" sortable />
         ),
         cell: ({ row }) => (
           <span className="tabular-nums">{formatDate(row.original.businessDate)}</span>
@@ -755,6 +772,7 @@ function BusinessRecordsPageInner() {
             title="状态"
             type="values"
             valueLabels={STATUS_FILTER_LABELS}
+            sortable
           />
         ),
         cell: ({ row }) =>
@@ -765,18 +783,33 @@ function BusinessRecordsPageInner() {
               {STATUS_LABEL[row.original.status] ?? row.original.status}
             </Badge>
           ),
+        sortingFn: (a, b, id) => {
+          const label = (v: string) =>
+            v === '__void__' ? '已作废' : (STATUS_LABEL[v as BusinessStatus] ?? v);
+          return label(a.getValue<string>(id)).localeCompare(
+            label(b.getValue<string>(id)),
+            'zh-Hans-CN',
+          );
+        },
         filterFn: multiSelect<BusinessRecordRow>(),
       },
       {
         id: 'handler',
         accessorKey: 'handler',
-        header: ({ column }) => <HeaderFilter column={column} title="经办人" type="values" />,
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="经办人" type="values" sortable />
+        ),
         filterFn: multiSelect<BusinessRecordRow>(),
       },
       {
         id: 'docNo',
-        accessorKey: 'docNo',
-        header: ({ column }) => <HeaderFilter column={column} title="单据编号" type="text" />,
+        // §codex P2:null 归一为 undefined 走 sortUndefined(方向无关,双向恒最后),
+        // 避免 desc 反转 sortingFn 结果把空单据编号排到最前。
+        accessorFn: (row) => row.docNo ?? undefined,
+        sortUndefined: 'last',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="单据编号" type="text" sortable />
+        ),
         cell: ({ row }) =>
           row.original.docNo ? (
             <span className="block max-w-36 truncate font-mono text-xs" title={row.original.docNo}>
@@ -785,12 +818,14 @@ function BusinessRecordsPageInner() {
           ) : (
             <span className="text-mute">—</span>
           ),
+        sortingFn: (a, b, id) =>
+          (a.getValue<string>(id) ?? '').localeCompare(b.getValue<string>(id) ?? ''),
         filterFn: textContains<BusinessRecordRow>(),
       },
       {
         id: 'summary',
         accessorKey: 'summary',
-        header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" />,
+        header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
         cell: ({ row }) => (
           <span className="block max-w-40 truncate" title={row.original.summary}>
             {row.original.summary}
@@ -801,7 +836,9 @@ function BusinessRecordsPageInner() {
       {
         id: 'enteredAt',
         accessorKey: 'enteredAt',
-        header: ({ column }) => <HeaderFilter column={column} title="录入时间" type="dateRange" />,
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="录入时间" type="dateRange" sortable />
+        ),
         cell: ({ row }) => (
           <span className="tabular-nums">{formatDateTime(row.original.enteredAt)}</span>
         ),
@@ -840,12 +877,16 @@ function BusinessRecordsPageInner() {
   const table = useReactTable({
     data: records,
     columns,
-    state: { columnFilters },
+    state: { columnFilters, sorting },
     onColumnFiltersChange: setColumnFilters,
+    onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
+    enableSortingRemoval: true,
+    enableMultiSort: false,
   });
 
   // 批量作废目标 = 当前筛选可见且勾选的未作废行(所见即所废,避免误伤被筛选隐藏的行)。
