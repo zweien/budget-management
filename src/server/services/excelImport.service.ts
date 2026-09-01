@@ -87,8 +87,8 @@ export interface ConfirmResult {
 
 // ---------- 解析辅助 ----------
 
-/** 把 exceljs 单元格读成字符串(数字/日期均转字符串)。 */
-function cellToString(cell: ExcelJS.Cell | undefined | null): string | null {
+/** 把 exceljs 单元格读成字符串(数字/日期均转字符串);export 供结算单导入复用。 */
+export function cellToString(cell: ExcelJS.Cell | undefined | null): string | null {
   if (cell === null || cell === undefined) return null;
   const v = cell.value;
   if (v === null || v === undefined) return null;
@@ -100,7 +100,7 @@ function cellToString(cell: ExcelJS.Cell | undefined | null): string | null {
   if (typeof v === 'number') {
     // 数字可能是年度/金额。金额保留原始数值字符串;后续再规范化。
     if (Number.isFinite(v)) {
-      return Number.isInteger(v) ? String(v) : String(v);
+      return String(v);
     }
     return null;
   }
@@ -111,9 +111,20 @@ function cellToString(cell: ExcelJS.Cell | undefined | null): string | null {
     const s = v.trim();
     return s.length === 0 ? null : s;
   }
-  // 超链接/公式对象等:取 .result / .text。
-  const obj = v as { result?: unknown; text?: string; hyperlink?: string };
+  // 富文本(个人结算单「事项」列常见)/公式/超链接对象:拍平或取结果。
+  const obj = v as {
+    richText?: Array<{ text?: string }>;
+    result?: unknown;
+    text?: string;
+  };
   if (obj && typeof obj === 'object') {
+    if (Array.isArray(obj.richText)) {
+      const s = obj.richText
+        .map((t) => t.text ?? '')
+        .join('')
+        .trim();
+      return s.length > 0 ? s : null;
+    }
     if (obj.result instanceof Date) return formatYmd(obj.result);
     if (typeof obj.result === 'string') return obj.result.trim() || null;
     if (typeof obj.result === 'number') return String(obj.result);
@@ -123,15 +134,15 @@ function cellToString(cell: ExcelJS.Cell | undefined | null): string | null {
 }
 
 /** Date → 'YYYY-MM-DD'(UTC,避免时区漂移)。 */
-function formatYmd(d: Date): string {
+export function formatYmd(d: Date): string {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 
-/** 校验 YYYY-MM-DD 文本可解析为合法日期,返回规范化字符串。 */
-function normalizeDate(s: string | null): string | null {
+/** 校验 YYYY-MM-DD 文本可解析为合法日期,返回规范化字符串。export 供结算单导入复用。 */
+export function normalizeDate(s: string | null): string | null {
   if (!s) return null;
   // 已是 Date 转出的 yyyy-mm-dd 直通;也接受手填文本。
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
@@ -142,8 +153,8 @@ function normalizeDate(s: string | null): string | null {
   return formatYmd(dt);
 }
 
-/** 校验金额字符串 > 0,返回 2 位小数字符串;失败返回 null。 */
-function normalizeAmount(s: string | null): string | null {
+/** 校验金额字符串 > 0,返回 2 位小数字符串;失败返回 null。export 供结算单导入复用。 */
+export function normalizeAmount(s: string | null): string | null {
   if (s === null || s === '') return null;
   let d: D;
   try {

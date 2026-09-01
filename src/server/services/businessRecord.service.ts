@@ -26,6 +26,8 @@ export interface CreateRecordInput {
   handler: string;
   summary: string;
   status: BusinessStatus;
+  /** 财务系统单据编号(非必填;个人结算单导入来源)。 */
+  docNo?: string | null;
   remark?: string | null;
 }
 
@@ -38,6 +40,7 @@ export interface UpdateRecordInput {
   handler?: string;
   summary?: string;
   status?: BusinessStatus;
+  docNo?: string | null;
   remark?: string | null;
 }
 
@@ -63,6 +66,16 @@ export interface RecordWithWarning {
 }
 
 /** 把 BusinessRecord 行序列化为快照对象(用于 history before/after 与审计)。 */
+/** 单据编号规范化:trim + 长度上限;空串归一为 null。 */
+function normalizeDocNo(v: string | null | undefined): string | null {
+  const s = v?.trim() ?? '';
+  if (!s) return null;
+  if (s.length > 64) {
+    throw new HTTPError(422, '单据编号过长(最多 64 字符)');
+  }
+  return s;
+}
+
 function snapshotRecord(row: BusinessRecord): Record<string, unknown> {
   return snapshotRow({
     id: row.id,
@@ -74,6 +87,7 @@ function snapshotRecord(row: BusinessRecord): Record<string, unknown> {
     handler: row.handler,
     summary: row.summary,
     status: row.status,
+    docNo: row.docNo,
     remark: row.remark,
     isVoid: row.isVoid,
     voidReason: row.voidReason,
@@ -230,6 +244,7 @@ export async function createRecord(
         handler: input.handler.trim(),
         summary: input.summary.trim(),
         status: input.status,
+        docNo: normalizeDocNo(input.docNo),
         remark: input.remark ?? null,
         isVoid: false,
         createdById: user.id,
@@ -362,6 +377,7 @@ export async function updateRecord(
   };
   if (input.handler !== undefined) data.handler = input.handler.trim();
   if (input.summary !== undefined) data.summary = input.summary.trim();
+  if (input.docNo !== undefined) data.docNo = normalizeDocNo(input.docNo);
   if (input.remark !== undefined) data.remark = input.remark;
 
   const after = await prisma.$transaction(async (tx) => {
@@ -447,41 +463,98 @@ export async function voidRecord(
 
   const now = new Date();
   return prisma.$transaction(async (tx) => {
-    const after = await tx.businessRecord.update({
-      where: { id: recordId },
-      data: {
-        isVoid: true,
-        voidReason: reason.trim(),
-        voidedBy: user.id,
-        voidedAt: now,
-        modifiedBy: { connect: { id: user.id } },
-      },
-    });
-
-    await tx.businessRecordHistory.create({
-      data: {
-        id: uuidv7(),
-        businessRecordId: recordId,
-        action: 'void',
-        beforeData: snapshotRecord(before) as Prisma.InputJsonValue,
-        afterData: snapshotRecord(after) as Prisma.InputJsonValue,
-        operatorId: user.id,
-        reason: reason.trim(),
-      },
-    });
-
-    await recordAudit(tx, {
-      projectId: before.projectId,
-      objectType: 'business_records',
-      objectId: recordId,
-      action: 'void',
-      operatorId: user.id,
-      before: snapshotRecord(before),
-      after: snapshotRecord(after),
-    });
-
-    return after;
+    return voidOneInTx(tx, before, reason, user, now);
   });
+}
+
+/** 事务内作废单条:置 isVoid + history + 审计(单条/批量共用)。 */
+async function voidOneInTx(
+  tx: Prisma.TransactionClient,
+  before: BusinessRecord,
+  reason: string,
+  user: Pick<User, 'id' | 'role'>,
+  now: Date,
+): Promise<BusinessRecord> {
+  const after = await tx.businessRecord.update({
+    where: { id: before.id },
+    data: {
+      isVoid: true,
+      voidReason: reason.trim(),
+      voidedBy: user.id,
+      voidedAt: now,
+      modifiedBy: { connect: { id: user.id } },
+    },
+  });
+
+  await tx.businessRecordHistory.create({
+    data: {
+      id: uuidv7(),
+      businessRecordId: before.id,
+      action: 'void',
+      beforeData: snapshotRecord(before) as Prisma.InputJsonValue,
+      afterData: snapshotRecord(after) as Prisma.InputJsonValue,
+      operatorId: user.id,
+      reason: reason.trim(),
+    },
+  });
+
+  await recordAudit(tx, {
+    projectId: before.projectId,
+    objectType: 'business_records',
+    objectId: before.id,
+    action: 'void',
+    operatorId: user.id,
+    before: snapshotRecord(before),
+    after: snapshotRecord(after),
+  });
+
+  return after;
+}
+
+/**
+ * §8.6 批量作废业务记录(业务记录页勾选批量操作)。
+ * - 权限:record:void + 项目范围;原因必填(全部行共用同一原因)。
+ * - 事务内逐条作废;已作废行自动跳过(不报错);不属于该项目的 id 忽略。
+ * - 返回 { voided, skipped }。部分跳过不算失败:批量场景「能废的废掉」比全有全无更符合预期。
+ */
+export async function voidRecordsBatch(
+  projectId: string,
+  recordIds: string[],
+  reason: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<{ voided: number; skipped: number }> {
+  await requirePermission(user, 'record:void', projectId);
+  if (!reason || !reason.trim()) {
+    throw new HTTPError(422, '作废原因不能为空');
+  }
+  const ids = [...new Set(recordIds)].filter((v) => typeof v === 'string' && v.length > 0);
+  if (ids.length === 0) {
+    throw new HTTPError(422, '请选择要作废的记录');
+  }
+
+  const records = await prisma.businessRecord.findMany({
+    where: { id: { in: ids }, projectId },
+  });
+
+  const now = new Date();
+  let voided = 0;
+  let skipped = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const record of records) {
+      if (record.isVoid) {
+        skipped += 1;
+        continue;
+      }
+      await voidOneInTx(tx, record, reason, user, now);
+      voided += 1;
+    }
+  });
+
+  // 请求里的 id 若全部无效(不存在/跨项目),提示避免"成功但什么都没发生"。
+  if (voided === 0 && skipped === 0) {
+    throw new HTTPError(404, '未找到可作废的业务记录');
+  }
+  return { voided, skipped };
 }
 
 /**

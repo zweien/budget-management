@@ -1,9 +1,9 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { ChevronDown, FolderArchive, Funnel, Paperclip, Package, Plus } from 'lucide-react';
+import { ChevronDown, FolderArchive, Funnel, Paperclip, Package, Plus, Upload } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -39,6 +39,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 import {
   Dialog,
@@ -134,6 +135,7 @@ interface BusinessRecordRow {
   handler: string;
   summary: string;
   status: BusinessStatus;
+  docNo: string | null;
   remark: string | null;
   isVoid: boolean;
   voidReason: string | null;
@@ -168,6 +170,8 @@ interface ProjectDetail {
   name: string;
   /** 服务端随详情下发:是否可录入/维护业务记录(OWNER/HANDLER;决定新增/修改/状态/作废入口)。 */
   canWriteRecords?: boolean;
+  /** 是否有项目编辑权(ADMIN/OWNER;决定 Excel 导入入口,record:import 与之一致)。 */
+  canEdit?: boolean;
 }
 
 interface LedgerResponse {
@@ -206,6 +210,7 @@ const recordSchema = z.object({
   handler: z.string().trim().min(1, '请输入经办人').max(64),
   summary: z.string().trim().min(1, '请输入摘要').max(200),
   status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
+  docNo: z.string().trim().max(64, '单据编号过长'),
   remark: z.string().trim().max(500),
 });
 
@@ -216,6 +221,7 @@ type RecordFormValues = z.infer<typeof recordSchema>;
 function BusinessRecordsPageInner() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
+  const router = useRouter();
   const projectId = params.id;
 
   // 项目标题(仅用于错误态;标题由项目壳承载)。
@@ -260,6 +266,9 @@ function BusinessRecordsPageInner() {
   const [attachmentTarget, setAttachmentTarget] = useState<BusinessRecordRow | null>(null);
   // 按科目层级打包附件 Dialog(Task 5 集成)。
   const [packageOpen, setPackageOpen] = useState(false);
+  // 批量选择(勾选行 → 批量作废);仅记录可写者渲染勾选列。
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchVoidOpen, setBatchVoidOpen] = useState(false);
   // 表单内待上传附件(Task 10:不进 zod schema,业务保存成功后循环上传)。
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
@@ -270,6 +279,7 @@ function BusinessRecordsPageInner() {
       status: 'PLACEHOLDER',
       handler: '',
       summary: '',
+      docNo: '',
       remark: '',
     },
   });
@@ -344,6 +354,7 @@ function BusinessRecordsPageInner() {
       handler: '',
       summary: '',
       status: 'PLACEHOLDER',
+      docNo: '',
       remark: '',
     });
     setFormOpen(true);
@@ -361,6 +372,7 @@ function BusinessRecordsPageInner() {
       handler: row.handler,
       summary: row.summary,
       status: row.status,
+      docNo: row.docNo ?? '',
       remark: row.remark ?? '',
     });
     setFormOpen(true);
@@ -381,6 +393,7 @@ function BusinessRecordsPageInner() {
         handler: values.handler,
         summary: values.summary,
         status: values.status,
+        docNo: values.docNo || null,
         remark: values.remark || null,
       };
       setSubmitting(true);
@@ -411,6 +424,7 @@ function BusinessRecordsPageInner() {
               handler: values.handler,
               summary: '',
               status: values.status,
+              docNo: '',
               remark: '',
             });
             form.setFocus('amount');
@@ -465,6 +479,38 @@ function BusinessRecordsPageInner() {
       setVoidTarget(null);
       setVoidReason('');
       setVoidError(null);
+      await reloadRecords();
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** 提交批量作废(勾选行共用同一原因;已作废行服务端自动跳过)。 */
+  const submitBatchVoid = async () => {
+    const ids = visibleVoidableIds.filter((id) => selectedIds.has(id));
+    if (ids.length === 0) return;
+    const reason = voidReason.trim();
+    if (!reason) {
+      setVoidError('请填写作废原因');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await apiFetch<{ voided: number; skipped: number }>(
+        `/api/projects/${projectId}/records/void-batch`,
+        { method: 'POST', body: JSON.stringify({ recordIds: ids, reason }) },
+      );
+      toast.success(
+        res.skipped > 0
+          ? `已作废 ${res.voided} 条,跳过 ${res.skipped} 条已作废`
+          : `已批量作废 ${res.voided} 条`,
+      );
+      setBatchVoidOpen(false);
+      setVoidReason('');
+      setVoidError(null);
+      setSelectedIds(new Set());
       await reloadRecords();
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
@@ -596,6 +642,52 @@ function BusinessRecordsPageInner() {
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
   const columns = useMemo<ColumnDef<BusinessRecordRow>[]>(
     () => [
+      // 批量选择列(仅可写者渲染;已作废行禁选)。全选作用于当前筛选可见的未作废行。
+      ...(project?.canWriteRecords
+        ? [
+            {
+              id: 'select',
+              header: ({ table: tbl }) => {
+                const ids = tbl
+                  .getFilteredRowModel()
+                  .rows.filter((r) => !r.original.isVoid)
+                  .map((r) => r.original.id);
+                const sel = ids.filter((id) => selectedIds.has(id)).length;
+                const all = ids.length > 0 && sel === ids.length;
+                return (
+                  <Checkbox
+                    checked={sel > 0 && !all ? 'indeterminate' : all}
+                    onCheckedChange={() =>
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        ids.forEach((id) => (all ? next.delete(id) : next.add(id)));
+                        return next;
+                      })
+                    }
+                    aria-label="全选可见记录"
+                  />
+                );
+              },
+              enableColumnFilter: false,
+              enableSorting: false,
+              cell: ({ row }) => (
+                <Checkbox
+                  checked={selectedIds.has(row.original.id)}
+                  disabled={row.original.isVoid}
+                  onCheckedChange={() =>
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(row.original.id)) next.delete(row.original.id);
+                      else next.add(row.original.id);
+                      return next;
+                    })
+                  }
+                  aria-label={`选择记录:${row.original.summary}`}
+                />
+              ),
+            } as ColumnDef<BusinessRecordRow>,
+          ]
+        : []),
       {
         id: 'budgetYear',
         accessorKey: 'budgetYear',
@@ -679,6 +771,20 @@ function BusinessRecordsPageInner() {
         filterFn: multiSelect<BusinessRecordRow>(),
       },
       {
+        id: 'docNo',
+        accessorKey: 'docNo',
+        header: ({ column }) => <HeaderFilter column={column} title="单据编号" type="text" />,
+        cell: ({ row }) =>
+          row.original.docNo ? (
+            <span className="block max-w-36 truncate font-mono text-xs" title={row.original.docNo}>
+              {row.original.docNo}
+            </span>
+          ) : (
+            <span className="text-mute">—</span>
+          ),
+        filterFn: textContains<BusinessRecordRow>(),
+      },
+      {
         id: 'summary',
         accessorKey: 'summary',
         header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" />,
@@ -723,7 +829,7 @@ function BusinessRecordsPageInner() {
         cell: ({ row }) => <RowActions row={row.original} />,
       },
     ],
-    [subjectLabels, yearOptions],
+    [subjectLabels, yearOptions, project?.canWriteRecords, selectedIds],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
@@ -738,6 +844,13 @@ function BusinessRecordsPageInner() {
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   });
+
+  // 批量作废目标 = 当前筛选可见且勾选的未作废行(所见即所废,避免误伤被筛选隐藏的行)。
+  const visibleVoidableIds = table
+    .getRowModel()
+    .rows.filter((r) => !r.original.isVoid)
+    .map((r) => r.original.id);
+  const selectedVisibleCount = visibleVoidableIds.filter((id) => selectedIds.has(id)).length;
 
   if (loadingMeta) {
     return (
@@ -788,8 +901,44 @@ function BusinessRecordsPageInner() {
               新增
             </Button>
           ) : null}
+          {project?.canEdit ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/projects/${projectId}/imports`)}
+            >
+              <Upload />
+              导入 Excel
+            </Button>
+          ) : null}
         </div>
       </div>
+
+      {/* 批量操作条(有勾选时出现) */}
+      {project?.canWriteRecords && selectedVisibleCount > 0 ? (
+        <div className="flex items-center justify-between rounded-lg border border-warning/40 bg-warning/20 px-4 py-2">
+          <p className="text-sm">
+            已勾选 <span className="font-semibold tabular-nums">{selectedVisibleCount}</span>{' '}
+            条未作废记录(仅作用于当前筛选结果)
+          </p>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+              取消勾选
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setVoidReason('');
+                setVoidError(null);
+                setBatchVoidOpen(true);
+              }}
+            >
+              批量作废
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {/* 记录表(Excel 式表头筛选) */}
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
@@ -973,6 +1122,19 @@ function BusinessRecordsPageInner() {
               />
               <FormField
                 control={form.control}
+                name="docNo"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>单据编号(可选)</FormLabel>
+                    <FormControl>
+                      <Input maxLength={64} placeholder="财务系统单据编号" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
                 name="remark"
                 render={({ field }) => (
                   <FormItem>
@@ -1077,12 +1239,13 @@ function BusinessRecordsPageInner() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 作废 Dialog(原因必填,原生受控 textarea) */}
+      {/* 作废 Dialog(单条/批量共用;原因必填,原生受控 textarea) */}
       <Dialog
-        open={voidTarget !== null}
+        open={voidTarget !== null || batchVoidOpen}
         onOpenChange={(open) => {
           if (!open) {
             setVoidTarget(null);
+            setBatchVoidOpen(false);
             setVoidReason('');
             setVoidError(null);
           }
@@ -1090,10 +1253,12 @@ function BusinessRecordsPageInner() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>作废业务记录</DialogTitle>
+            <DialogTitle>
+              {batchVoidOpen ? `批量作废 ${selectedVisibleCount} 条业务记录` : '作废业务记录'}
+            </DialogTitle>
           </DialogHeader>
-          {voidTarget ? (
-            <div className="space-y-3">
+          <div className="space-y-3">
+            {voidTarget ? (
               <Alert variant="warning">
                 <AlertTitle>
                   将作废记录:{formatDate(voidTarget.businessDate)} ·{' '}
@@ -1101,29 +1266,39 @@ function BusinessRecordsPageInner() {
                 </AlertTitle>
                 <AlertDescription>作废后该记录占用将由台账实时解除,不可恢复。</AlertDescription>
               </Alert>
-              <div className="grid gap-1.5">
-                <Label htmlFor="void-reason">作废原因</Label>
-                <Textarea
-                  id="void-reason"
-                  maxLength={200}
-                  rows={3}
-                  placeholder="请填写作废原因"
-                  value={voidReason}
-                  onChange={(e) => {
-                    setVoidReason(e.target.value);
-                    if (voidError) setVoidError(null);
-                  }}
-                  aria-invalid={!!voidError}
-                />
-                {voidError ? <p className="text-xs text-destructive">{voidError}</p> : null}
-              </div>
+            ) : (
+              <Alert variant="warning">
+                <AlertTitle>
+                  将作废当前勾选的 {selectedVisibleCount} 条记录(已作废记录自动跳过)。
+                </AlertTitle>
+                <AlertDescription>
+                  作废后记录占用由台账实时解除,不可恢复;作废原因将写入全部记录的历史。
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="grid gap-1.5">
+              <Label htmlFor="void-reason">作废原因</Label>
+              <Textarea
+                id="void-reason"
+                maxLength={200}
+                rows={3}
+                placeholder="请填写作废原因"
+                value={voidReason}
+                onChange={(e) => {
+                  setVoidReason(e.target.value);
+                  if (voidError) setVoidError(null);
+                }}
+                aria-invalid={!!voidError}
+              />
+              {voidError ? <p className="text-xs text-destructive">{voidError}</p> : null}
             </div>
-          ) : null}
+          </div>
           <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
                 setVoidTarget(null);
+                setBatchVoidOpen(false);
                 setVoidReason('');
                 setVoidError(null);
               }}
@@ -1131,8 +1306,12 @@ function BusinessRecordsPageInner() {
             >
               取消
             </Button>
-            <Button variant="destructive" onClick={() => void submitVoid()} disabled={submitting}>
-              {submitting ? '提交中…' : '确认作废'}
+            <Button
+              variant="destructive"
+              onClick={() => void (batchVoidOpen ? submitBatchVoid() : submitVoid())}
+              disabled={submitting}
+            >
+              {submitting ? '提交中…' : batchVoidOpen ? '确认批量作废' : '确认作废'}
             </Button>
           </DialogFooter>
         </DialogContent>

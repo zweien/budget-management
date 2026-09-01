@@ -6,6 +6,7 @@ import { FileSpreadsheet, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
+import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  SettlementImportPreview,
+  type SettlementBatchData,
+} from '@/components/records/settlement-import-preview';
 
 /** §10 预览页一行(对应 GET /imports/:batchId 返回的三分组项)。 */
 interface PreviewRow {
@@ -59,6 +64,17 @@ interface BatchPreview {
   valid: PreviewRow[];
   errors: PreviewRow[];
   duplicates: PreviewRow[];
+}
+
+/** 批次列表项(GET /imports)。 */
+interface BatchListItem {
+  batchId: string;
+  fileName: string;
+  templateVersion: string;
+  status: string;
+  createdAt: string;
+  confirmedAt: string | null;
+  rowCount: number;
 }
 
 /** 上传文件(走原生 fetch + mock header,不用 apiFetch 的 JSON Content-Type)。 */
@@ -200,7 +216,8 @@ function ImportPageInner() {
   const projectId = params.id;
   const batchId = search.get('batch') ?? null;
 
-  const [preview, setPreview] = useState<BatchPreview | null>(null);
+  // 预览载荷:标准模板(BatchPreview)或个人结算单(SettlementBatchData),按 templateVersion 分流。
+  const [preview, setPreview] = useState<BatchPreview | SettlementBatchData | null>(null);
   // 进入预览模式(batchId 非空)时初始即为 loading;所有 setState 仅在 await 之后。
   const [loading, setLoading] = useState<boolean>(!!batchId);
   const [uploading, setUploading] = useState(false);
@@ -208,6 +225,8 @@ function ImportPageInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // 进行中/历史批次(暂存再入口)。
+  const [batches, setBatches] = useState<BatchListItem[] | null>(null);
   // 编辑权门控:undefined=未加载;false=只读(隐藏上传/确认入口)。
   const [canEdit, setCanEdit] = useState<boolean | undefined>(undefined);
 
@@ -224,18 +243,34 @@ function ImportPageInner() {
     };
   }, [projectId]);
 
+  // 上传模式:拉取批次列表(进行中批次可继续)。
+  useEffect(() => {
+    if (batchId || canEdit === false) return;
+    let cancelled = false;
+    apiFetch<{ batches: BatchListItem[] }>(`/api/projects/${projectId}/imports`)
+      .then((d) => {
+        if (!cancelled) setBatches(d.batches);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [batchId, projectId, canEdit]);
+
   // 首次/批次切换时拉取预览;effect 体内不调用 setState(全部在 Promise 回调中)。
   useEffect(() => {
     if (!batchId) return;
     let cancelled = false;
-    apiFetch<BatchPreview>(`/api/projects/${projectId}/imports/${batchId}`)
+    apiFetch<BatchPreview | SettlementBatchData>(`/api/projects/${projectId}/imports/${batchId}`)
       .then((data) => {
         if (cancelled) return;
         setPreview(data);
-        // §10.3 疑似重复默认不勾选;有效行默认全选。
-        const sel = new Set<string>();
-        data.valid.forEach((r) => sel.add(r.rowId));
-        setSelected(sel);
+        // §10.3 疑似重复默认不勾选;有效行默认全选(仅标准模板;结算单由其组件自管)。
+        if (data.templateVersion !== SETTLEMENT_TEMPLATE_VERSION) {
+          const sel = new Set<string>();
+          (data as BatchPreview).valid.forEach((r) => sel.add(r.rowId));
+          setSelected(sel);
+        }
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -281,7 +316,8 @@ function ImportPageInner() {
     setConfirming(true);
     try {
       const res = await apiFetch<{ created: number }>(
-        `/api/projects/${projectId}/imports/${preview.batchId}/confirm`,
+        // 结算单批次由 SettlementImportPreview 自行确认,此处必为标准模板载荷。
+        `/api/projects/${projectId}/imports/${(preview as BatchPreview).batchId}/confirm`,
         {
           method: 'POST',
           body: JSON.stringify({ selectedRowIds: [...selected] }),
@@ -297,11 +333,12 @@ function ImportPageInner() {
   };
 
   const stats = useMemo(() => {
-    if (!preview) return null;
+    if (!preview || preview.templateVersion === SETTLEMENT_TEMPLATE_VERSION) return null;
+    const std = preview as BatchPreview;
     return {
-      valid: preview.valid.length,
-      errors: preview.errors.length,
-      duplicates: preview.duplicates.length,
+      valid: std.valid.length,
+      errors: std.errors.length,
+      duplicates: std.duplicates.length,
       selected: selected.size,
     };
   }, [preview, selected]);
@@ -330,7 +367,19 @@ function ImportPageInner() {
       );
     }
 
-    const confirmed = preview.status === 'confirmed';
+    // 个人结算单批次:整页交给结算单预览组件(逐条科目指定 + 暂存)。
+    if (preview.templateVersion === SETTLEMENT_TEMPLATE_VERSION) {
+      return (
+        <SettlementImportPreview
+          projectId={projectId}
+          initialData={preview as SettlementBatchData}
+          canEdit={canEdit === true}
+        />
+      );
+    }
+
+    const standard = preview as BatchPreview;
+    const confirmed = standard.status === 'confirmed';
 
     return (
       <div className="space-y-4">
@@ -367,7 +416,7 @@ function ImportPageInner() {
 
         <Alert variant="info">
           <AlertTitle>
-            文件:{preview.fileName}(模板 v{preview.templateVersion})
+            文件:{standard.fileName}(模板 v{standard.templateVersion})
           </AlertTitle>
           <AlertDescription>
             {confirmed
@@ -378,11 +427,11 @@ function ImportPageInner() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">有效行({preview.valid.length})</CardTitle>
+            <CardTitle className="text-sm">有效行({standard.valid.length})</CardTitle>
           </CardHeader>
           <CardContent>
             <PreviewTable
-              rows={preview.valid}
+              rows={standard.valid}
               selectable={!confirmed}
               selected={selected}
               onToggle={toggleRow}
@@ -394,12 +443,12 @@ function ImportPageInner() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              疑似重复行({preview.duplicates.length})<Badge variant="warning">默认不导入</Badge>
+              疑似重复行({standard.duplicates.length})<Badge variant="warning">默认不导入</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <PreviewTable
-              rows={preview.duplicates}
+              rows={standard.duplicates}
               selectable={!confirmed}
               selected={selected}
               onToggle={toggleRow}
@@ -410,11 +459,11 @@ function ImportPageInner() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">错误行({preview.errors.length})</CardTitle>
+            <CardTitle className="text-sm">错误行({standard.errors.length})</CardTitle>
           </CardHeader>
           <CardContent>
             <PreviewTable
-              rows={preview.errors}
+              rows={standard.errors}
               selectable={false}
               selected={selected}
               onToggle={toggleRow}
@@ -474,11 +523,72 @@ function ImportPageInner() {
       <Alert variant="info">
         <AlertTitle>两阶段导入:上传校验 → 预览确认</AlertTitle>
         <AlertDescription>
-          上传后将逐行校验(项目编号/年度/叶科目/金额/状态/日期),识别疑似重复行,生成预览。
-          在预览页勾选有效行后点击「确认导入」才会写入业务记录。超预算行允许导入(§10.2)。
-          请先下载模板按格式填写。
+          支持两种文件,上传时自动识别:① 系统模板(下载模板后按列填写,文件内含科目编码); ②
+          财务系统导出的「个人结算单查询」(表头在第 4 行,无科目列,预览页逐条指定科目)。
+          上传后逐行校验并识别疑似重复;确认导入才写入业务记录,期间可暂存退出。
         </AlertDescription>
       </Alert>
+
+      {/* 进行中 / 历史批次(结算单导入的暂存再入口)。 */}
+      {batches && batches.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">导入批次</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>文件</TableHead>
+                  <TableHead className="w-32">类型</TableHead>
+                  <TableHead className="w-24">状态</TableHead>
+                  <TableHead className="w-20 tabular-nums">行数</TableHead>
+                  <TableHead className="w-40">上传时间</TableHead>
+                  <TableHead className="w-20" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {batches.map((b) => (
+                  <TableRow key={b.batchId}>
+                    <TableCell className="max-w-64 truncate" title={b.fileName}>
+                      {b.fileName}
+                    </TableCell>
+                    <TableCell>
+                      {b.templateVersion === SETTLEMENT_TEMPLATE_VERSION ? (
+                        <Badge>个人结算单</Badge>
+                      ) : (
+                        <Badge variant="secondary">标准模板</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {b.status === 'confirmed' ? (
+                        <Badge variant="secondary">已导入</Badge>
+                      ) : (
+                        <Badge variant="warning">进行中</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{b.rowCount}</TableCell>
+                    <TableCell className="tabular-nums text-xs">
+                      {b.createdAt.slice(0, 16).replace('T', ' ')}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          router.push(`/projects/${projectId}/imports?batch=${b.batchId}`)
+                        }
+                      >
+                        {b.status === 'confirmed' ? '查看' : '继续'}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 拖放上传区(原生 file input + drag events,替代 antd Dragger) */}
       <label

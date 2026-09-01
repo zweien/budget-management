@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { HTTPError, requireUser } from '@/lib/auth/session';
 import { parseAndValidate } from '@/server/services/excelImport.service';
+import {
+  listImportBatches,
+  loadSettlementWorkbookIfMatch,
+  parseSettlement,
+} from '@/server/services/settlementImport.service';
 
 /**
  * POST /api/projects/:id/imports — 上传 Excel 文件,解析+校验+疑似重复检测(§10 阶段一)。
@@ -28,8 +33,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const batchId = await parseAndValidate(arrayBuffer, id, user, name);
+    // 格式自动识别:命中个人结算单表头(单据编号+单据状态)走结算单解析,否则标准模板。
+    const settlementWb = await loadSettlementWorkbookIfMatch(arrayBuffer);
+    const batchId = settlementWb
+      ? await parseSettlement(settlementWb, id, user, name)
+      : await parseAndValidate(arrayBuffer, id, user, name);
     return NextResponse.json({ batchId }, { status: 201 });
+  } catch (e) {
+    if (e instanceof HTTPError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
+}
+
+/**
+ * GET /api/projects/:id/imports — 批次列表(最近 20 条)。
+ * 供上传页展示「进行中批次」(暂存的结算单导入可从此继续)。
+ */
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const user = await requireUser();
+    const { id } = await params;
+    const batches = await listImportBatches(id, user);
+    return NextResponse.json({ batches });
   } catch (e) {
     if (e instanceof HTTPError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

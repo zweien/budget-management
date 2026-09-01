@@ -16,6 +16,7 @@ import {
   listRecords,
   updateRecord,
   voidRecord,
+  voidRecordsBatch,
   switchStatus,
 } from '@/server/services/businessRecord.service';
 
@@ -493,5 +494,129 @@ describe('businessRecord.service (integration, real PG)', () => {
       adminUser(),
     );
     expect(combo.length).toBe(0);
+  });
+});
+
+/**
+ * 批量作废(voidRecordsBatch)独立用例:最小夹具(项目+叶科目+3 条记录),
+ * 不走初始预算编制流程(超预算允许,createRecord 只要求叶科目)。
+ */
+describe('businessRecord.service voidRecordsBatch (integration, real PG)', () => {
+  let adminId: string;
+  let outsiderId: string;
+  let projectId: string;
+  let leafId: string;
+  const recordIds: string[] = [];
+  const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
+
+  beforeAll(async () => {
+    await prisma.$connect();
+    adminId = uuidv7();
+    outsiderId = uuidv7();
+    await prisma.user.createMany({
+      data: [
+        { id: adminId, name: 'admin-batchvoid', role: UserRole.ADMIN },
+        { id: outsiderId, name: 'outsider-batchvoid', role: UserRole.USER },
+      ],
+    });
+    const project = await createProject(
+      { code: `BV-${uuidv7().slice(0, 8)}`, name: '批量作废测试' },
+      adminUser(),
+    );
+    projectId = project.id;
+    leafId = uuidv7();
+    await prisma.budgetSubject.create({
+      data: {
+        id: leafId,
+        projectId,
+        parentId: null,
+        code: 'L1',
+        name: '叶科目',
+        level: 1,
+        isLeaf: true,
+      },
+    });
+    for (const i of [1, 2, 3]) {
+      const { record } = await createRecord(
+        projectId,
+        {
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: `${i}0.00`,
+          businessDate: '2026-08-01',
+          handler: '经办',
+          summary: `批量作废记录${i}`,
+          status: BusinessStatus.PAID,
+        },
+        adminUser(),
+      );
+      recordIds.push(record.id);
+    }
+  });
+
+  afterAll(async () => {
+    await prisma.businessRecordHistory
+      .deleteMany({ where: { businessRecord: { projectId } } })
+      .catch(() => {});
+    await prisma.businessRecord.deleteMany({ where: { projectId } }).catch(() => {});
+    await prisma.auditLog.deleteMany({ where: { projectId } }).catch(() => {});
+    await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
+    await prisma.projectMember.deleteMany({ where: { projectId } }).catch(() => {});
+    await prisma.projectBudget.deleteMany({ where: { projectId } }).catch(() => {});
+    await prisma.project.deleteMany({ where: { id: projectId } }).catch(() => {});
+    await prisma.user.deleteMany({ where: { id: { in: [adminId, outsiderId] } } }).catch(() => {});
+    await prisma.$disconnect();
+  });
+
+  it('无成员资格的普通用户 → 403;空原因/空 id 列表 → 422', async () => {
+    await expect(
+      voidRecordsBatch(projectId, recordIds.slice(0, 1), '原因', {
+        id: outsiderId,
+        role: UserRole.USER,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      voidRecordsBatch(projectId, recordIds.slice(0, 1), '  ', adminUser()),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(voidRecordsBatch(projectId, [], '原因', adminUser())).rejects.toMatchObject({
+      status: 422,
+    });
+  });
+
+  it('批量作废:2 条生效;再跑一遍全部跳过;history/审计逐条留痕', async () => {
+    // 预先作废第 3 条(模拟已作废行)。
+    await voidRecord(recordIds[2], '单独作废', adminUser());
+
+    const res = await voidRecordsBatch(projectId, recordIds, '集中清理', adminUser());
+    expect(res).toEqual({ voided: 2, skipped: 1 });
+
+    const rows = await prisma.businessRecord.findMany({
+      where: { id: { in: recordIds } },
+    });
+    expect(rows.every((r) => r.isVoid)).toBe(true);
+    expect(rows.every((r) => r.voidReason === '集中清理' || r.voidReason === '单独作废')).toBe(
+      true,
+    );
+
+    // history:批量 2 条 + 单独 1 条 = 3 条 void。
+    const history = await prisma.businessRecordHistory.findMany({
+      where: { businessRecordId: { in: recordIds }, action: 'void' },
+    });
+    expect(history).toHaveLength(3);
+    // 审计 void 3 条。
+    const audits = await prisma.auditLog.findMany({
+      where: { projectId, objectType: 'business_records', action: 'void' },
+    });
+    expect(audits).toHaveLength(3);
+
+    // 再跑一遍:全部已作废 → voided 0 / skipped 3(不算失败)。
+    const again = await voidRecordsBatch(projectId, recordIds, '重复操作', adminUser());
+    expect(again).toEqual({ voided: 0, skipped: 3 });
+  });
+
+  it('全部 id 无效(跨项目/不存在)→ 404', async () => {
+    await expect(
+      voidRecordsBatch(projectId, [uuidv7(), uuidv7()], '原因', adminUser()),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });
