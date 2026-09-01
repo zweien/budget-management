@@ -633,6 +633,15 @@ export interface AdjustmentLineDetail {
   afterAnnual: string;
 }
 
+/** 审批流转记录条目(§审批记录保留与展示)。 */
+export interface AdjustmentHistoryEntry {
+  action: string;
+  operatorName: string;
+  operatedAt: Date;
+  /** 审批/驳回意见(无则为 null)。 */
+  opinion: string | null;
+}
+
 /** 调整单详情(明细行 + 双维度合计)。 */
 export interface AdjustmentDetail {
   id: string;
@@ -647,6 +656,8 @@ export interface AdjustmentDetail {
   /** 最近一次驳回意见(从未被驳回则为 null)。 */
   rejectionOpinion: string | null;
   rejectionAt: Date | null;
+  /** 审批流转记录(审计日志:新建/修改/提交/审批/驳回/撤回,含意见与操作人)。 */
+  history: AdjustmentHistoryEntry[];
   lines: AdjustmentLineDetail[];
   sums: {
     originTotal: string;
@@ -754,14 +765,25 @@ export async function getAdjustmentDetail(
   const sumBy = (pick: (l: AdjustmentLineDetail) => string) =>
     lines.reduce((acc, l) => acc.plus(fromStored(pick(l))), ZERO).toFixed(2);
 
-  // 最近一次驳回意见(§驳回后再提交:申请人需要知道驳回原因)。
-  // 驳回意见在 recordAudit 的 afterData.opinion 里(approval_logs 是遗留表,无此数据)。
-  const lastRejection = await prisma.auditLog.findFirst({
-    where: { objectType: 'budget_adjustments', objectId: adj.id, action: 'reject' },
-    orderBy: { operatedAt: 'desc' },
+  // 审批流转记录(§审批记录保留与展示):审计日志按时间升序,含操作人。
+  const historyRows = await prisma.auditLog.findMany({
+    where: {
+      objectType: 'budget_adjustments',
+      objectId: adj.id,
+      action: { in: ['create', 'update', 'submit', 'approve', 'reject', 'withdraw'] },
+    },
+    orderBy: { operatedAt: 'asc' },
+    include: { operator: { select: { name: true } } },
   });
-  const rejectionOpinion =
-    (lastRejection?.afterData as { opinion?: unknown } | null)?.opinion ?? null;
+  const history: AdjustmentHistoryEntry[] = historyRows.map((h) => ({
+    action: h.action,
+    operatorName: h.operator?.name ?? '—',
+    operatedAt: h.operatedAt,
+    opinion: ((h.afterData as { opinion?: unknown } | null)?.opinion as string | undefined) ?? null,
+  }));
+  // 最近一次驳回意见 = 流转记录中最后一条 reject 的意见。
+  const lastRejection = [...history].reverse().find((h) => h.action === 'reject');
+  const rejectionOpinion = lastRejection?.opinion ?? null;
 
   return {
     id: adj.id,
@@ -773,8 +795,9 @@ export async function getAdjustmentDetail(
     totalReason: adj.totalReason,
     annualReason: adj.annualReason,
     createdAt: adj.createdAt,
-    rejectionOpinion: typeof rejectionOpinion === 'string' ? rejectionOpinion : null,
+    rejectionOpinion,
     rejectionAt: lastRejection?.operatedAt ?? null,
+    history,
     lines,
     sums: {
       originTotal: sumBy((l) => l.originTotal),

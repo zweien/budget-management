@@ -22,6 +22,16 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 
+/** 审批流转动作的中文标签。 */
+const HISTORY_ACTION_LABEL: Record<string, string> = {
+  create: '新建',
+  update: '修改',
+  submit: '提交审批',
+  approve: '审批通过',
+  reject: '驳回',
+  withdraw: '撤回',
+};
+
 /** 状态展示语义色遵循 DESIGN.md;导出供调整列表页复用,避免两份定义漂移。 */
 export const STATUS_LABEL: Record<string, string> = {
   DRAFT: '草稿',
@@ -55,6 +65,13 @@ export interface AdjustmentDetailVO {
   createdAt: string;
   /** 最近一次驳回意见(从未被驳回则为 null)。 */
   rejectionOpinion: string | null;
+  /** 审批流转记录(时间升序)。 */
+  history: {
+    action: string;
+    operatorName: string;
+    operatedAt: string;
+    opinion: string | null;
+  }[];
   lines: {
     id: string;
     subjectId: string | null;
@@ -346,6 +363,36 @@ export function AdjustmentDetailSheet({
                     </TableRow>
                   </TableFooter>
                 </Table>
+              </div>
+            ) : null}
+
+            {/* 审批流转记录(§审批记录保留与展示) */}
+            {detail && detail.history.length > 0 ? (
+              <div className="overflow-hidden rounded-lg border border-border">
+                <div className="border-b border-border bg-muted/40 px-3 py-2 text-sm font-medium">
+                  审批记录
+                </div>
+                <ul className="divide-y divide-border">
+                  {detail.history.map((h, i) => (
+                    <li
+                      key={`${h.action}:${i}`}
+                      className="flex items-start justify-between gap-3 px-3 py-2 text-sm"
+                    >
+                      <span>
+                        <span className="font-medium">
+                          {HISTORY_ACTION_LABEL[h.action] ?? h.action}
+                        </span>
+                        {h.opinion ? (
+                          <span className="mt-0.5 block text-xs text-mute">意见:{h.opinion}</span>
+                        ) : null}
+                      </span>
+                      <span className="text-right text-xs text-mute">
+                        {h.operatorName}
+                        <span className="block tabular-nums">{formatDateTime(h.operatedAt)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
 

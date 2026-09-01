@@ -1629,6 +1629,13 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
 
     // 审批生效:A 年度 600 → 500。
     await approveAdjustment(adj.id, adminUser());
+    // §审批记录:流转历史完整保留(新建→提交→驳回(含意见)→修改→提交→审批)。
+    const finalDetail = await getAdjustmentDetail(adj.id, adminUser());
+    const actions = finalDetail.history.map((h) => h.action);
+    expect(actions).toEqual(['create', 'submit', 'reject', 'update', 'submit', 'approve']);
+    const rejectEntry = finalDetail.history.find((h) => h.action === 'reject')!;
+    expect(rejectEntry.opinion).toBe('额度依据不足,退回修改');
+    expect(rejectEntry.operatorName).toBe('admin-adjdetail');
     const sb = await prisma.subjectBudget.findUnique({
       where: {
         projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: leafA.id },
