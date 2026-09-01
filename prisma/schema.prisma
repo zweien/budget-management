@@ -322,6 +322,8 @@ model BusinessRecord {
   handler       String
   summary       String
   status        BusinessStatus
+  // 财务系统单据编号(个人结算单导入来源;手动补录可填)。非必填、不唯一。
+  docNo         String?
   remark        String?
   isVoid        Boolean         @default(false) @map("is_void")
   voidReason    String?         @map("void_reason")
@@ -341,6 +343,7 @@ model BusinessRecord {
 
   @@index([projectId, budgetYear, subjectId, isVoid])
   @@index([projectId, budgetYear])
+  @@index([projectId, docNo])
   @@map("business_records")
 }
 
