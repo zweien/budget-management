@@ -698,6 +698,8 @@ function BusinessRecordsPageInner() {
       {
         id: 'budgetYear',
         accessorKey: 'budgetYear',
+        // §codex P2:数值列 TanStack 自动首次降序;与其他列统一为首次升序。
+        sortDescFirst: false,
         header: ({ column }) => (
           <HeaderFilter column={column} title="年度" type="values" options={yearOptions} sortable />
         ),
@@ -801,7 +803,10 @@ function BusinessRecordsPageInner() {
       },
       {
         id: 'docNo',
-        accessorKey: 'docNo',
+        // §codex P2:null 归一为 undefined 走 sortUndefined(方向无关,双向恒最后),
+        // 避免 desc 反转 sortingFn 结果把空单据编号排到最前。
+        accessorFn: (row) => row.docNo ?? undefined,
+        sortUndefined: 'last',
         header: ({ column }) => (
           <HeaderFilter column={column} title="单据编号" type="text" sortable />
         ),
@@ -813,14 +818,8 @@ function BusinessRecordsPageInner() {
           ) : (
             <span className="text-mute">—</span>
           ),
-        sortingFn: (a, b, id) => {
-          const va = a.getValue<string | null>(id);
-          const vb = b.getValue<string | null>(id);
-          if (!va && !vb) return 0;
-          if (!va) return 1; // 空单据编号恒排最后(双向一致)。
-          if (!vb) return -1;
-          return va.localeCompare(vb);
-        },
+        sortingFn: (a, b, id) =>
+          (a.getValue<string>(id) ?? '').localeCompare(b.getValue<string>(id) ?? ''),
         filterFn: textContains<BusinessRecordRow>(),
       },
       {
