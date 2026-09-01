@@ -677,8 +677,12 @@ export async function getAdjustmentDetail(
       },
       select: { id: true, name: true, code: true, parentId: true, createdAt: true },
     }),
-    // 待审/草稿:参照提交时刻;已生效:参照审批时刻(undefined → 内部取 approvedAt)。
-    buildBaselineAmounts(adj, adj.status === 'APPROVED' ? undefined : adj.createdAt),
+    // 待审/草稿:参照最近提交时刻(驳回后再提交会刷新 submittedAt);
+    // 已生效:参照审批时刻(undefined → 内部取 approvedAt)。
+    buildBaselineAmounts(
+      adj,
+      adj.status === 'APPROVED' ? undefined : (adj.submittedAt ?? adj.createdAt),
+    ),
   ]);
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
 
@@ -841,7 +845,7 @@ export async function submitAdjustment(
       }
       const submitted = await tx.budgetAdjustment.update({
         where: { id: adjId },
-        data: { status: ApprovalStatus.PENDING },
+        data: { status: ApprovalStatus.PENDING, submittedAt: new Date() },
       });
       await recordAudit(tx, {
         projectId: adj.projectId,
@@ -938,7 +942,7 @@ export async function submitAdjustment(
 
     const submitted = await tx.budgetAdjustment.update({
       where: { id: adjId },
-      data: { status: ApprovalStatus.PENDING },
+      data: { status: ApprovalStatus.PENDING, submittedAt: new Date() },
     });
 
     await recordAudit(tx, {

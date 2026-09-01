@@ -1588,6 +1588,8 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
       adminUser(),
     );
     await submitAdjustment(adj.id, adminUser());
+    const firstSubmittedAt = (await getAdjustment(adj.id, adminUser())).submittedAt;
+    expect(firstSubmittedAt).not.toBeNull();
     await rejectAdjustment(adj.id, adminUser(), '额度依据不足,退回修改');
 
     const rejected = await getAdjustment(adj.id, adminUser());
@@ -1618,6 +1620,8 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
     await submitAdjustment(adj.id, adminUser());
     const resubmitted = await getAdjustment(adj.id, adminUser());
     expect(resubmitted.status).toBe(ApprovalStatus.PENDING);
+    // §codex P2:再提交刷新提交时间(详情基线快照参照随之更新)。
+    expect(resubmitted.submittedAt!.getTime()).toBeGreaterThan(firstSubmittedAt!.getTime());
     const rebuiltLocks = await prisma.budgetLock.findMany({
       where: { adjustmentId: adj.id, releasedAt: null },
     });

@@ -566,15 +566,27 @@ export default function AdjustmentsPage() {
     }
     setSubmitting(true);
     try {
-      const { adjustment } = await apiFetch<{ adjustment: AdjustmentRow }>(
-        `/api/projects/${projectId}/adjustments`,
-        { method: 'POST', body: JSON.stringify(payload) },
-      );
-      await apiFetch(`/api/projects/${projectId}/adjustments/${adjustment.id}/submit`, {
-        method: 'POST',
-      });
+      // 编辑模式(草稿/已驳回):保存到原单并提交原单,不再另建新单(§codex P1)。
+      if (editingId) {
+        await apiFetch(`/api/projects/${projectId}/adjustments/${editingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        await apiFetch(`/api/projects/${projectId}/adjustments/${editingId}/submit`, {
+          method: 'POST',
+        });
+      } else {
+        const { adjustment } = await apiFetch<{ adjustment: AdjustmentRow }>(
+          `/api/projects/${projectId}/adjustments`,
+          { method: 'POST', body: JSON.stringify(payload) },
+        );
+        await apiFetch(`/api/projects/${projectId}/adjustments/${adjustment.id}/submit`, {
+          method: 'POST',
+        });
+      }
       toast.success('已提交审批,可在审批中心查看进度');
       setMode('list');
+      setEditingId(null);
       await reload();
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
