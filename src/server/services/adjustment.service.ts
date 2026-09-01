@@ -448,8 +448,8 @@ export async function createAdjustment(
 }
 
 /**
- * §7 编辑调整草稿(仅 DRAFT 可改):重建明细行 + 更新年度/原因。
- * 校验逻辑与 createAdjustment 一致;不涉及锁(DRAFT 无锁)。
+ * §7 编辑调整草稿(DRAFT / REJECTED 可改):重建明细行 + 更新年度/原因。
+ * 校验逻辑与 createAdjustment 一致;不涉及锁(驳回时锁已释放,DRAFT 本无锁)。
  */
 export async function updateDraftAdjustment(
   adjId: string,
@@ -475,12 +475,14 @@ export async function updateDraftAdjustment(
   const parsedLines = validateAndParseLines(payload);
 
   return prisma.$transaction(async (tx) => {
+    // 行锁:与提交互斥(§codex P2——驳回单被并发编辑+提交时,校验必须基于同一份明细)。
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
     const existing = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
     if (!existing) {
       throw new HTTPError(404, '调整单不存在');
     }
-    if (existing.status !== ApprovalStatus.DRAFT) {
-      throw new HTTPError(409, `仅草稿可编辑,当前状态:${existing.status}`);
+    if (existing.status !== ApprovalStatus.DRAFT && existing.status !== ApprovalStatus.REJECTED) {
+      throw new HTTPError(409, `仅草稿或已驳回单可编辑,当前状态:${existing.status}`);
     }
     const projectId = existing.projectId;
 
@@ -642,6 +644,9 @@ export interface AdjustmentDetail {
   totalReason: string | null;
   annualReason: string | null;
   createdAt: Date;
+  /** 最近一次驳回意见(从未被驳回则为 null)。 */
+  rejectionOpinion: string | null;
+  rejectionAt: Date | null;
   lines: AdjustmentLineDetail[];
   sums: {
     originTotal: string;
@@ -674,8 +679,12 @@ export async function getAdjustmentDetail(
       },
       select: { id: true, name: true, code: true, parentId: true, createdAt: true },
     }),
-    // 待审/草稿:参照提交时刻;已生效:参照审批时刻(undefined → 内部取 approvedAt)。
-    buildBaselineAmounts(adj, adj.status === 'APPROVED' ? undefined : adj.createdAt),
+    // 待审/草稿:参照最近提交时刻(驳回后再提交会刷新 submittedAt);
+    // 已生效:参照审批时刻(undefined → 内部取 approvedAt)。
+    buildBaselineAmounts(
+      adj,
+      adj.status === 'APPROVED' ? undefined : (adj.submittedAt ?? adj.createdAt),
+    ),
   ]);
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
 
@@ -745,6 +754,15 @@ export async function getAdjustmentDetail(
   const sumBy = (pick: (l: AdjustmentLineDetail) => string) =>
     lines.reduce((acc, l) => acc.plus(fromStored(pick(l))), ZERO).toFixed(2);
 
+  // 最近一次驳回意见(§驳回后再提交:申请人需要知道驳回原因)。
+  // 驳回意见在 recordAudit 的 afterData.opinion 里(approval_logs 是遗留表,无此数据)。
+  const lastRejection = await prisma.auditLog.findFirst({
+    where: { objectType: 'budget_adjustments', objectId: adj.id, action: 'reject' },
+    orderBy: { operatedAt: 'desc' },
+  });
+  const rejectionOpinion =
+    (lastRejection?.afterData as { opinion?: unknown } | null)?.opinion ?? null;
+
   return {
     id: adj.id,
     projectId: adj.projectId,
@@ -755,6 +773,8 @@ export async function getAdjustmentDetail(
     totalReason: adj.totalReason,
     annualReason: adj.annualReason,
     createdAt: adj.createdAt,
+    rejectionOpinion: typeof rejectionOpinion === 'string' ? rejectionOpinion : null,
+    rejectionAt: lastRejection?.operatedAt ?? null,
     lines,
     sums: {
       originTotal: sumBy((l) => l.originTotal),
@@ -792,39 +812,53 @@ export async function submitAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({
+  const adjRef = await prisma.budgetAdjustment.findUnique({
     where: { id: adjId },
-    include: { lines: true },
+    select: { projectId: true },
   });
-  if (!adj) {
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:adjust', adj.projectId);
+  await requirePermission(user, 'budget:adjust', adjRef.projectId);
 
-  if (adj.status !== ApprovalStatus.DRAFT) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可提交,仅 DRAFT 可提交`);
-  }
+  // 读单/守卫/解析全部移入事务并先锁单行(§codex P2):与并发编辑互斥,
+  // 校验/锁/状态迁移基于同一份明细与状态。
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({
+      where: { id: adjId },
+      include: { lines: true },
+    });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
 
-  const parsedLines = adj.lines.map((l) => ({
-    id: l.id,
-    subjectId: l.subjectId,
-    newSubjectName: l.newSubjectName,
-    newSubjectParentId: l.newSubjectParentId,
-    total: fromStored(l.totalAdjustment),
-    annual: fromStored(l.annualAdjustment),
-  }));
+    // DRAFT 首次提交;REJECTED 驳回后修改可再次提交(锁已在驳回时释放,此处重建)。
+    if (adj.status !== ApprovalStatus.DRAFT && adj.status !== ApprovalStatus.REJECTED) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可提交,仅 草稿/已驳回 可提交`);
+    }
 
-  if (adj.kind === AdjustmentKind.ALLOCATE) {
-    // 追加下达:正向 + 非零合计;池内分配再做容量护栏(expandTotals 不设上限);无锁、无零和校验。
-    validateAllocate(parsedLines);
-    return prisma.$transaction(async (tx) => {
-      await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
+    const parsedLines = adj.lines.map((l) => ({
+      id: l.id,
+      subjectId: l.subjectId,
+      newSubjectName: l.newSubjectName,
+      newSubjectParentId: l.newSubjectParentId,
+      total: fromStored(l.totalAdjustment),
+      annual: fromStored(l.annualAdjustment),
+    }));
+
+    // 并发复核预期 = 提交前的状态(DRAFT 首次提交 / REJECTED 驳回后再提交)。
+    const expectedStatus = adj.status;
+    if (adj.kind === AdjustmentKind.ALLOCATE) {
+      // 追加下达:正向 + 非零合计;池内分配再做容量护栏(expandTotals 不设上限);无锁、无零和校验。
+      validateAllocate(parsedLines);
+      await lockAndRecheckStatus(tx, adjId, expectedStatus);
       if (!adj.expandTotals) {
         await assertAllocateCapacity(tx, adj.projectId, parsedLines);
       }
       const submitted = await tx.budgetAdjustment.update({
         where: { id: adjId },
-        data: { status: ApprovalStatus.PENDING },
+        data: { status: ApprovalStatus.PENDING, submittedAt: new Date() },
       });
       await recordAudit(tx, {
         projectId: adj.projectId,
@@ -836,19 +870,17 @@ export async function submitAdjustment(
         after: snapshotAdjustment(submitted),
       });
       return submitted;
-    });
-  }
-
-  assertBalanced(parsedLines);
-  // 新增科目行原预算为 0,调减无意义(应只调增)。
-  for (const line of parsedLines) {
-    if (!line.subjectId && (line.total.isNeg() || line.annual.isNeg())) {
-      throw new HTTPError(422, `新增科目"${line.newSubjectName}"原预算为 0,不可调减`);
     }
-  }
 
-  return prisma.$transaction(async (tx) => {
-    await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
+    assertBalanced(parsedLines);
+    // 新增科目行原预算为 0,调减无意义(应只调增)。
+    for (const line of parsedLines) {
+      if (!line.subjectId && (line.total.isNeg() || line.annual.isNeg())) {
+        throw new HTTPError(422, `新增科目"${line.newSubjectName}"原预算为 0,不可调减`);
+      }
+    }
+
+    await lockAndRecheckStatus(tx, adjId, expectedStatus);
     // 总维度调减护栏:调整后不得为负(§总维度调减护栏)。
     await assertTotalDecreaseFloor(tx, adj.projectId, null, parsedLines);
     // 按科目合并年度调减合计(同一科目多行可能分别调减)。
@@ -921,7 +953,7 @@ export async function submitAdjustment(
 
     const submitted = await tx.budgetAdjustment.update({
       where: { id: adjId },
-      data: { status: ApprovalStatus.PENDING },
+      data: { status: ApprovalStatus.PENDING, submittedAt: new Date() },
     });
 
     await recordAudit(tx, {
@@ -994,23 +1026,40 @@ export async function approveAdjustment(
   user: Pick<User, 'id' | 'role'>,
   opinion?: string,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({
+  // 首读仅取权限/状态/提交代;全量(明细)在事务内行锁后重读。
+  // §codex P1:提交代(submittedAt)绑定——待审期间被驳回/编辑/再提交时,
+  // 本审批在行锁内发现代变化即 409,绝不把旧提交的明细套在新提交上执行。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
     where: { id: adjId },
-    include: { lines: true },
+    select: { projectId: true, status: true, submittedAt: true },
   });
-  if (!adj) {
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:approve', adj.projectId);
+  await requirePermission(user, 'budget:approve', adjRef.projectId);
 
-  if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可审批,仅 PENDING 可审批`);
+  if (adjRef.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adjRef.status} 不可审批,仅 PENDING 可审批`);
   }
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
     // 双重审批防护:行锁 + 锁内复核状态(两个并发审批只有一个能通过);
     // 即使复核被绕过,末尾的条件化状态迁移 + 事务回滚仍保证金额不重复应用。
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({
+      where: { id: adjId },
+      include: { lines: true },
+    });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (adj.status !== ApprovalStatus.PENDING) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可审批,仅 PENDING 可审批`);
+    }
+    if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
+      throw new HTTPError(409, '该调整单在审批期间被驳回并重新提交,请刷新后重试');
+    }
     await lockAndRecheckStatus(tx, adjId, ApprovalStatus.PENDING);
     const parsedLines = adj.lines.map((l) => ({
       id: l.id,
@@ -1505,14 +1554,18 @@ export async function rejectAdjustment(
   user: Pick<User, 'id' | 'role'>,
   opinion: string,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({ where: { id: adjId } });
-  if (!adj) {
+  // 提交代绑定同 approve(§codex P1):待审期间被再提交则拒绝本次驳回。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    select: { projectId: true, status: true, submittedAt: true },
+  });
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:approve', adj.projectId);
+  await requirePermission(user, 'budget:approve', adjRef.projectId);
 
-  if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可驳回,仅 PENDING 可驳回`);
+  if (adjRef.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adjRef.status} 不可驳回,仅 PENDING 可驳回`);
   }
   if (!opinion || !opinion.trim()) {
     throw new HTTPError(422, '驳回需填写意见');
@@ -1520,6 +1573,17 @@ export async function rejectAdjustment(
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (adj.status !== ApprovalStatus.PENDING) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可驳回,仅 PENDING 可驳回`);
+    }
+    if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
+      throw new HTTPError(409, '该调整单在审批期间被重新提交,请刷新后重试');
+    }
     await releaseLocks(tx, adjId, now);
     const rejected = await tx.budgetAdjustment.update({
       where: { id: adjId },
@@ -1543,18 +1607,33 @@ export async function withdrawAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({ where: { id: adjId } });
-  if (!adj) {
+  // 提交代绑定同 approve(§codex P1):待审期间被驳回/再提交则拒绝本次撤回。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    select: { projectId: true, status: true, submittedAt: true },
+  });
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:adjust', adj.projectId);
+  await requirePermission(user, 'budget:adjust', adjRef.projectId);
 
-  if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可撤回,仅 PENDING 可撤回`);
+  if (adjRef.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adjRef.status} 不可撤回,仅 PENDING 可撤回`);
   }
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (adj.status !== ApprovalStatus.PENDING) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可撤回,仅 PENDING 可撤回`);
+    }
+    if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
+      throw new HTTPError(409, '该调整单在审批期间状态发生变化,请刷新后重试');
+    }
     await releaseLocks(tx, adjId, now);
     const withdrawn = await tx.budgetAdjustment.update({
       where: { id: adjId },

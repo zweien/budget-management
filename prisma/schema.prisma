@@ -248,6 +248,8 @@ model BudgetAdjustment {
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
   approvedAt  DateTime?       @map("approved_at")
+  // 最近一次提交时间(驳回后修改再提交会刷新;详情基线快照以此为参照)。
+  submittedAt DateTime?       @map("submitted_at")
 
   project   Project @relation(fields: [projectId], references: [id])
   lines     BudgetAdjustmentLine[]

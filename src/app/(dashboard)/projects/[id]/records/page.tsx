@@ -228,7 +228,7 @@ function BusinessRecordsPageInner() {
   // 初始值:状态默认排除已作废 + URL 深链(台账叶科目跳转:?subjectId=xx&year=yyyy)。
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(() => {
     const init: ColumnFiltersState = [
-      { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVED', 'PAID'] },
+      { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
     ];
     const sid = search.get('subjectId');
     if (sid) init.push({ id: 'subjectId', value: [sid] });
