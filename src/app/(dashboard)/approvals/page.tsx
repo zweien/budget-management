@@ -67,6 +67,8 @@ interface AdjustmentPending {
   applicantId: string;
   createdAt: string;
   updatedAt: string;
+  /** 最近提交时间(§版本绑定:审批/驳回请求携带,防止批准未审阅的旧轮次)。 */
+  submittedAt: string | null;
   project: ProjectRef;
   applicant: UserRef;
   lineCount?: number;
@@ -162,13 +164,21 @@ export default function ApprovalsPage() {
   };
 
   /** 详情内就地办理(§issue15):复用 submitAction 的接口路径与意见语义。 */
-  const handleInSheetAction = async (nextMode: 'approve' | 'reject', sheetOpinion: string) => {
+  const handleInSheetAction = async (
+    nextMode: 'approve' | 'reject',
+    sheetOpinion: string,
+    clientSubmittedAt?: string,
+  ) => {
     if (!detailTarget) throw new Error('待办不存在');
     await apiFetch(
       `/api/projects/${detailTarget.projectId}/adjustments/${detailTarget.id}/${nextMode}`,
       {
         method: 'POST',
-        body: JSON.stringify({ opinion: sheetOpinion }),
+        body: JSON.stringify({
+          opinion: sheetOpinion,
+          // §版本绑定:详情所见的提交代;单据被驳回/再提交后 → 409 提示刷新。
+          submittedAt: detailTarget.submittedAt ?? clientSubmittedAt,
+        }),
       },
     );
     toast.success(nextMode === 'approve' ? '已审批通过' : '已驳回');
@@ -197,7 +207,11 @@ export default function ApprovalsPage() {
       if (!path) throw new Error('未知待办类型');
       await apiFetch(path, {
         method: 'POST',
-        body: JSON.stringify({ opinion: trimmed }),
+        body: JSON.stringify({
+          opinion: trimmed,
+          // §版本绑定:调整单携带审批人所见的提交代。
+          ...(kind === 'adjustment' ? { submittedAt: row.submittedAt ?? undefined } : {}),
+        }),
       });
       toast.success(mode === 'approve' ? '已审批通过' : '已驳回');
       closeAction();

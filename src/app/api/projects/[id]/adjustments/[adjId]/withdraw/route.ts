@@ -8,13 +8,25 @@ import { withdrawAdjustment } from '@/server/services/adjustment.service';
  * 申请人发起,无 body。
  */
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string; adjId: string }> },
 ) {
   try {
     const user = await requireUser();
     const { adjId } = await params;
-    const adjustment = await withdrawAdjustment(adjId, user);
+
+    // 操作人所见版本的提交代(§版本绑定),body 可空。
+    let submittedAt: string | undefined;
+    try {
+      const body = (await req.json()) as { submittedAt?: unknown };
+      if (body && typeof body.submittedAt === 'string') {
+        submittedAt = body.submittedAt;
+      }
+    } catch {
+      // ignore
+    }
+
+    const adjustment = await withdrawAdjustment(adjId, user, submittedAt);
     return NextResponse.json({ adjustment });
   } catch (e) {
     if (e instanceof HTTPError) {

@@ -16,16 +16,21 @@ export async function POST(
     const { adjId } = await params;
 
     let opinion: string | undefined;
+    let submittedAt: string | undefined;
     try {
-      const body = (await req.json()) as { opinion?: unknown };
+      const body = (await req.json()) as { opinion?: unknown; submittedAt?: unknown };
       if (body && typeof body.opinion === 'string') {
         opinion = body.opinion;
+      }
+      // 审批人所见版本的提交代(§版本绑定):与锁内单据不一致 → 409。
+      if (body && typeof body.submittedAt === 'string') {
+        submittedAt = body.submittedAt;
       }
     } catch {
       // body 可空;无 opinion 即可。
     }
 
-    const adjustment = await approveAdjustment(adjId, user, opinion);
+    const adjustment = await approveAdjustment(adjId, user, opinion, submittedAt);
     return NextResponse.json({ adjustment });
   } catch (e) {
     if (e instanceof HTTPError) {

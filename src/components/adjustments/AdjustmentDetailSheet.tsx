@@ -63,6 +63,8 @@ export interface AdjustmentDetailVO {
   totalReason: string | null;
   annualReason: string | null;
   createdAt: string;
+  /** 最近提交时间(§版本绑定:就地办理请求携带)。 */
+  submittedAt: string | null;
   /** 最近一次驳回意见(从未被驳回则为 null)。 */
   rejectionOpinion: string | null;
   /** 审批流转记录(时间升序)。 */
@@ -121,8 +123,13 @@ interface AdjustmentDetailSheetProps {
   /**
    * 就地办理(§issue15,审批中心传入):校验意见后回调;
    * resolve = 成功(父级负责关 Sheet + 刷新列表),reject = 失败(保持打开)。
+   * 第三参 = 详情所见的提交代(§版本绑定,父级透传到请求体)。
    */
-  onAction?: (mode: 'approve' | 'reject', opinion: string) => Promise<void>;
+  onAction?: (
+    mode: 'approve' | 'reject',
+    opinion: string,
+    clientSubmittedAt?: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -188,7 +195,7 @@ export function AdjustmentDetailSheet({
     if (!onAction) return;
     setActing(mode);
     try {
-      await onAction(mode, trimmed);
+      await onAction(mode, trimmed, detail?.submittedAt ?? undefined);
       // 成功后由父级关闭 Sheet;这里不动状态。
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '操作失败');
