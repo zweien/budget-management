@@ -1,5 +1,6 @@
 import { UserRole } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { uuidv7 } from '@/lib/id';
 import { HTTPError } from '@/lib/auth/session';
 
 /**
@@ -68,6 +69,51 @@ const MATRIX: Record<UserRole, Set<Action>> = {
   USER: USER_ACTIONS,
 };
 
+/**
+ * 无人值守(机器凭证)硬排除动作:不可逆/审批/权限管理类(ADR 0001、AGENTS.md「确认策略」)。
+ * unattended 凭证触碰时服务端直接 403 并写入被拒审计——不是「不建议」而是「做不了」;
+ * 在场交互可用 attended 凭证(`make-agent --attended`)或正常登录会话执行。
+ * 凭证管理走 make-agent 脚本、无 HTTP 面,故无需列入。
+ */
+export const UNATTENDED_EXCLUDED_ACTIONS = new Set<Action>([
+  'record:void', // 作废(单条/批量)不可逆
+  'budget:approve', // 审批:初始预算/预算调整/科目变更的通过与驳回
+  'member:manage', // 项目成员与权限变更
+]);
+
+/** 被拒尝试审计:operator=服务账号本身,失败不掩盖随后的 403。
+ *  projectId 仅在真实存在时落库(外键约束);否则置 null,原始值进 afterData。 */
+async function auditUnattendedDenied(
+  user: { id: string; apiKeyPrefix?: string },
+  action: Action,
+  projectId?: string,
+): Promise<void> {
+  const validProjectId = projectId
+    ? ((
+        await prisma.project
+          .findUnique({ where: { id: projectId }, select: { id: true } })
+          .catch(() => null)
+      )?.id ?? null)
+    : null;
+  await prisma.auditLog
+    .create({
+      data: {
+        id: uuidv7(),
+        projectId: validProjectId,
+        objectType: 'permission',
+        objectId: projectId ?? user.id,
+        action: 'unattended.denied',
+        afterData: {
+          attemptedAction: action,
+          apiKeyPrefix: user.apiKeyPrefix ?? null,
+          ...(projectId && !validProjectId ? { attemptedProjectId: projectId } : {}),
+        },
+        operatorId: user.id,
+      },
+    })
+    .catch(() => {});
+}
+
 /** 是否有某动作权限(仅按全局角色,不含项目成员维度) */
 export function can(user: { role: UserRole }, action: Action): boolean {
   return MATRIX[user.role]?.has(action) ?? false;
@@ -118,10 +164,15 @@ export async function canWriteRecords(
  * 项目级动作均须携带 projectId。服务端权限再校验(§15.3)。
  */
 export async function requirePermission(
-  user: { id: string; role: UserRole },
+  user: { id: string; role: UserRole; unattended?: boolean; apiKeyPrefix?: string },
   action: Action,
   projectId?: string,
 ): Promise<void> {
+  // 无人值守凭证硬排除(与项目状态无关,置于一切分支之前)。
+  if (user.unattended && UNATTENDED_EXCLUDED_ACTIONS.has(action)) {
+    await auditUnattendedDenied(user, action, projectId);
+    throw new HTTPError(403, '无人值守凭证禁止执行此操作(作废/审批/成员管理仅限人在场会话)');
+  }
   // 归档项目只读(§codex P1):除豁免动作外,一切项目写动作在归档期间拒绝。
   // 前置执行(OWNER_EDIT/RECORD_WRITE 分支内有提前 return,放后面会被绕过)。
   // 豁免:查看、project:edit(恢复归档本身依赖它;updateProject 另有自己的 409)、

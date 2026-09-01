@@ -25,6 +25,30 @@
 `AUTHENTIK_ISSUER` / `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` / `AUTH_SECRET`(`openssl rand -base64 32`)/ `APP_BASE_URL`。
 Authentik 侧:建 OAuth2 Provider(Confidential,Redirect URI `<APP_BASE_URL>/api/auth/callback`,Subject mode=User ID)+ Application(slug 与 ISSUER 路径一致)。
 
+## Coding Agent 自动化(服务账号 + API Key)
+
+coding agent 以**服务账号**身份经 HTTP API 操作本系统(交互与无人值守皆可)。决策记录见 [docs/adr/0001](./docs/adr/0001-service-account-api-key.md);术语见 [CONTEXT.md](./CONTEXT.md)。
+
+### 凭证与接入
+
+- `npm run make-agent -- <账号名>`:建服务账号(USER)+ 发无人值守 key(明文仅展示一次);`--attended` 发在场交互 key;`--list` / `--revoke <前缀|id>` 管理凭证。
+- 认证:`Authorization: Bearer bma_…`,`getCurrentUser()` 优先识别(两种 MOCK 模式均可用);凭据写 `~/.budget-agent.json`(chmod 600),`BUDGET_BASE_URL`/`BUDGET_TOKEN` 可覆盖。
+- MCP:`npm run mcp`(stdio,`mcp/server.ts`,工具名 `budget_*`,策略写在工具描述里);Skill:仓库 `skills/budget-ops/`(已装 `~/.agents/skills/budget-ops/`)——skill 以 HTTP 为准、不依赖 MCP。
+- 项目授权:ADMIN 在「项目概览 → 成员管理」把服务账号加为成员(OWNER 可编辑);收权即移除,零新代码。
+
+### 确认策略(agent 会话必须遵守;操作目录见 skill)
+
+| 档位     | 操作                                                                   | 规则                                                                                                 |
+| -------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 自主     | 查询/统计/审计/解析/预览/暂存/科目指派                                 | 随时可做                                                                                             |
+| 指令授权 | 新增改记录、确认导入、到账登记、调整编制提交                           | 任务指令明确列出才做                                                                                 |
+| 硬排除   | 作废(`record:void`)、审批(`budget:approve`)、成员管理(`member:manage`) | 无人值守凭证服务端直接 403(`UNATTENDED_EXCLUDED_ACTIONS`),被拒尝试进审计(`action=unattended.denied`) |
+
+### 无人值守约定
+
+- 收件箱:`~/budget-inbox/<项目编号>/*.xlsx`,成功移 `_done/`、失败移 `_failed/`(附原因 txt)。
+- 科目自动指派:`GET /api/projects/:id/subject-mappings`(摘要→科目历史统计)+ agent 语义判断;拿不准留暂存并汇报待指派,不强行确认。
+
 ## 版本发布流程(确保版本号唯一)
 
 **唯一事实源:`package.json` 的 `version` 字段;git tag `vX.Y.Z` 与其一一对应。**

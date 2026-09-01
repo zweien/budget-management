@@ -5,6 +5,7 @@ import { jwtVerify, SignJWT } from 'jose';
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS } from '@/lib/auth/oidc';
+import { verifyApiKey } from '@/lib/auth/api-key';
 
 function sessionSecret(): Uint8Array {
   // MOCK_AUTH=false 时 env 校验保证 AUTH_SECRET 存在且 ≥32 字符。
@@ -35,14 +36,32 @@ export async function verifySession(
 }
 
 /**
+ * 当前认证主体:Prisma User + 机器认证标记。
+ * 经 Bearer API Key 认证时,viaApiKey/unattended/apiKeyPrefix 有值(见 api-key.ts);
+ * 会话登录(cookie/mock header)时为 undefined——权限层只看 unattended。
+ */
+export type CurrentUser = User & {
+  viaApiKey?: boolean;
+  /** 无人值守凭证:硬排除动作(作废/审批/成员管理)在服务端直接拒绝。 */
+  unattended?: boolean;
+  apiKeyPrefix?: string;
+};
+
+/**
  * 获取当前用户。
+ * - Authorization: Bearer bma_…:机器凭证(服务账号),MOCK/SSO 两种模式均可用。
  * - MOCK_AUTH=true:从 x-mock-user-id header 读取(本地开发/测试)。
  * - MOCK_AUTH=false(SSO):校验 bm_session JWT → 按 sub 实时查库
  *   (角色/停用状态即时生效,无需重新登录)。
  */
-export async function getCurrentUser(): Promise<User | null> {
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const h = await headers();
+  const authorization = h.get('authorization');
+  if (authorization?.toLowerCase().startsWith('bearer ')) {
+    return verifyApiKey(authorization.slice(7).trim());
+  }
+
   if (env.MOCK_AUTH) {
-    const h = await headers();
     const mockUserId = h.get('x-mock-user-id');
     if (!mockUserId) return null;
     return prisma.user.findUnique({ where: { id: mockUserId } });
@@ -58,7 +77,7 @@ export async function getCurrentUser(): Promise<User | null> {
   return user;
 }
 
-export async function requireUser(): Promise<User> {
+export async function requireUser(): Promise<CurrentUser> {
   const user = await getCurrentUser();
   if (!user) throw new HTTPError(401, '未登录或用户不存在');
   return user;
