@@ -16,7 +16,7 @@ import {
   endOfQuarter,
   endOfYear,
 } from 'date-fns';
-import { Funnel } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Funnel } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,11 @@ interface HeaderFilterProps<TData> {
    */
   options?: unknown[];
   placeholder?: string;
+  /**
+   * 可排序:标题变为按钮,点击循环 升序→降序→取消(§Q1 盘问结论)。
+   * 与漏斗筛选按钮相互独立;排序激活时标题+箭头高亮 link 蓝。
+   */
+  sortable?: boolean;
 }
 
 function isFilterActive(type: ColumnFilterType, value: unknown): boolean {
@@ -69,11 +74,35 @@ export function HeaderFilter<TData>({
   valueLabels,
   options,
   placeholder,
+  sortable,
 }: HeaderFilterProps<TData>) {
   const active = isFilterActive(type, column.getFilterValue());
+  const sorted = sortable ? column.getIsSorted() : false;
+  const titleEl = sortable ? (
+    <button
+      type="button"
+      onClick={column.getToggleSortingHandler()}
+      aria-label={`排序${title}`}
+      className={cn(
+        'inline-flex items-center gap-0.5 rounded-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50',
+        sorted ? 'text-link' : undefined,
+      )}
+    >
+      <span>{title}</span>
+      {sorted === 'asc' ? (
+        <ArrowUp className="size-3.5" />
+      ) : sorted === 'desc' ? (
+        <ArrowDown className="size-3.5" />
+      ) : (
+        <ArrowUpDown className="size-3 text-mute" />
+      )}
+    </button>
+  ) : (
+    <span>{title}</span>
+  );
   return (
     <span className="inline-flex items-center gap-1">
-      <span>{title}</span>
+      {titleEl}
       <Popover>
         <PopoverTrigger asChild>
           <button
