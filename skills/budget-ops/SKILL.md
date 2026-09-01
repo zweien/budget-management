@@ -22,8 +22,9 @@ BASE=$(jq -r .baseUrl ~/.budget-agent.json); TOK=$(jq -r .token ~/.budget-agent.
 curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 ```
 
-- **401**:凭证无效/已撤销 → 停止并上报,请管理员 `npm run make-agent` 重发。
+- **401**:凭证无效/已撤销/已过期 → 停止并上报,请用户在「API 凭证」页重发(服务账号场景 `npm run make-agent` 重发)。
 - **403 且消息含「无人值守凭证禁止」**:命中硬排除(见下),**不得**尝试绕过,原样上报。
+- **403 且消息含「凭证档位」或「凭证未授权访问该项目」**:key 的范围收窄(档位/项目范围),同样**不得**绕过;原样上报,或请用户换范围更大的 key。
 - **422**:业务校验失败,按消息修正后可重试。
 
 ## 2. 确认策略(必须遵守)

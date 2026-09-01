@@ -1,4 +1,4 @@
-import { UserRole } from '@prisma/client';
+import { UserRole, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
 import { HTTPError } from '@/lib/auth/session';
@@ -73,7 +73,6 @@ const MATRIX: Record<UserRole, Set<Action>> = {
  * 无人值守(机器凭证)硬排除动作:不可逆/审批/权限管理类(ADR 0001、AGENTS.md「确认策略」)。
  * unattended 凭证触碰时服务端直接 403 并写入被拒审计——不是「不建议」而是「做不了」;
  * 在场交互可用 attended 凭证(`make-agent --attended`)或正常登录会话执行。
- * 凭证管理走 make-agent 脚本、无 HTTP 面,故无需列入。
  */
 export const UNATTENDED_EXCLUDED_ACTIONS = new Set<Action>([
   'record:void', // 作废(单条/批量)不可逆
@@ -81,12 +80,50 @@ export const UNATTENDED_EXCLUDED_ACTIONS = new Set<Action>([
   'member:manage', // 项目成员与权限变更
 ]);
 
-/** 被拒尝试审计:operator=服务账号本身,失败不掩盖随后的 403。
- *  projectId 仅在真实存在时落库(外键约束);否则置 null,原始值进 afterData。 */
-async function auditUnattendedDenied(
-  user: { id: string; apiKeyPrefix?: string },
+/** 凭证档位「只读」允许的动作(查询/统计/审计;项目范围收窄仍生效)。 */
+const KEY_READ_ACTIONS = new Set<Action>(['project:view', 'audit:view', 'user:list']);
+
+/** 凭证档位「读写」在只读之上追加的动作(业务记录、导入、到账)。 */
+const KEY_WRITE_ACTIONS = new Set<Action>(['record:create', 'record:edit', 'record:import']);
+
+/** scope 收窄拒绝(档位/项目范围);返回错误消息,null=放行。scope 只砍不加:
+ *  实际权限 = 用户权限 ∩ 凭证范围,矩阵仍是唯一真相源。 */
+function apiKeyScopeDenial(
+  scopes: {
+    viaApiKey?: boolean;
+    keyTier?: string;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
   action: Action,
   projectId?: string,
+): string | null {
+  if (!scopes.viaApiKey) return null;
+  const tier = scopes.keyTier ?? 'full';
+  if (tier === 'read' && !KEY_READ_ACTIONS.has(action)) {
+    return '凭证档位为只读,禁止此操作';
+  }
+  if (tier === 'write' && !KEY_READ_ACTIONS.has(action) && !KEY_WRITE_ACTIONS.has(action)) {
+    return '凭证档位为读写,禁止预算/项目维护类操作(请使用完整档凭证或登录会话)';
+  }
+  if (
+    (scopes.keyProjectScope ?? 'all') === 'selected' &&
+    projectId &&
+    !(scopes.keyProjectIds ?? []).includes(projectId)
+  ) {
+    return '凭证未授权访问该项目';
+  }
+  return null;
+}
+
+/** 机器凭证被拒审计:operator=凭证所属用户,失败不掩盖随后的 403。
+ *  projectId 仅在真实存在时落库(外键约束);否则置 null,原始值进 afterData。 */
+async function auditMachineDenied(
+  user: { id: string; apiKeyPrefix?: string },
+  action: Action,
+  projectId: string | undefined,
+  auditAction: 'unattended.denied' | 'apikey.denied',
+  extra: Prisma.InputJsonObject = {},
 ): Promise<void> {
   const validProjectId = projectId
     ? ((
@@ -102,11 +139,12 @@ async function auditUnattendedDenied(
         projectId: validProjectId,
         objectType: 'permission',
         objectId: projectId ?? user.id,
-        action: 'unattended.denied',
+        action: auditAction,
         afterData: {
           attemptedAction: action,
           apiKeyPrefix: user.apiKeyPrefix ?? null,
           ...(projectId && !validProjectId ? { attemptedProjectId: projectId } : {}),
+          ...extra,
         },
         operatorId: user.id,
       },
@@ -164,14 +202,33 @@ export async function canWriteRecords(
  * 项目级动作均须携带 projectId。服务端权限再校验(§15.3)。
  */
 export async function requirePermission(
-  user: { id: string; role: UserRole; unattended?: boolean; apiKeyPrefix?: string },
+  user: {
+    id: string;
+    role: UserRole;
+    viaApiKey?: boolean;
+    unattended?: boolean;
+    apiKeyPrefix?: string;
+    keyTier?: string;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
   action: Action,
   projectId?: string,
 ): Promise<void> {
   // 无人值守凭证硬排除(与项目状态无关,置于一切分支之前)。
   if (user.unattended && UNATTENDED_EXCLUDED_ACTIONS.has(action)) {
-    await auditUnattendedDenied(user, action, projectId);
+    await auditMachineDenied(user, action, projectId, 'unattended.denied');
     throw new HTTPError(403, '无人值守凭证禁止执行此操作(作废/审批/成员管理仅限人在场会话)');
+  }
+  // 凭证 scope 收窄(档位/项目范围;只砍不加,置于成员/矩阵判定之前,命中即拒)。
+  const scopeDenial = apiKeyScopeDenial(user, action, projectId);
+  if (scopeDenial) {
+    await auditMachineDenied(user, action, projectId, 'apikey.denied', {
+      reason: scopeDenial,
+      keyTier: user.keyTier ?? 'full',
+      keyProjectScope: user.keyProjectScope ?? 'all',
+    });
+    throw new HTTPError(403, scopeDenial);
   }
   // 归档项目只读(§codex P1):除豁免动作外,一切项目写动作在归档期间拒绝。
   // 前置执行(OWNER_EDIT/RECORD_WRITE 分支内有提前 return,放后面会被绕过)。

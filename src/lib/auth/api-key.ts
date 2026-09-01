@@ -4,9 +4,9 @@ import { prisma } from '@/lib/prisma';
 import type { CurrentUser } from '@/lib/auth/session';
 
 /**
- * 机器凭证(服务账号 API Key,ADR 0001)。
+ * 机器凭证(个人 API Key / 服务账号 API Key,ADR 0001)。
  * key 明文形如 `bma_<32hex>`,仅在创建时展示一次;库中只存 SHA-256。
- * Bearer 认证入口见 session.ts getCurrentUser;无人值守硬排除见 permissions.ts。
+ * Bearer 认证入口见 session.ts getCurrentUser;scope 收窄与硬排除见 permissions.ts。
  */
 
 /** key 固定前缀,与随机段一起参与展示前缀。 */
@@ -27,8 +27,8 @@ export function apiKeyDisplayPrefix(key: string): string {
 }
 
 /**
- * 校验 Bearer key → 服务账号(附机器认证标记)。
- * 不存在/已撤销/账号停用 → null(上游统一按 401 处理,不区分原因避免信息泄露)。
+ * 校验 Bearer key → 凭证所属用户(附机器认证标记与 scope)。
+ * 不存在/已撤销/已过期/账号停用 → null(上游统一按 401 处理,不区分原因避免信息泄露)。
  * 命中时刷新 lastUsedAt(失败不阻断认证)。
  */
 export async function verifyApiKey(key: string): Promise<CurrentUser | null> {
@@ -38,6 +38,7 @@ export async function verifyApiKey(key: string): Promise<CurrentUser | null> {
     include: { user: true },
   });
   if (!rec || rec.revokedAt) return null;
+  if (rec.expiresAt && rec.expiresAt.getTime() <= Date.now()) return null;
   if (rec.user.status !== 'active') return null;
   await prisma.apiKey
     .update({ where: { id: rec.id }, data: { lastUsedAt: new Date() } })
@@ -46,5 +47,8 @@ export async function verifyApiKey(key: string): Promise<CurrentUser | null> {
     viaApiKey: true as const,
     unattended: rec.unattended,
     apiKeyPrefix: rec.prefix,
+    keyTier: rec.tier,
+    keyProjectScope: rec.projectScope,
+    keyProjectIds: Array.isArray(rec.projectIds) ? (rec.projectIds as string[]) : undefined,
   });
 }

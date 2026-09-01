@@ -72,18 +72,26 @@ model User {
   @@map("users")
 }
 
-/// 机器凭证:绑定服务账号(coding agent),Bearer 认证用;哈希入库、可撤销。
-/// unattended=true 的凭证在服务端拒绝「硬排除动作」(作废/审批/成员管理),见 permissions.ts。
+/// 机器凭证:绑定任意用户(coding agent 自助个人凭证 / 服务账号),Bearer 认证用;
+/// 哈希入库、可撤销。scope 只收窄不放大:实际权限 = 用户权限 ∩ 凭证范围(permissions.ts);
+/// unattended=true 的凭证在服务端拒绝「硬排除动作」(作废/审批/成员管理)。
 model ApiKey {
-  id         String    @id @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  name       String
-  keyHash    String    @unique @map("key_hash")
-  prefix     String
-  unattended Boolean   @default(true)
-  lastUsedAt DateTime? @map("last_used_at")
-  revokedAt  DateTime? @map("revoked_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id           String    @id @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  name         String
+  keyHash      String    @unique @map("key_hash")
+  prefix       String
+  unattended   Boolean   @default(true)
+  /// 凭证档位:read(仅查看)/ write(加业务记录、导入、到账)/ full(与用户相同)。
+  tier         String    @default("full")
+  /// 项目范围:all(用户可访问的全部)/ selected(仅 projectIds 列表)。
+  projectScope String    @default("all") @map("project_scope")
+  /// selected 时的项目 UUID 数组(Json 数组;仅收窄带项目上下文的操作)。
+  projectIds   Json?
+  expiresAt    DateTime? @map("expires_at")
+  lastUsedAt   DateTime? @map("last_used_at")
+  revokedAt    DateTime? @map("revoked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 
