@@ -74,6 +74,7 @@ export async function GET() {
       applicantId: a.applicantId,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
+      submittedAt: a.submittedAt,
       project: a.project,
       applicant: applicantMap.get(a.applicantId) ?? { id: a.applicantId, name: '未知用户' },
       lineCount: a.lines.length,

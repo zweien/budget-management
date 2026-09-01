@@ -633,6 +633,15 @@ export interface AdjustmentLineDetail {
   afterAnnual: string;
 }
 
+/** 审批流转记录条目(§审批记录保留与展示)。 */
+export interface AdjustmentHistoryEntry {
+  action: string;
+  operatorName: string;
+  operatedAt: Date;
+  /** 审批/驳回意见(无则为 null)。 */
+  opinion: string | null;
+}
+
 /** 调整单详情(明细行 + 双维度合计)。 */
 export interface AdjustmentDetail {
   id: string;
@@ -647,6 +656,8 @@ export interface AdjustmentDetail {
   /** 最近一次驳回意见(从未被驳回则为 null)。 */
   rejectionOpinion: string | null;
   rejectionAt: Date | null;
+  /** 审批流转记录(审计日志:新建/修改/提交/审批/驳回/撤回,含意见与操作人)。 */
+  history: AdjustmentHistoryEntry[];
   lines: AdjustmentLineDetail[];
   sums: {
     originTotal: string;
@@ -754,14 +765,26 @@ export async function getAdjustmentDetail(
   const sumBy = (pick: (l: AdjustmentLineDetail) => string) =>
     lines.reduce((acc, l) => acc.plus(fromStored(pick(l))), ZERO).toFixed(2);
 
-  // 最近一次驳回意见(§驳回后再提交:申请人需要知道驳回原因)。
-  // 驳回意见在 recordAudit 的 afterData.opinion 里(approval_logs 是遗留表,无此数据)。
-  const lastRejection = await prisma.auditLog.findFirst({
-    where: { objectType: 'budget_adjustments', objectId: adj.id, action: 'reject' },
-    orderBy: { operatedAt: 'desc' },
+  // 审批流转记录(§审批记录保留与展示):审计日志按时间升序,含操作人。
+  const historyRows = await prisma.auditLog.findMany({
+    where: {
+      objectType: 'budget_adjustments',
+      objectId: adj.id,
+      action: { in: ['create', 'update', 'submit', 'approve', 'reject', 'withdraw'] },
+    },
+    // operated_at 为毫秒精度,同毫秒双写时以 uuidv7 id(时间有序)作稳定次序键。
+    orderBy: [{ operatedAt: 'asc' }, { id: 'asc' }],
+    include: { operator: { select: { name: true } } },
   });
-  const rejectionOpinion =
-    (lastRejection?.afterData as { opinion?: unknown } | null)?.opinion ?? null;
+  const history: AdjustmentHistoryEntry[] = historyRows.map((h) => ({
+    action: h.action,
+    operatorName: h.operator?.name ?? '—',
+    operatedAt: h.operatedAt,
+    opinion: ((h.afterData as { opinion?: unknown } | null)?.opinion as string | undefined) ?? null,
+  }));
+  // 最近一次驳回意见 = 流转记录中最后一条 reject 的意见。
+  const lastRejection = [...history].reverse().find((h) => h.action === 'reject');
+  const rejectionOpinion = lastRejection?.opinion ?? null;
 
   return {
     id: adj.id,
@@ -773,8 +796,9 @@ export async function getAdjustmentDetail(
     totalReason: adj.totalReason,
     annualReason: adj.annualReason,
     createdAt: adj.createdAt,
-    rejectionOpinion: typeof rejectionOpinion === 'string' ? rejectionOpinion : null,
+    rejectionOpinion,
     rejectionAt: lastRejection?.operatedAt ?? null,
+    history,
     lines,
     sums: {
       originTotal: sumBy((l) => l.originTotal),
@@ -1025,6 +1049,8 @@ export async function approveAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
   opinion?: string,
+  /** 审批人所见版本的提交代:与锁内单据不符 → 409(§codex P1 版本绑定)。 */
+  clientSubmittedAt?: string | null,
 ): Promise<BudgetAdjustment> {
   // 首读仅取权限/状态/提交代;全量(明细)在事务内行锁后重读。
   // §codex P1:提交代(submittedAt)绑定——待审期间被驳回/编辑/再提交时,
@@ -1059,6 +1085,15 @@ export async function approveAdjustment(
     }
     if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
       throw new HTTPError(409, '该调整单在审批期间被驳回并重新提交,请刷新后重试');
+    }
+
+    // §codex P1:客户端携带其所见版本的提交代时,必须与锁内单据一致——
+    // 审批人打开的是旧轮次而单据已被驳回/再提交 → 拒绝,防止批准未审阅的内容。
+    if (
+      clientSubmittedAt &&
+      (adj.submittedAt?.getTime() ?? 0) !== new Date(clientSubmittedAt).getTime()
+    ) {
+      throw new HTTPError(409, '该调整单已变更(被驳回或重新提交),请刷新后基于最新版本操作');
     }
     await lockAndRecheckStatus(tx, adjId, ApprovalStatus.PENDING);
     const parsedLines = adj.lines.map((l) => ({
@@ -1553,6 +1588,8 @@ export async function rejectAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
   opinion: string,
+  /** 审批人所见版本的提交代(§codex P1 版本绑定)。 */
+  clientSubmittedAt?: string | null,
 ): Promise<BudgetAdjustment> {
   // 提交代绑定同 approve(§codex P1):待审期间被再提交则拒绝本次驳回。
   const adjRef = await prisma.budgetAdjustment.findUnique({
@@ -1584,6 +1621,13 @@ export async function rejectAdjustment(
     if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
       throw new HTTPError(409, '该调整单在审批期间被重新提交,请刷新后重试');
     }
+
+    if (
+      clientSubmittedAt &&
+      (adj.submittedAt?.getTime() ?? 0) !== new Date(clientSubmittedAt).getTime()
+    ) {
+      throw new HTTPError(409, '该调整单已变更(被重新提交),请刷新后重试');
+    }
     await releaseLocks(tx, adjId, now);
     const rejected = await tx.budgetAdjustment.update({
       where: { id: adjId },
@@ -1606,6 +1650,8 @@ export async function rejectAdjustment(
 export async function withdrawAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
+  /** 操作人所见版本的提交代(§codex P1 版本绑定)。 */
+  clientSubmittedAt?: string | null,
 ): Promise<BudgetAdjustment> {
   // 提交代绑定同 approve(§codex P1):待审期间被驳回/再提交则拒绝本次撤回。
   const adjRef = await prisma.budgetAdjustment.findUnique({
@@ -1633,6 +1679,13 @@ export async function withdrawAdjustment(
     }
     if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
       throw new HTTPError(409, '该调整单在审批期间状态发生变化,请刷新后重试');
+    }
+
+    if (
+      clientSubmittedAt &&
+      (adj.submittedAt?.getTime() ?? 0) !== new Date(clientSubmittedAt).getTime()
+    ) {
+      throw new HTTPError(409, '该调整单状态已变化,请刷新后重试');
     }
     await releaseLocks(tx, adjId, now);
     const withdrawn = await tx.budgetAdjustment.update({
