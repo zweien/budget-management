@@ -1026,23 +1026,40 @@ export async function approveAdjustment(
   user: Pick<User, 'id' | 'role'>,
   opinion?: string,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({
+  // 首读仅取权限/状态/提交代;全量(明细)在事务内行锁后重读。
+  // §codex P1:提交代(submittedAt)绑定——待审期间被驳回/编辑/再提交时,
+  // 本审批在行锁内发现代变化即 409,绝不把旧提交的明细套在新提交上执行。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
     where: { id: adjId },
-    include: { lines: true },
+    select: { projectId: true, status: true, submittedAt: true },
   });
-  if (!adj) {
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:approve', adj.projectId);
+  await requirePermission(user, 'budget:approve', adjRef.projectId);
 
-  if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可审批,仅 PENDING 可审批`);
+  if (adjRef.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adjRef.status} 不可审批,仅 PENDING 可审批`);
   }
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
     // 双重审批防护:行锁 + 锁内复核状态(两个并发审批只有一个能通过);
     // 即使复核被绕过,末尾的条件化状态迁移 + 事务回滚仍保证金额不重复应用。
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({
+      where: { id: adjId },
+      include: { lines: true },
+    });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (adj.status !== ApprovalStatus.PENDING) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可审批,仅 PENDING 可审批`);
+    }
+    if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
+      throw new HTTPError(409, '该调整单在审批期间被驳回并重新提交,请刷新后重试');
+    }
     await lockAndRecheckStatus(tx, adjId, ApprovalStatus.PENDING);
     const parsedLines = adj.lines.map((l) => ({
       id: l.id,
@@ -1537,14 +1554,18 @@ export async function rejectAdjustment(
   user: Pick<User, 'id' | 'role'>,
   opinion: string,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({ where: { id: adjId } });
-  if (!adj) {
+  // 提交代绑定同 approve(§codex P1):待审期间被再提交则拒绝本次驳回。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    select: { projectId: true, status: true, submittedAt: true },
+  });
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:approve', adj.projectId);
+  await requirePermission(user, 'budget:approve', adjRef.projectId);
 
-  if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可驳回,仅 PENDING 可驳回`);
+  if (adjRef.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adjRef.status} 不可驳回,仅 PENDING 可驳回`);
   }
   if (!opinion || !opinion.trim()) {
     throw new HTTPError(422, '驳回需填写意见');
@@ -1552,6 +1573,17 @@ export async function rejectAdjustment(
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (adj.status !== ApprovalStatus.PENDING) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可驳回,仅 PENDING 可驳回`);
+    }
+    if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
+      throw new HTTPError(409, '该调整单在审批期间被重新提交,请刷新后重试');
+    }
     await releaseLocks(tx, adjId, now);
     const rejected = await tx.budgetAdjustment.update({
       where: { id: adjId },
@@ -1575,18 +1607,33 @@ export async function withdrawAdjustment(
   adjId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<BudgetAdjustment> {
-  const adj = await prisma.budgetAdjustment.findUnique({ where: { id: adjId } });
-  if (!adj) {
+  // 提交代绑定同 approve(§codex P1):待审期间被驳回/再提交则拒绝本次撤回。
+  const adjRef = await prisma.budgetAdjustment.findUnique({
+    where: { id: adjId },
+    select: { projectId: true, status: true, submittedAt: true },
+  });
+  if (!adjRef) {
     throw new HTTPError(404, '调整单不存在');
   }
-  await requirePermission(user, 'budget:adjust', adj.projectId);
+  await requirePermission(user, 'budget:adjust', adjRef.projectId);
 
-  if (adj.status !== ApprovalStatus.PENDING) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可撤回,仅 PENDING 可撤回`);
+  if (adjRef.status !== ApprovalStatus.PENDING) {
+    throw new HTTPError(409, `当前状态 ${adjRef.status} 不可撤回,仅 PENDING 可撤回`);
   }
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM budget_adjustments WHERE id = ${adjId}::uuid FOR UPDATE`;
+    const adj = await tx.budgetAdjustment.findUnique({ where: { id: adjId } });
+    if (!adj) {
+      throw new HTTPError(404, '调整单不存在');
+    }
+    if (adj.status !== ApprovalStatus.PENDING) {
+      throw new HTTPError(409, `当前状态 ${adj.status} 不可撤回,仅 PENDING 可撤回`);
+    }
+    if ((adjRef.submittedAt?.getTime() ?? 0) !== (adj.submittedAt?.getTime() ?? 0)) {
+      throw new HTTPError(409, '该调整单在审批期间状态发生变化,请刷新后重试');
+    }
     await releaseLocks(tx, adjId, now);
     const withdrawn = await tx.budgetAdjustment.update({
       where: { id: adjId },
