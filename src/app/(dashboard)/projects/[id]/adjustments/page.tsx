@@ -1268,7 +1268,8 @@ export default function AdjustmentsPage() {
                   <TableCell className="tabular-nums">{formatDateTime(row.createdAt)}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      {row.status === 'DRAFT' && (
+                      {/* DRAFT 正常编辑/提交/删除;REJECTED 驳回后可修改并再次提交(不可删除,保留流转记录) */}
+                      {(row.status === 'DRAFT' || row.status === 'REJECTED') && (
                         <>
                           <Button variant="ghost" size="sm" onClick={() => void openEdit(row)}>
                             编辑
@@ -1276,14 +1277,16 @@ export default function AdjustmentsPage() {
                           <Button size="sm" onClick={() => void submitRow(row)}>
                             提交审批
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-error-deep hover:bg-error-soft"
-                            onClick={() => setDeleteTarget(row)}
-                          >
-                            删除
-                          </Button>
+                          {row.status === 'DRAFT' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-error-deep hover:bg-error-soft"
+                              onClick={() => setDeleteTarget(row)}
+                            >
+                              删除
+                            </Button>
+                          )}
                         </>
                       )}
                       {row.status === 'PENDING' && (

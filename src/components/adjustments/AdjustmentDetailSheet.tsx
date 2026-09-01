@@ -53,6 +53,8 @@ export interface AdjustmentDetailVO {
   totalReason: string | null;
   annualReason: string | null;
   createdAt: string;
+  /** 最近一次驳回意见(从未被驳回则为 null)。 */
+  rejectionOpinion: string | null;
   lines: {
     id: string;
     subjectId: string | null;
@@ -184,6 +186,7 @@ export function AdjustmentDetailSheet({
   const expandTotals = detail?.expandTotals ?? fallback?.expandTotals;
   const totalReason = detail?.totalReason ?? fallback?.totalReason ?? null;
   const annualReason = detail?.annualReason ?? fallback?.annualReason ?? null;
+  const rejectionOpinion = detail?.rejectionOpinion ?? null;
   const createdAt = detail?.createdAt ?? fallback?.createdAt ?? null;
   const loading = open && !!adjustmentId && !detail && !error;
 
@@ -245,6 +248,12 @@ export function AdjustmentDetailSheet({
                 <dt className="text-xs text-mute">年度预算调整原因</dt>
                 <dd className="mt-1 text-sm">{annualReason || '—'}</dd>
               </div>
+              {rejectionOpinion ? (
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-error-deep">驳回意见</dt>
+                  <dd className="mt-1 whitespace-pre-wrap text-sm">{rejectionOpinion}</dd>
+                </div>
+              ) : null}
               {createdAt && (
                 <div className="bg-card p-3">
                   <dt className="text-xs text-mute">创建时间</dt>

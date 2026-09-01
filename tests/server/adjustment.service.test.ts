@@ -14,6 +14,7 @@ import {
 import { createProject } from '@/server/services/project.service';
 import {
   approveAdjustment,
+  rejectAdjustment,
   createAdjustment,
   deleteDraftAdjustment,
   getAdjustment,
@@ -1567,6 +1568,98 @@ describe('getAdjustmentDetail (§issue15) — 审批详情基线重建', () => {
       adminUser(),
     );
     await expectHTTP(() => submitAdjustment(fourth.id, adminUser()), 422);
+  });
+
+  it('§驳回后再提交:REJECTED 可编辑/再提交(锁重建、额度重校验、意见随详情下发)', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('resubmit');
+
+    // A 年度 -550 提交 → 驳回(锁释放,状态 REJECTED,意见落审批日志)。
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        totalReason: '总盘调剂',
+        annualReason: '年度调剂',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '-550.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '550.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await rejectAdjustment(adj.id, adminUser(), '额度依据不足,退回修改');
+
+    const rejected = await getAdjustment(adj.id, adminUser());
+    expect(rejected.status).toBe(ApprovalStatus.REJECTED);
+    // 锁已释放。
+    const activeLocks = await prisma.budgetLock.findMany({
+      where: { adjustmentId: adj.id, releasedAt: null },
+    });
+    expect(activeLocks).toHaveLength(0);
+    // 详情下发最近驳回意见。
+    const detail = await getAdjustmentDetail(adj.id, adminUser());
+    expect(detail.rejectionOpinion).toBe('额度依据不足,退回修改');
+
+    // 驳回后可编辑(改小额),再提交 → 锁重建、状态回 PENDING。
+    await updateDraftAdjustment(
+      adj.id,
+      {
+        year: 2026,
+        totalReason: '总盘调剂(修改后)',
+        annualReason: '年度调剂(修改后)',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '-100.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '100.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    const resubmitted = await getAdjustment(adj.id, adminUser());
+    expect(resubmitted.status).toBe(ApprovalStatus.PENDING);
+    const rebuiltLocks = await prisma.budgetLock.findMany({
+      where: { adjustmentId: adj.id, releasedAt: null },
+    });
+    expect(rebuiltLocks).toHaveLength(1); // A 的年度调减锁
+
+    // 审批生效:A 年度 600 → 500。
+    await approveAdjustment(adj.id, adminUser());
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: leafA.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('500.00');
+
+    // 边界守卫不变:APPROVED 单不可编辑。
+    await expect(
+      updateDraftAdjustment(
+        adj.id,
+        {
+          year: 2026,
+          lines: [
+            { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '0' },
+            { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '0' },
+          ],
+        },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+
+    // 再提交护栏仍在:新单超调(A 年度 500,调减 600)→ 422。
+    const over = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '-600.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '600.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await expectHTTP(() => submitAdjustment(over.id, adminUser()), 422);
   });
 
   it('§codex P2:同科目多行净额护栏——净调减合法不误杀,净超调仍拦截', async () => {

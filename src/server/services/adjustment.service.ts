@@ -448,8 +448,8 @@ export async function createAdjustment(
 }
 
 /**
- * §7 编辑调整草稿(仅 DRAFT 可改):重建明细行 + 更新年度/原因。
- * 校验逻辑与 createAdjustment 一致;不涉及锁(DRAFT 无锁)。
+ * §7 编辑调整草稿(DRAFT / REJECTED 可改):重建明细行 + 更新年度/原因。
+ * 校验逻辑与 createAdjustment 一致;不涉及锁(驳回时锁已释放,DRAFT 本无锁)。
  */
 export async function updateDraftAdjustment(
   adjId: string,
@@ -479,8 +479,8 @@ export async function updateDraftAdjustment(
     if (!existing) {
       throw new HTTPError(404, '调整单不存在');
     }
-    if (existing.status !== ApprovalStatus.DRAFT) {
-      throw new HTTPError(409, `仅草稿可编辑,当前状态:${existing.status}`);
+    if (existing.status !== ApprovalStatus.DRAFT && existing.status !== ApprovalStatus.REJECTED) {
+      throw new HTTPError(409, `仅草稿或已驳回单可编辑,当前状态:${existing.status}`);
     }
     const projectId = existing.projectId;
 
@@ -642,6 +642,9 @@ export interface AdjustmentDetail {
   totalReason: string | null;
   annualReason: string | null;
   createdAt: Date;
+  /** 最近一次驳回意见(从未被驳回则为 null)。 */
+  rejectionOpinion: string | null;
+  rejectionAt: Date | null;
   lines: AdjustmentLineDetail[];
   sums: {
     originTotal: string;
@@ -745,6 +748,15 @@ export async function getAdjustmentDetail(
   const sumBy = (pick: (l: AdjustmentLineDetail) => string) =>
     lines.reduce((acc, l) => acc.plus(fromStored(pick(l))), ZERO).toFixed(2);
 
+  // 最近一次驳回意见(§驳回后再提交:申请人需要知道驳回原因)。
+  // 驳回意见在 recordAudit 的 afterData.opinion 里(approval_logs 是遗留表,无此数据)。
+  const lastRejection = await prisma.auditLog.findFirst({
+    where: { objectType: 'budget_adjustments', objectId: adj.id, action: 'reject' },
+    orderBy: { operatedAt: 'desc' },
+  });
+  const rejectionOpinion =
+    (lastRejection?.afterData as { opinion?: unknown } | null)?.opinion ?? null;
+
   return {
     id: adj.id,
     projectId: adj.projectId,
@@ -755,6 +767,8 @@ export async function getAdjustmentDetail(
     totalReason: adj.totalReason,
     annualReason: adj.annualReason,
     createdAt: adj.createdAt,
+    rejectionOpinion: typeof rejectionOpinion === 'string' ? rejectionOpinion : null,
+    rejectionAt: lastRejection?.operatedAt ?? null,
     lines,
     sums: {
       originTotal: sumBy((l) => l.originTotal),
@@ -801,8 +815,9 @@ export async function submitAdjustment(
   }
   await requirePermission(user, 'budget:adjust', adj.projectId);
 
-  if (adj.status !== ApprovalStatus.DRAFT) {
-    throw new HTTPError(409, `当前状态 ${adj.status} 不可提交,仅 DRAFT 可提交`);
+  // DRAFT 首次提交;REJECTED 驳回后修改可再次提交(锁已在驳回时释放,此处重建)。
+  if (adj.status !== ApprovalStatus.DRAFT && adj.status !== ApprovalStatus.REJECTED) {
+    throw new HTTPError(409, `当前状态 ${adj.status} 不可提交,仅 草稿/已驳回 可提交`);
   }
 
   const parsedLines = adj.lines.map((l) => ({
@@ -814,11 +829,13 @@ export async function submitAdjustment(
     annual: fromStored(l.annualAdjustment),
   }));
 
+  // 并发复核预期 = 提交前的状态(DRAFT 首次提交 / REJECTED 驳回后再提交)。
+  const expectedStatus = adj.status;
   if (adj.kind === AdjustmentKind.ALLOCATE) {
     // 追加下达:正向 + 非零合计;池内分配再做容量护栏(expandTotals 不设上限);无锁、无零和校验。
     validateAllocate(parsedLines);
     return prisma.$transaction(async (tx) => {
-      await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
+      await lockAndRecheckStatus(tx, adjId, expectedStatus);
       if (!adj.expandTotals) {
         await assertAllocateCapacity(tx, adj.projectId, parsedLines);
       }
@@ -848,7 +865,7 @@ export async function submitAdjustment(
   }
 
   return prisma.$transaction(async (tx) => {
-    await lockAndRecheckStatus(tx, adjId, ApprovalStatus.DRAFT);
+    await lockAndRecheckStatus(tx, adjId, expectedStatus);
     // 总维度调减护栏:调整后不得为负(§总维度调减护栏)。
     await assertTotalDecreaseFloor(tx, adj.projectId, null, parsedLines);
     // 按科目合并年度调减合计(同一科目多行可能分别调减)。
