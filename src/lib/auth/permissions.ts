@@ -32,10 +32,12 @@ const OWNER_EDIT_ACTIONS = new Set<Action>([
   'budget:adjust',
   'budget:changeSubject',
   'record:import',
+  // 作废是破坏性操作,归 OWNER/ADMIN(与 AGENTS.md「HANDLER=只读成员」一致)。
+  'record:void',
 ]);
 
 /** 业务记录写动作:OWNER 与 HANDLER 成员均可(录入人员=HANDLER;管理员豁免)。 */
-const RECORD_WRITE_ACTIONS = new Set<Action>(['record:create', 'record:edit', 'record:void']);
+const RECORD_WRITE_ACTIONS = new Set<Action>(['record:create', 'record:edit']);
 
 /** 兼容旧引用:全部项目级编辑动作(OWNER_EDIT ∪ RECORD_WRITE)。 */
 const EDIT_ACTIONS = new Set<Action>([...OWNER_EDIT_ACTIONS, ...RECORD_WRITE_ACTIONS]);

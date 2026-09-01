@@ -104,10 +104,16 @@ export function SettlementImportPreview({
   const [selected, setSelected] = useState<Set<string>>(() => {
     const s = new Set<string>();
     initialData.pending.forEach((r) => s.add(r.rowId));
+    // 恢复批次:已持久化 forcedImport 的重复行视为已勾选(勾选态与强制标志始终同相)。
+    initialData.duplicates.forEach((r) => {
+      if (r.forcedImport) s.add(r.rowId);
+    });
     return s;
   });
   const [confirming, setConfirming] = useState(false);
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
+  // 暂存失败态:任何行级 PATCH 失败都置位并禁用「确认导入」,防止带着旧数据确认。
+  const [saveError, setSaveError] = useState<string | null>(null);
   const patchQueue = useRef<Promise<unknown>>(Promise.resolve());
 
   const confirmed = data.status === 'confirmed';
@@ -136,8 +142,11 @@ export function SettlementImportPreview({
           body: JSON.stringify({ updates }),
         }),
       )
+      .then(() => setSaveError(null))
       .catch((e: unknown) => {
-        toast.error(e instanceof Error ? e.message : '暂存失败,请重试');
+        const msg = e instanceof Error ? e.message : '暂存失败,请重试';
+        setSaveError(msg);
+        toast.error(msg);
       });
   };
 
@@ -163,25 +172,36 @@ export function SettlementImportPreview({
     patchRows([{ rowId, subjectId }]);
   };
 
-  const handleYearChange = (rowId: string, raw: string, original: number) => {
+  const handleYearChange = (
+    rowId: string,
+    e: React.FocusEvent<HTMLInputElement>,
+    original: number,
+  ) => {
+    const raw = e.target.value;
     const year = Number(raw);
-    if (!Number.isInteger(year) || year < 1900 || year > 9999 || year === original) return;
+    if (raw.trim() === '' || !Number.isInteger(year) || year < 1900 || year > 9999) {
+      // 非受控输入:非法输入直接回显恢复,避免界面值与服务端将导入的值不一致。
+      e.target.value = String(original);
+      toast.warning(`预算年度须为 1900~9999 的整数,已恢复为 ${original}`);
+      return;
+    }
+    if (year === original) return;
     applyLocal(rowId, { budgetYear: year });
     patchRows([{ rowId, budgetYear: year }]);
   };
 
   const toggleRow = (r: SettlementRow) => {
-    const isDup = r.duplicateFlag;
+    // 重复行:勾选状态即「强制导入」标志,两者同相切换(恢复批次时也不会错位)。
+    const nowSelected = !selected.has(r.rowId);
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(r.rowId)) next.delete(r.rowId);
-      else next.add(r.rowId);
+      if (nowSelected) next.add(r.rowId);
+      else next.delete(r.rowId);
       return next;
     });
-    if (isDup) {
-      const nowForced = !r.forcedImport;
-      applyLocal(r.rowId, {}, { forcedImport: nowForced });
-      patchRows([{ rowId: r.rowId, forcedImport: nowForced }]);
+    if (r.duplicateFlag) {
+      applyLocal(r.rowId, {}, { forcedImport: nowSelected });
+      patchRows([{ rowId: r.rowId, forcedImport: nowSelected }]);
     }
   };
 
@@ -266,7 +286,7 @@ export function SettlementImportPreview({
               max={9999}
               className="w-16 rounded border border-hairline bg-card px-1.5 py-0.5 text-xs tabular-nums"
               aria-label={`第 ${r.rowNo} 行预算年度`}
-              onBlur={(e) => handleYearChange(r.rowId, e.target.value, r.parsedData.budgetYear)}
+              onBlur={(e) => handleYearChange(r.rowId, e, r.parsedData.budgetYear)}
             />
           )}
         </TableCell>
@@ -489,13 +509,17 @@ export function SettlementImportPreview({
 
       {canEdit ? (
         <div className="flex items-center justify-end gap-3">
-          {unassignedCount > 0 ? (
+          {saveError ? (
+            <p className="text-xs text-error-deep">暂存失败:{saveError},修改未落库前无法确认导入</p>
+          ) : unassignedCount > 0 ? (
             <p className="text-xs text-mute">
               勾选行中还有 {unassignedCount} 行未指定科目,指定后才能确认导入
             </p>
           ) : null}
           <Button
-            disabled={selected.size === 0 || unassignedCount > 0 || confirming}
+            disabled={
+              selected.size === 0 || unassignedCount > 0 || confirming || saveError !== null
+            }
             onClick={handleConfirm}
           >
             {confirming ? '导入中…' : `确认导入(${selected.size} 行)`}

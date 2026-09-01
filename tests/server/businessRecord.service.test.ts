@@ -568,7 +568,26 @@ describe('businessRecord.service voidRecordsBatch (integration, real PG)', () =>
     await prisma.$disconnect();
   });
 
-  it('无成员资格的普通用户 → 403;空原因/空 id 列表 → 422', async () => {
+  it('无成员资格的普通用户/HANDLER 成员 → 403;空原因/空 id 列表 → 422', async () => {
+    // §codex P1:作废是破坏性操作(record:void=OWNER/ADMIN),HANDLER 只读成员不可。
+    const handlerId = uuidv7();
+    await prisma.user.create({
+      data: { id: handlerId, name: 'handler-batchvoid', role: UserRole.USER },
+    });
+    await prisma.projectMember.create({
+      data: { id: uuidv7(), projectId, userId: handlerId, memberRole: 'HANDLER' },
+    });
+    await expect(
+      voidRecordsBatch(projectId, recordIds.slice(0, 1), '原因', {
+        id: handlerId,
+        role: UserRole.USER,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    await prisma.projectMember
+      .deleteMany({ where: { projectId, userId: handlerId } })
+      .catch(() => {});
+    await prisma.user.delete({ where: { id: handlerId } }).catch(() => {});
+
     await expect(
       voidRecordsBatch(projectId, recordIds.slice(0, 1), '原因', {
         id: outsiderId,

@@ -110,7 +110,7 @@ describe('requirePermission 项目级编辑权(集成,真实 PG)', () => {
   });
 
   it('业务记录写动作:OWNER 与 HANDLER 放行,非成员 403', async () => {
-    for (const a of ['record:create', 'record:edit', 'record:void'] as Action[]) {
+    for (const a of ['record:create', 'record:edit'] as Action[]) {
       await expect(requirePermission(owner(), a, projectId)).resolves.toBeUndefined();
       await expect(requirePermission(handler(), a, projectId)).resolves.toBeUndefined();
       await expect(requirePermission(outsider(), a, projectId)).rejects.toMatchObject({
@@ -118,6 +118,17 @@ describe('requirePermission 项目级编辑权(集成,真实 PG)', () => {
       });
       await expect(requirePermission(admin(), a, projectId)).resolves.toBeUndefined();
     }
+  });
+
+  it('record:void 仅 OWNER/ADMIN(HANDLER 403;§codex P1 作废属破坏性操作)', async () => {
+    await expect(requirePermission(owner(), 'record:void', projectId)).resolves.toBeUndefined();
+    await expect(requirePermission(admin(), 'record:void', projectId)).resolves.toBeUndefined();
+    await expect(requirePermission(handler(), 'record:void', projectId)).rejects.toMatchObject({
+      status: 403,
+    });
+    await expect(requirePermission(outsider(), 'record:void', projectId)).rejects.toMatchObject({
+      status: 403,
+    });
   });
 
   it('预算/项目维护类:HANDLER 仍 403(仅 OWNER)', async () => {

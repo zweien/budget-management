@@ -195,6 +195,13 @@ export async function parseSettlement(
   if (headerRowNo === 0 || !headerSheet) {
     throw new HTTPError(422, '未找到个人结算单表头(需包含 单据编号/单据状态)');
   }
+  // 必要列必须全部按表头名命中;缺列直接拒绝(静默回退到 A 列会把单据编号当成金额/经办人)。
+  {
+    const missing = Object.values(SETTLEMENT_HEADERS).filter((k) => !colIndex.has(k));
+    if (missing.length > 0) {
+      throw new HTTPError(422, `结算单缺少必要列:${missing.join('、')},请核对导出文件`);
+    }
+  }
 
   const parsedRows: Array<{
     rowNo: number;

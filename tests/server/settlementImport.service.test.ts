@@ -101,6 +101,19 @@ async function buildSettlementXlsx(rows: SettlementRowData[]): Promise<Buffer> {
   return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
 }
 
+/** 构造「表头不全」的结算单 xlsx(回归:缺必要列必须 422,不得静默回退 A 列)。 */
+async function buildPartialHeaderXlsx(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('个人结算单查询');
+  ws.addRow(['个人结算单查询']);
+  ws.addRow(['时间:2026年08月31日']);
+  ws.addRow(['单位:计算机学院']);
+  ws.addRow(['单据编号', '单据状态', '填制日期']);
+  ws.addRow(['TY-X', '完成记账', '2026-08-01']);
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+}
+
 /** 标准模板 xlsx(验证不会被误判为结算单格式)。 */
 async function buildStandardXlsx(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -225,6 +238,15 @@ describe('settlementImport.service (integration, real PG)', () => {
 
     const std = await buildStandardXlsx();
     expect(await loadSettlementWorkbookIfMatch(std)).toBeNull();
+  });
+
+  it('parse:缺少必要列表头 → 422(不回退 A 列)', async () => {
+    const buf = await buildPartialHeaderXlsx();
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    expect(wb).not.toBeNull(); // 检测头命中,但必要列不全
+    await expect(parseSettlement(wb!, projectId, adminUser())).rejects.toMatchObject({
+      status: 422,
+    });
   });
 
   it('parse:状态映射/退单跳过/年度推导/富文本拍平/错误行', async () => {

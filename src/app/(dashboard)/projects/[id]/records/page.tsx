@@ -617,20 +617,23 @@ function BusinessRecordsPageInner() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-error-deep hover:bg-error-soft"
-              onClick={() => {
-                setVoidTarget(row);
-                setVoidReason('');
-                setVoidError(null);
-              }}
-              disabled={row.isVoid}
-            >
-              作废
-            </Button>
           </>
+        ) : null}
+        {/* 作废是破坏性操作(record:void=OWNER/ADMIN),与批量作废入口同门控。 */}
+        {project?.canEdit ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-error-deep hover:bg-error-soft"
+            onClick={() => {
+              setVoidTarget(row);
+              setVoidReason('');
+              setVoidError(null);
+            }}
+            disabled={row.isVoid}
+          >
+            作废
+          </Button>
         ) : null}
         <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
           历史
@@ -642,8 +645,8 @@ function BusinessRecordsPageInner() {
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
   const columns = useMemo<ColumnDef<BusinessRecordRow>[]>(
     () => [
-      // 批量选择列(仅可写者渲染;已作废行禁选)。全选作用于当前筛选可见的未作废行。
-      ...(project?.canWriteRecords
+      // 批量选择列(仅可作废者=ADMIN/OWNER 渲染;已作废行禁选)。全选作用于当前筛选可见的未作废行。
+      ...(project?.canEdit
         ? [
             {
               id: 'select',
@@ -829,7 +832,7 @@ function BusinessRecordsPageInner() {
         cell: ({ row }) => <RowActions row={row.original} />,
       },
     ],
-    [subjectLabels, yearOptions, project?.canWriteRecords, selectedIds],
+    [subjectLabels, yearOptions, project?.canEdit, selectedIds],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
@@ -915,7 +918,7 @@ function BusinessRecordsPageInner() {
       </div>
 
       {/* 批量操作条(有勾选时出现) */}
-      {project?.canWriteRecords && selectedVisibleCount > 0 ? (
+      {project?.canEdit && selectedVisibleCount > 0 ? (
         <div className="flex items-center justify-between rounded-lg border border-warning/40 bg-warning/20 px-4 py-2">
           <p className="text-sm">
             已勾选 <span className="font-semibold tabular-nums">{selectedVisibleCount}</span>{' '}
