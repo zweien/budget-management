@@ -362,4 +362,54 @@ describe('project.service (integration, real PG)', () => {
     });
     expect(got.id).toBe(project.id);
   });
+
+  it('createProject:YYYY-MM-DD 字符串正常入库(修复 Prisma 500,codex 修复)', async () => {
+    const project = await createProject(
+      {
+        code: `PD-${uuidv7().slice(0, 8)}`,
+        name: '日期串建项',
+        startDate: '2024-05-01',
+        endDate: '2026-12-31',
+      },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    expect(project.startDate?.toISOString().slice(0, 10)).toBe('2024-05-01');
+    expect(project.endDate?.toISOString().slice(0, 10)).toBe('2026-12-31');
+  });
+
+  it('createProject:非法日期串 → 422(而非 Prisma 500)', async () => {
+    await expect(
+      createProject(
+        { code: `PD-${uuidv7().slice(0, 8)}`, name: '坏日期', startDate: '2024-13-99' },
+        { id: adminId, role: UserRole.ADMIN },
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('开始日期格式无效'),
+    });
+  });
+
+  it('updateProject:日期串可改;置 null 可清空', async () => {
+    const project = await createProject(
+      { code: `PD-${uuidv7().slice(0, 8)}`, name: '日期改项' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    const updated = await updateProject(
+      project.id,
+      { startDate: '2025-01-15' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    expect(updated.startDate?.toISOString().slice(0, 10)).toBe('2025-01-15');
+
+    const cleared = await updateProject(
+      project.id,
+      { startDate: null, endDate: null },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    expect(cleared.startDate).toBeNull();
+    expect(cleared.endDate).toBeNull();
+  });
 });

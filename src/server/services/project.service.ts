@@ -18,8 +18,9 @@ export interface CreateProjectInput {
   level?: string | null;
   projectType?: string | null;
   undertakingUnit?: string | null;
-  startDate?: Date | null;
-  endDate?: Date | null;
+  /** 前端传 YYYY-MM-DD 日期串;服务端规范化为 Date(非法格式 422)。 */
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
   remark?: string | null;
 }
 
@@ -29,9 +30,28 @@ export interface UpdateProjectInput {
   level?: string | null;
   projectType?: string | null;
   undertakingUnit?: string | null;
-  startDate?: Date | null;
-  endDate?: Date | null;
+  /** 前端传 YYYY-MM-DD 日期串;服务端规范化为 Date(非法格式 422)。 */
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
   remark?: string | null;
+}
+
+/**
+ * 起止日期入参规范化(§codex 修复):前端传 YYYY-MM-DD 日期串,而 Prisma 的
+ * DateTime(@db.Date)要求完整 Date/ISO 值——裸日期串会导致 500。
+ * 接受 Date / YYYY-MM-DD;非法格式返回 422(而非 Prisma 错误)。
+ */
+function normalizeDateInput(value: Date | string | null | undefined, label: string): Date | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === 'string') {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (m) {
+      const dt = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
+      if (!Number.isNaN(dt.getTime())) return dt;
+    }
+  }
+  throw new HTTPError(422, `${label}格式无效(应为 YYYY-MM-DD)`);
 }
 
 /**
@@ -46,6 +66,8 @@ export async function createProject(
   await requirePermission(user, 'project:create');
   const ownerId = input.ownerId ?? user.id;
   const projectId = uuidv7();
+  const startDate = normalizeDateInput(input.startDate, '开始日期');
+  const endDate = normalizeDateInput(input.endDate, '结束日期');
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -57,8 +79,8 @@ export async function createProject(
           level: input.level ?? null,
           projectType: input.projectType ?? null,
           undertakingUnit: input.undertakingUnit ?? null,
-          startDate: input.startDate ?? null,
-          endDate: input.endDate ?? null,
+          startDate,
+          endDate,
           ownerId,
           remark: input.remark ?? null,
         },
@@ -250,8 +272,9 @@ export async function updateProject(
   if (input.level !== undefined) data.level = input.level;
   if (input.projectType !== undefined) data.projectType = input.projectType;
   if (input.undertakingUnit !== undefined) data.undertakingUnit = input.undertakingUnit;
-  if (input.startDate !== undefined) data.startDate = input.startDate;
-  if (input.endDate !== undefined) data.endDate = input.endDate;
+  if (input.startDate !== undefined)
+    data.startDate = normalizeDateInput(input.startDate, '开始日期');
+  if (input.endDate !== undefined) data.endDate = normalizeDateInput(input.endDate, '结束日期');
   if (input.remark !== undefined) data.remark = input.remark;
 
   return prisma.$transaction(async (tx) => {
