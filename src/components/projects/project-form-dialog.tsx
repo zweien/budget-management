@@ -5,11 +5,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import type { DateRange } from 'react-day-picker';
 
 import { apiFetch } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { DatePicker } from '@/components/ui/date-picker';
 import {
   Dialog,
   DialogContent,
@@ -54,17 +53,29 @@ function formatDateOnly(d?: Date): string | null {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
-const projectFormSchema = z.object({
-  code: z.string().trim().min(1, '请输入项目编号'),
-  name: z.string().trim().min(1, '请输入项目名称'),
-  level: z.string().trim(),
-  projectType: z.string().trim(),
-  undertakingUnit: z.string().trim(),
-  range: z.custom<DateRange>().optional(),
-  remark: z.string().trim(),
-  /** 负责人(仅新建;获得该项目 OWNER 成员编辑权),默认创建者自己。 */
-  ownerId: z.string().trim(),
-});
+const projectFormSchema = z
+  .object({
+    code: z.string().trim().min(1, '请输入项目编号'),
+    name: z.string().trim().min(1, '请输入项目名称'),
+    level: z.string().trim(),
+    projectType: z.string().trim(),
+    undertakingUnit: z.string().trim(),
+    /** 起止日期拆为两个字段(可只填其一)。 */
+    startDate: z.custom<Date>().optional(),
+    endDate: z.custom<Date>().optional(),
+    remark: z.string().trim(),
+    /** 负责人(仅新建;获得该项目 OWNER 成员编辑权),默认创建者自己。 */
+    ownerId: z.string().trim(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.startDate && v.endDate && v.endDate < v.startDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endDate'],
+        message: '结束日期不能早于开始日期',
+      });
+    }
+  });
 
 type ProjectFormValues = z.infer<typeof projectFormSchema>;
 
@@ -148,12 +159,8 @@ export function ProjectFormDialog({
         undertakingUnit: editing.undertakingUnit ?? '',
         remark: editing.remark ?? '',
         ownerId: '',
-        range: editing.startDate
-          ? {
-              from: parseDateOnly(editing.startDate),
-              to: parseDateOnly(editing.endDate),
-            }
-          : undefined,
+        startDate: parseDateOnly(editing.startDate),
+        endDate: parseDateOnly(editing.endDate),
       });
     } else {
       form.reset({
@@ -164,7 +171,8 @@ export function ProjectFormDialog({
         undertakingUnit: '',
         remark: '',
         ownerId: me?.id ?? '',
-        range: undefined,
+        startDate: undefined,
+        endDate: undefined,
       });
     }
   }, [open, editing, me?.id, form]);
@@ -182,8 +190,8 @@ export function ProjectFormDialog({
               level: values.level || null,
               projectType: values.projectType || null,
               undertakingUnit: values.undertakingUnit || null,
-              startDate: formatDateOnly(values.range?.from),
-              endDate: formatDateOnly(values.range?.to),
+              startDate: formatDateOnly(values.startDate),
+              endDate: formatDateOnly(values.endDate),
               remark: values.remark || null,
             }),
           },
@@ -200,8 +208,8 @@ export function ProjectFormDialog({
             level: values.level || null,
             projectType: values.projectType || null,
             undertakingUnit: values.undertakingUnit || null,
-            startDate: formatDateOnly(values.range?.from),
-            endDate: formatDateOnly(values.range?.to),
+            startDate: formatDateOnly(values.startDate),
+            endDate: formatDateOnly(values.endDate),
             remark: values.remark || null,
             ownerId: values.ownerId || undefined,
           }),
@@ -341,21 +349,42 @@ export function ProjectFormDialog({
                 )}
               />
             ) : null}
-            <FormField
-              control={form.control}
-              name="range"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>起止时间</FormLabel>
-                  <DateRangePicker
-                    value={field.value}
-                    onChange={field.onChange}
-                    placeholder="选择起止时间"
-                  />
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="grid grid-cols-2 gap-3">
+              <FormField
+                control={form.control}
+                name="startDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>开始日期</FormLabel>
+                    <FormControl>
+                      <DatePicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="选择或输入开始日期"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="endDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>结束日期</FormLabel>
+                    <FormControl>
+                      <DatePicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="选择或输入结束日期"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
             <FormField
               control={form.control}
               name="remark"
