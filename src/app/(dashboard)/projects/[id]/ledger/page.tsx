@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Download } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
+import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { BudgetTreeTable, type LedgerNode } from '@/components/ui/BudgetTreeTable';
@@ -70,6 +71,39 @@ export default function ProjectLedgerPage() {
     setYear(Number(next));
   };
 
+  /**
+   * §主要汇总行:一级科目(parentId 为空)各列之和 = 全体叶科目之和。
+   * 执行率为加权值(合计总占用 ÷ 合计预算),非各行平均;预算为 0 时为 null。
+   */
+  const level1Summary = useMemo(() => {
+    if (!ledger) return null;
+    const num = (s: string) => {
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+    let budget = 0;
+    let paid = 0;
+    let payable = 0;
+    let occupied = 0;
+    let balance = 0;
+    for (const n of ledger.nodes) {
+      if (n.parentId !== null) continue;
+      budget += num(n.current);
+      paid += num(n.paid);
+      payable += num(n.payable);
+      occupied += num(n.totalOccupied);
+      balance += num(n.balance);
+    }
+    return {
+      budget,
+      paid,
+      payable,
+      occupied,
+      balance,
+      rate: budget > 0 ? (occupied / budget) * 100 : null,
+    };
+  }, [ledger]);
+
   /** 导出当前年度台账为 xlsx(§10.5)。 */
   const handleExport = async () => {
     setExporting(true);
@@ -122,15 +156,39 @@ export default function ProjectLedgerPage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : ledger && ledger.nodes.length > 0 ? (
-        <BudgetTreeTable
-          nodes={ledger.nodes}
-          subjectHref={(n) =>
-            // 业务记录只挂在叶科目上:仅叶科目可点,携带当前年度筛选跳转。
-            n.isLeaf
-              ? `/projects/${projectId}/records?subjectId=${n.subjectId}&year=${year}`
-              : undefined
-          }
-        />
+        <div className="space-y-2">
+          {level1Summary && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground tabular-nums">
+              <span>
+                一级科目合计:预算{' '}
+                <span className="font-medium text-foreground">
+                  {level1Summary.budget.toFixed(2)}
+                </span>
+                {' · '}已支出 {level1Summary.paid.toFixed(2)}
+                {' · '}应付未付 {level1Summary.payable.toFixed(2)}
+                {' · '}总占用 {level1Summary.occupied.toFixed(2)}
+                {' · '}结余{' '}
+                <span className={cn(level1Summary.balance < 0 && 'text-error-deep')}>
+                  {level1Summary.balance.toFixed(2)}
+                </span>
+                {level1Summary.rate !== null && (
+                  <>
+                    {' · '}执行率 {level1Summary.rate.toFixed(1)}%
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+          <BudgetTreeTable
+            nodes={ledger.nodes}
+            subjectHref={(n) =>
+              // 业务记录只挂在叶科目上:仅叶科目可点,携带当前年度筛选跳转。
+              n.isLeaf
+                ? `/projects/${projectId}/records?subjectId=${n.subjectId}&year=${year}`
+                : undefined
+            }
+          />
+        </div>
       ) : (
         <Alert variant="info">
           <AlertTitle>{year} 年度暂无预算执行数据</AlertTitle>

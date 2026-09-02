@@ -858,6 +858,32 @@ export default function InitialBudgetPage() {
     return m;
   }, [leafCodes, subjectAmounts]);
 
+  /**
+   * §主要汇总行:一级科目(顶层行)汇总值之和 = 全体叶科目之和。
+   * 一级行本身是叶时直接取其明细(rollupByCode 只登记非叶行)。
+   */
+  const level1Summary = useMemo(() => {
+    let total = 0;
+    const byYear = new Map<number, number>();
+    for (const root of subjectTree) {
+      const roll = rollupByCode.get(root.code);
+      if (roll) {
+        total += roll.total;
+        for (const [y, v] of roll.byYear) byYear.set(y, (byYear.get(y) ?? 0) + v);
+      } else {
+        total += toDisplayNumber(subjectTotalAmounts[root.code]);
+        for (const [k, amt] of Object.entries(subjectAmounts)) {
+          const [code, yearStr] = k.split('|');
+          if (code !== root.code) continue;
+          const y = Number(yearStr);
+          byYear.set(y, (byYear.get(y) ?? 0) + toDisplayNumber(amt));
+        }
+      }
+    }
+    return { total, byYear };
+  }, [subjectTree, rollupByCode, subjectTotalAmounts, subjectAmounts]);
+  const level1OverTotal = projectTotal !== '' && level1Summary.total > projectTotalNum + 1e-9;
+
   /** 组装提交 payload。isLeaf 由 leafCodes 在提交时推导。 */
   const buildPayload = (): InitialBudgetPayload => {
     // 仅保留叶子科目的预算,且仅对已声明年度。
@@ -1461,6 +1487,28 @@ export default function InitialBudgetPage() {
             )}
           </div>
         </div>
+        {subjectRows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground tabular-nums">
+            <span>
+              一级科目合计:总预算{' '}
+              <span
+                className={cn(
+                  'font-medium',
+                  level1OverTotal ? 'text-error-deep' : 'text-foreground',
+                )}
+              >
+                {level1Summary.total.toFixed(2)}
+              </span>
+              {level1OverTotal ? <span className="text-error-deep">(超总预算)</span> : null}
+              {declaredYears.map((y) => (
+                <span key={y}>
+                  {' · '}
+                  {y} 年 {(level1Summary.byYear.get(y) ?? 0).toFixed(2)}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
         <div
           ref={tableWrapRef}
           className="overflow-x-auto rounded-lg border border-border bg-card shadow-l2"
