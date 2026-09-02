@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { normalizeWhitespace } from '@/lib/text';
 
 /**
  * 科目映射记忆:项目内「摘要 → 科目」的历史确认统计(来自未作废业务记录)。
@@ -24,9 +25,9 @@ export interface SubjectMappingOptions {
   limit?: number;
 }
 
-/** 摘要归一化:去首尾空白、压缩连续空白(与导入行摘要的常见差异对齐)。 */
+/** 摘要归一化(与查重指纹同口径,见 lib/text)。 */
 export function normalizeSummary(s: string): string {
-  return s.trim().replace(/\s+/g, ' ');
+  return normalizeWhitespace(s);
 }
 
 /**

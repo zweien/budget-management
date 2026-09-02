@@ -51,6 +51,8 @@ export interface SettlementRow {
   validationStatus: 'valid' | 'error' | 'skipped';
   errors: { field: string; message: string }[];
   duplicateFlag: boolean;
+  /** 重复档位(ADR 0002):hard=单据编号硬重复,禁止导入;旧数据无档位按 suspected。 */
+  duplicateLevel: 'none' | 'hard' | 'suspected';
   forcedImport: boolean;
   normalizedAmount: string | null;
 }
@@ -104,9 +106,10 @@ export function SettlementImportPreview({
   const [selected, setSelected] = useState<Set<string>>(() => {
     const s = new Set<string>();
     initialData.pending.forEach((r) => s.add(r.rowId));
-    // 恢复批次:已持久化 forcedImport 的重复行视为已勾选(勾选态与强制标志始终同相)。
+    // 恢复批次:已持久化 forcedImport 的疑似重复行视为已勾选(勾选态与强制标志始终同相);
+    // 硬重复行不可导入,永不勾选。
     initialData.duplicates.forEach((r) => {
-      if (r.forcedImport) s.add(r.rowId);
+      if (r.forcedImport && r.duplicateLevel !== 'hard') s.add(r.rowId);
     });
     return s;
   });
@@ -191,6 +194,10 @@ export function SettlementImportPreview({
   };
 
   const toggleRow = (r: SettlementRow) => {
+    if (r.duplicateLevel === 'hard') {
+      toast.error('硬重复行不可导入:单据编号与未作废记录重复,请先作废旧记录');
+      return;
+    }
     // 重复行:勾选状态即「强制导入」标志,两者同相切换(恢复批次时也不会错位)。
     const nowSelected = !selected.has(r.rowId);
     setSelected((prev) => {
@@ -260,15 +267,27 @@ export function SettlementImportPreview({
   const renderRow = (r: SettlementRow) => {
     const checked = selected.has(r.rowId);
     const selectable = !readOnly;
+    const hard = r.duplicateLevel === 'hard';
     return (
-      <TableRow key={r.rowId} className={cn(r.duplicateFlag && 'bg-warning/20')}>
+      <TableRow
+        key={r.rowId}
+        className={cn(hard && 'opacity-60', r.duplicateFlag && !hard && 'bg-warning/20')}
+      >
         {selectable ? (
           <TableCell className="pr-0">
-            <Checkbox
-              checked={checked}
-              onCheckedChange={() => toggleRow(r)}
-              aria-label={`选择第 ${r.rowNo} 行`}
-            />
+            {hard ? (
+              <span
+                className="inline-block size-4 rounded border border-input bg-muted"
+                title="硬重复:单据编号与未作废记录重复,禁止导入"
+                aria-label={`第 ${r.rowNo} 行硬重复,不可导入`}
+              />
+            ) : (
+              <Checkbox
+                checked={checked}
+                onCheckedChange={() => toggleRow(r)}
+                aria-label={`选择第 ${r.rowNo} 行`}
+              />
+            )}
           </TableCell>
         ) : null}
         <TableCell className="tabular-nums">{r.rowNo}</TableCell>
@@ -316,7 +335,9 @@ export function SettlementImportPreview({
           )}
         </TableCell>
         <TableCell>
-          {r.duplicateFlag ? (
+          {hard ? (
+            <Badge variant="error">硬重复</Badge>
+          ) : r.duplicateFlag ? (
             r.forcedImport ? (
               <Badge variant="warning">强制导入</Badge>
             ) : (
@@ -406,10 +427,13 @@ export function SettlementImportPreview({
           <p className="mt-1 text-xl font-semibold tabular-nums">{assignedCount}</p>
         </Card>
         <Card className="p-3">
-          <p className="caption-mono">疑似重复</p>
+          <p className="caption-mono">重复行</p>
           <p className="mt-1 text-xl font-semibold text-warning-deep tabular-nums">
             {data.duplicates.length}
           </p>
+          {data.duplicates.some((r) => r.duplicateLevel === 'hard') && (
+            <p className="text-xs text-error-deep">含硬重复行,禁止导入</p>
+          )}
         </Card>
         <Card className="p-3">
           <p className="caption-mono">错误行</p>

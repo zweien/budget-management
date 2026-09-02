@@ -547,29 +547,43 @@ describe('settlementImport.service (integration, real PG)', () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
-  it('确认:重复行未强制导入 → 422;强制导入放行;确认前 docNo 冲突兜底', async () => {
-    // 既有 docNo FORCE-1。
-    await prisma.businessRecord.create({
-      data: {
-        id: uuidv7(),
-        projectId,
-        budgetYear: 2026,
-        subjectId: leafId,
-        amount: toStored(new Prisma.Decimal('1')),
-        businessDate: new Date('2026-01-01T00:00:00Z'),
-        handler: '旧',
-        summary: '已有单据',
-        status: BusinessStatus.PAID,
-        docNo: 'FORCE-1',
-        createdById: adminId,
-      },
+  it('确认:docNo 硬重复禁止导入(不可强制);指纹疑似可强制;确认前 docNo 冲突兜底', async () => {
+    // 既有 docNo FORCE-1(硬重复源)+ 指纹命中源(无编号:2026-07-10/33/「指纹命中源」)。
+    await prisma.businessRecord.createMany({
+      data: [
+        {
+          id: uuidv7(),
+          projectId,
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: toStored(new Prisma.Decimal('1')),
+          businessDate: new Date('2026-01-01T00:00:00Z'),
+          handler: '旧',
+          summary: '已有单据',
+          status: BusinessStatus.PAID,
+          docNo: 'FORCE-1',
+          createdById: adminId,
+        },
+        {
+          id: uuidv7(),
+          projectId,
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: toStored(new Prisma.Decimal('33')),
+          businessDate: new Date('2026-07-10T00:00:00Z'),
+          handler: '旧',
+          summary: '指纹命中源',
+          status: BusinessStatus.PAID,
+          createdById: adminId,
+        },
+      ],
     });
     const buf = await buildSettlementXlsx([
       {
         docNo: 'FORCE-1',
         docStatus: '完成记账',
         fillDate: '2026-07-08',
-        subject: '强制导入单',
+        subject: '硬重复单',
         amount: '20',
         handler: '庚',
       },
@@ -581,28 +595,50 @@ describe('settlementImport.service (integration, real PG)', () => {
         amount: '21',
         handler: '庚',
       },
+      {
+        docStatus: '完成记账',
+        fillDate: '2026-07-10',
+        subject: '指纹命中源',
+        amount: '33',
+        handler: '庚',
+      },
     ]);
     const wb = await loadSettlementWorkbookIfMatch(buf);
     const batchId = await parseSettlement(wb!, projectId, adminUser());
     const preview = await getSettlementBatch(batchId, adminUser());
-    const dupRow = preview.duplicates.find((r) => r.parsedData.docNo === 'FORCE-1')!;
+    const hardRow = preview.duplicates.find((r) => r.parsedData.docNo === 'FORCE-1')!;
+    const susRow = preview.duplicates.find((r) => !r.parsedData.docNo)!;
     const okRow = preview.pending.find((r) => r.parsedData.docNo === 'RACE-1')!;
+    expect(hardRow.duplicateLevel).toBe('hard');
+    expect(susRow.duplicateLevel).toBe('suspected');
 
     await updateSettlementRows(
       batchId,
       [
-        { rowId: dupRow.rowId, subjectId: leafId },
+        { rowId: hardRow.rowId, subjectId: leafId },
+        { rowId: susRow.rowId, subjectId: leafId },
         { rowId: okRow.rowId, subjectId: leafId },
       ],
       adminUser(),
     );
 
-    // 重复行默认未强制 → 422。
+    // 硬重复行不可强制导入(暂存即拒)。
     await expect(
-      confirmSettlementImport(batchId, [dupRow.rowId, okRow.rowId], adminUser()),
+      updateSettlementRows(batchId, [{ rowId: hardRow.rowId, forcedImport: true }], adminUser()),
     ).rejects.toMatchObject({ status: 422 });
 
-    // 模拟确认前他人导入同 docNo(RACE-1)→ 兜底 422。
+    // 硬重复行确认 → 422(即使强行把 forcedImport 写进选中集也拦)。
+    await expect(
+      confirmSettlementImport(batchId, [hardRow.rowId, susRow.rowId], adminUser()),
+    ).rejects.toMatchObject({ status: 422, message: expect.stringContaining('硬重复') });
+
+    // 疑似重复行未强制 → 422。
+    await expect(
+      confirmSettlementImport(batchId, [susRow.rowId], adminUser()),
+    ).rejects.toMatchObject({ status: 422, message: expect.stringContaining('疑似重复') });
+
+    // 疑似重复行强制导入 + 竞态:确认前他人导入同 docNo(RACE-1)→ 兜底 422(硬重复无豁免)。
+    await updateSettlementRows(batchId, [{ rowId: susRow.rowId, forcedImport: true }], adminUser());
     await prisma.businessRecord.create({
       data: {
         id: uuidv7(),
@@ -618,20 +654,14 @@ describe('settlementImport.service (integration, real PG)', () => {
         createdById: adminId,
       },
     });
-    await updateSettlementRows(batchId, [{ rowId: dupRow.rowId, forcedImport: true }], adminUser());
     await expect(
-      confirmSettlementImport(batchId, [dupRow.rowId, okRow.rowId], adminUser()),
+      confirmSettlementImport(batchId, [susRow.rowId, okRow.rowId], adminUser()),
     ).rejects.toMatchObject({ status: 422 });
 
-    // 只导入强制重复行(取消 RACE-1 勾选)→ 成功。
-    const res = await confirmSettlementImport(batchId, [dupRow.rowId], adminUser());
+    // 只导入强制疑似行(取消 RACE-1 勾选)→ 成功。
+    const res = await confirmSettlementImport(batchId, [susRow.rowId], adminUser());
     expect(res.created).toBe(1);
-    const forced = await prisma.businessRecord.findFirst({
-      where: { projectId, docNo: 'FORCE-1' },
-      orderBy: { createdAt: 'desc' },
-    });
-    expect(forced).not.toBeNull();
-    const importRow = await prisma.importRow.findFirst({ where: { batchId, rowNo: dupRow.rowNo } });
+    const importRow = await prisma.importRow.findFirst({ where: { batchId, rowNo: susRow.rowNo } });
     expect(importRow?.forcedImport).toBe(true);
   });
 

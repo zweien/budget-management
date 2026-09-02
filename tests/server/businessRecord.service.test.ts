@@ -182,6 +182,106 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(saved!.amount.toFixed(2)).toBe('700.00');
   });
 
+  it('createRecord/updateRecord: docNo 硬重复 409、作废释放编号、指纹疑似 duplicateHints(ADR 0002)', async () => {
+    const { project, leafA } = await seedApprovedProject('DUP');
+    const base = {
+      budgetYear: 2026,
+      subjectId: leafA.id,
+      handler: '经办人A',
+      status: BusinessStatus.PLACEHOLDER,
+    };
+
+    // 1) 首建带编号记录。
+    await createRecord(
+      project.id,
+      {
+        ...base,
+        amount: '10.00',
+        businessDate: '2026-06-03',
+        summary: '原始记录',
+        docNo: 'HARD-1',
+      },
+      adminUser(),
+    );
+
+    // 2) 同号再建 → 409 硬重复(消息含冲突详情与出路提示)。
+    await expect(
+      createRecord(
+        project.id,
+        {
+          ...base,
+          amount: '20.00',
+          businessDate: '2026-06-04',
+          summary: '另一笔',
+          docNo: 'HARD-1',
+        },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining('不可重复入账'),
+    });
+
+    // 3) 作废旧记录 → 编号释放 → 同号可再建。
+    const old = await prisma.businessRecord.findFirstOrThrow({
+      where: { projectId: project.id, docNo: 'HARD-1' },
+    });
+    await voidRecord(old.id, '重导测试', adminUser());
+    const reCreated = await createRecord(
+      project.id,
+      {
+        ...base,
+        amount: '20.00',
+        businessDate: '2026-06-04',
+        summary: '重导记录',
+        docNo: 'HARD-1',
+      },
+      adminUser(),
+    );
+    expect(reCreated.record.docNo).toBe('HARD-1');
+    expect(reCreated.duplicateHints).toBeUndefined();
+
+    // 4) 无编号 + 指纹命中(年度+金额+日期+摘要,基准须为有效记录)→ 保存成功但带疑似重复提示。
+    await createRecord(
+      project.id,
+      {
+        ...base,
+        amount: '10.00',
+        businessDate: '2026-06-03',
+        summary: '原始记录',
+        docNo: 'FP-BASE',
+      },
+      adminUser(),
+    );
+    const hinted = await createRecord(
+      project.id,
+      { ...base, amount: '10.00', businessDate: '2026-06-03', summary: '原始记录' },
+      adminUser(),
+    );
+    expect(hinted.duplicateHints?.length).toBeGreaterThan(0);
+    expect(hinted.duplicateHints![0].summary).toBe('原始记录');
+
+    // 5) updateRecord:把另一条的 docNo 改成已被占用的编号 → 409。
+    const other = await createRecord(
+      project.id,
+      {
+        ...base,
+        amount: '30.00',
+        businessDate: '2026-06-05',
+        summary: '别的记录',
+        docNo: 'HARD-2',
+      },
+      adminUser(),
+    );
+    await expect(
+      updateRecord(other.record.id, { docNo: 'HARD-1' }, adminUser()),
+    ).rejects.toMatchObject({ status: 409 });
+
+    // 6) updateRecord 保留自身编号(改别的字段)→ 不自撞,正常保存。
+    const kept = await updateRecord(reCreated.record.id, { handler: '新经办人' }, adminUser());
+    expect(kept.record.handler).toBe('新经办人');
+  });
+
   it('createRecord: 非叶科目 → HTTPError 422', async () => {
     const { project, root } = await seedApprovedProject('NONLEAF');
 

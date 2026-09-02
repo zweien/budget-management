@@ -20,7 +20,7 @@ export interface ExcelColumn {
   width: number;
 }
 
-/** §10.4 模板列(顺序敏感,解析按此顺序)。 */
+/** §10.4 模板列(顺序敏感;解析按表头匹配,缺表头退回此顺序)。 */
 export const EXCEL_COLUMNS: readonly ExcelColumn[] = [
   { header: '项目编号', key: 'projectCode', width: 18 },
   { header: '预算年度', key: 'budgetYear', width: 12 },
@@ -31,6 +31,8 @@ export const EXCEL_COLUMNS: readonly ExcelColumn[] = [
   { header: '摘要', key: 'summary', width: 30 },
   { header: '业务状态', key: 'businessStatus', width: 16 },
   { header: '备注', key: 'remark', width: 24 },
+  // v0.11 追加(可选列):老文件无此列仍可导入,查重退回指纹疑似。
+  { header: '单据编号', key: 'docNo', width: 20 },
 ] as const;
 
 /** §10.2 业务状态中文 ↔ BusinessStatus 枚举映射。 */
@@ -163,10 +165,14 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
     ['摘要', '非空。'],
     ['业务状态', `四选一:${STATUS_CN_VALUES.join(' / ')}。`],
     ['备注', '可选。'],
+    [
+      '单据编号',
+      '可选。财务系统单据号;项目内与未作废记录同号即【硬重复】,禁止导入(先作废旧记录方可重导)。',
+    ],
     ['', ''],
     [
-      '疑似重复',
-      '系统按(项目+年度+科目+金额+业务日期+摘要)匹配已有记录;疑似重复默认不导入,可在确认页勾选强制导入。',
+      '重复检测',
+      '填了单据编号:与项目内未作废记录同号 → 硬重复,禁止导入。未填编号:按(年度+金额+业务日期+摘要)匹配 → 疑似重复,默认不导入,可在确认页勾选强制导入。',
     ],
     ['超预算', '超预算行允许导入(仅在台账中体现),不会被拒绝。'],
   ];

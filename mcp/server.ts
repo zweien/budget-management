@@ -311,7 +311,7 @@ server.tool(
 
 server.tool(
   'budget_create_record',
-  `新增业务记录。${POLICY_CONFIRM}status 取值:PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/PAID。`,
+  `新增业务记录。${POLICY_CONFIRM}status 取值:PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/PAID。填了 docNo 且与项目内未作废记录同号 → 409 硬重复,禁止创建(先作废旧记录才能重导);未填 docNo 时若与既有记录构成指纹相似(年度+金额+日期+摘要),响应带 duplicateHints 警示、仍会保存。`,
   {
     projectId: z.string().uuid().describe(projectIdDesc),
     budgetYear: z.number().int(),
@@ -335,7 +335,7 @@ server.tool(
 
 server.tool(
   'budget_update_record',
-  `修改业务记录(全部字段可选)。${POLICY_CONFIRM}`,
+  `修改业务记录(全部字段可选)。${POLICY_CONFIRM}docNo 改为与未作废记录同号 → 409 硬重复,禁止修改。`,
   {
     projectId: z.string().uuid().describe(projectIdDesc),
     recordId: z.string().uuid().describe('业务记录 ID'),
