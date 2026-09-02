@@ -4,7 +4,7 @@
 
 **科研项目预算的全闭环管理 · 编制 → 下达 → 占用 → 调整 → 统计**
 
-[![Release](https://img.shields.io/badge/release-v0.5.0-blue)](./CHANGELOG.md)
+[![Release](https://img.shields.io/badge/release-v0.10.0-blue)](./CHANGELOG.md)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://www.typescriptlang.org/)
@@ -12,12 +12,12 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://www.postgresql.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-38BDF8?logo=tailwindcss)](https://tailwindcss.com/)
 [![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-Radix-000000)](https://ui.shadcn.com/)
-[![Tests](https://img.shields.io/badge/tests-229%20passed-brightgreen)](#测试)
+[![Tests](https://img.shields.io/badge/tests-293%20passed-brightgreen)](#测试)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 </div>
 
-> 一个面向科研项目的 B/S 架构预算管理工具。围绕 **预算编制 → 预算下达 → 业务占用 → 预算调整 → 统计分析** 的完整闭环，提供精确到科目级的预算管控、实时占用聚合、审批流转与审计留痕。
+> 一个面向科研项目的 B/S 架构预算管理工具。围绕 **预算编制 → 预算下达 → 业务占用 → 预算调整 → 统计分析** 的完整闭环，提供精确到科目级的预算管控、实时占用聚合、审批流转与审计留痕；并内置 **Coding Agent 自动化**——通过 API Key 机器认证 + 分级确认策略，让 AI 代理安全地代管预算。
 
 ---
 
@@ -32,7 +32,8 @@
 - ⚖️ **双维度预算调整** —— 一次调整同时处理「科目总预算」与「年度预算」两个维度，收支平衡校验 + 可调额度锁定
 - ✅ **审批流转 + 审计留痕** —— 草稿 / 待审批 / 通过 / 驳回状态机，统一审计中间件记录前后快照
 - 🔒 **预算锁机制** —— 调减额度在提交时即锁定，防止多张调整单累计超额
-- 📥 **Excel 批量导入** —— 三段式预览（有效 / 错误 / 疑似重复），原子化确认防并发
+- 📥 **Excel 批量导入** —— 标准模板三段式预览（有效 / 错误 / 疑似重复），原子化确认防并发；**个人结算单**直接上传（自动识别格式、单据编号查重、暂存续办）
+- 🤖 **Coding Agent 自动化** —— API Key 机器认证（个人凭证自助签发 / 服务账号）、权限 scope 只收窄不放大、无人值守硬排除（作废/审批/成员管理服务端拦截）、MCP Server + Agent Skill 三层接入
 - 📤 **台账导出** —— 一键导出年度执行台账为 Excel
 - 🎨 **Vercel 设计语言** —— 按 DESIGN.md token 体系落地 shadcn/ui 界面，亮 / 暗双主题
 - 🔗 **台账联动查询** —— 执行台账点击叶科目直达业务记录筛选视图
@@ -49,18 +50,21 @@ flowchart LR
     C --> E[统计分析<br/>执行率 / 超预算预警]
     E --> F[年度结转<br/>跨年结转未完业务]
     F --> A
+    C -.结算单 Excel.-> G[Agent 自动化<br/>收件箱 → 导入 → 汇报]
+    G --> C
 ```
 
 ## 🛠️ 技术栈
 
-| 层           | 技术                                                                                                             |
-| ------------ | ---------------------------------------------------------------------------------------------------------------- |
-| **前端**     | Next.js 16 (App Router) · React 19 · TypeScript 5 (strict) · Tailwind CSS 4 · shadcn/ui (Radix) · TanStack Table |
-| **后端**     | Next.js Route Handlers · Prisma 5 ORM · Zod 校验                                                                 |
-| **数据库**   | PostgreSQL 16                                                                                                    |
-| **金额运算** | decimal.js（全链路字符串传输，杜绝浮点误差）                                                                     |
-| **测试**     | Vitest（229 项集成测试，直连真实 PG）                                                                            |
-| **工程化**   | ESLint · Prettier · Husky · commitlint · lint-staged                                                             |
+| 层             | 技术                                                                                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **前端**       | Next.js 16 (App Router) · React 19 · TypeScript 5 (strict) · Tailwind CSS 4 · shadcn/ui (Radix) · TanStack Table |
+| **后端**       | Next.js Route Handlers · Prisma 5 ORM · Zod 校验                                                                 |
+| **数据库**     | PostgreSQL 16                                                                                                    |
+| **金额运算**   | decimal.js（全链路字符串传输，杜绝浮点误差）                                                                     |
+| **Agent 接入** | REST API + Bearer API Key · MCP Server (stdio, `@modelcontextprotocol/sdk`) · Agent Skill (`skills/budget-ops`)  |
+| **测试**       | Vitest（293 项集成测试，直连真实 PG）                                                                            |
+| **工程化**     | ESLint · Prettier · Husky · commitlint · lint-staged                                                             |
 
 ### UI 设计体系
 
@@ -108,13 +112,7 @@ npm run db:seed            # 写入 3 个角色用户 + 默认数据
 npm run dev                   # http://localhost:3000
 ```
 
-### 6.（可选）预算调整导出 docx
-
-预算调整的「导出 docx」功能按模板生成 Word 文档，依赖 `jszip`（已随 `npm install` 安装，纯 Node 实现，无需 Python）。开箱即用，无需额外配置。
-
-> 仓库另附 `scripts/gen_adjustment_docx.py` 作为 Python（python-docx）实现的可选参考，默认未启用。
-
-### 7.（可选）接入 Authentik SSO
+### 6.（可选）接入 Authentik SSO
 
 默认 `MOCK_AUTH=true`（本地开发用模拟身份）。接入 SSO：在 Authentik 建 OAuth2 Provider(Confidential,Redirect URI `http://localhost:3000/api/auth/callback`)+ Application(slug 建议 `budget`),把凭据填入 `.env` 并设 `MOCK_AUTH=false`，详见 [AGENTS.md](./AGENTS.md) 认证体系小节。首个管理员：`npm run make-admin -- <用户名>`。
 
@@ -126,42 +124,84 @@ npm run dev                   # http://localhost:3000
 
 ## 📖 主要功能
 
-| 模块           | 说明                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------- |
-| **项目管理**   | 立项、起止时间（可手输日期）、级别、归档；管理员可指定/调整项目负责人（成员管理）                         |
-| **预算编制**   | 树形科目编辑器、新编制默认预设模板、单位×数量×单价自动算金额、父节点汇总、草稿随时保存再编辑              |
-| **预算审批**   | 提交 / 审批 / 驳回 / 撤回，审批中心统一待办                                                               |
-| **预算调整**   | 双维度（总预算 + 年度）联动表单，收支平衡校验，可调额度锁定                                               |
-| **业务记录**   | 逐笔登记支出（登记占位 / 合同 / 财务审批 / 已支出），实时占用，连续录入；科目下拉可搜索、同名科目编号消歧 |
-| **报销凭证**   | 业务记录附件上传（图片/PDF/Office ≤50MB 不限数量）、抽屉管理、在线预览（浏览器原生渲染）                  |
-| **附件打包**   | 按预算科目层级组织 zip 文件夹，文件名模板可自定义（日期/金额/经办人/科目等 8 个占位符），可筛年度         |
-| **执行台账**   | 树形展示各科目预算/占用/结余/执行率，列显示控制、导出，叶科目点击直达业务记录筛选                         |
-| **到账流水**   | 登记项目到账资金                                                                                          |
-| **Excel 导入** | 批量导入业务记录，三段式预览 + 防并发确认                                                                 |
-| **年度结转**   | 跨年结转未完成业务记录                                                                                    |
-| **统计分析**   | 自定义统计（科目模糊检索）、月度历史、跨项目汇总、**经费余额**（总预算口径结余 + 仅看负结余 + xlsx 导出） |
-| **操作日志**   | 全量审计，前后快照留痕                                                                                    |
+| 模块           | 说明                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **项目管理**   | 立项、起止时间（可手输日期）、级别、归档；管理员可指定/调整项目负责人（成员管理）                                            |
+| **预算编制**   | 树形科目编辑器、新编制默认预设模板、单位×数量×单价自动算金额、父节点汇总、草稿随时保存再编辑                                 |
+| **预算审批**   | 提交 / 审批 / 驳回 / 撤回，审批中心统一待办                                                                                  |
+| **预算调整**   | 双维度（总预算 + 年度）联动表单，收支平衡校验，可调额度锁定；驳回后可编辑再提交，审批版本绑定防串版本                        |
+| **业务记录**   | 逐笔登记支出（登记占位 / 合同 / 财务审批 / 已支出），单据编号字段、批量作废、表头筛选+排序；科目下拉可搜索、同名科目编号消歧 |
+| **结算单导入** | 财务系统「个人结算单查询」xlsx 直接上传：格式自动识别、单据编号查重（可强制导入）、逐条指定科目可暂存续办                    |
+| **报销凭证**   | 业务记录附件上传（图片/PDF/Office ≤50MB 不限数量）、抽屉管理、在线预览（浏览器原生渲染）                                     |
+| **附件打包**   | 按预算科目层级组织 zip 文件夹，文件名模板可自定义（日期/金额/经办人/科目等 8 个占位符），可筛年度                            |
+| **执行台账**   | 树形展示各科目预算/占用/结余/执行率，列显示控制、导出，叶科目点击直达业务记录筛选                                            |
+| **到账流水**   | 登记项目到账资金                                                                                                             |
+| **Excel 导入** | 标准模板批量导入业务记录，三段式预览 + 防并发确认                                                                            |
+| **年度结转**   | 跨年结转未完成业务记录                                                                                                       |
+| **统计分析**   | 自定义统计（科目模糊检索）、月度历史、跨项目汇总、**经费余额**（总预算口径结余 + 仅看负结余 + xlsx 导出）                    |
+| **操作日志**   | 全量审计，前后快照留痕；机器凭证被拒尝试（`unattended.denied` / `apikey.denied`）一并留痕                                    |
+| **API 凭证**   | 个人 API Key 自助签发/撤销：档位（只读/读写/完整）× 项目范围（全部/指定）× 有效期，明文仅创建时可见                          |
+
+## 🤖 Coding Agent 自动化
+
+让 AI 编码代理（ZCode / Claude Code 等）安全地代管预算——决策记录见 [ADR 0001](./docs/adr/0001-service-account-api-key.md)。
+
+### 接入三层
+
+| 层           | 用法                                              | 适用                           |
+| ------------ | ------------------------------------------------- | ------------------------------ |
+| **HTTP API** | `Authorization: Bearer bma_…` 调 REST API         | 通用底座，任何 agent 可用      |
+| **MCP**      | `npm run mcp`（stdio），17 个 `budget_*` 命名工具 | 本机 agent 的便利层            |
+| **Skill**    | `skills/budget-ops`（已装 `~/.agents/skills/`）   | 操作手册：策略、流程、汇报格式 |
+
+### 凭证与权限
+
+- **个人凭证（自助）**：「API 凭证」页签发，权限 = 本人权限 ∩ 凭证范围（**只收窄，不放大**）：
+  - 档位：只读（查询统计）/ 读写（加业务记录、导入、到账）/ 完整（与本人相同）
+  - 项目范围：全部 / 指定项目（列表接口过滤、跨项目聚合接口拒绝）
+  - 有效期：永久 / N 天；创建后不可编辑，要改即撤销重发
+- **服务账号**：`npm run make-agent -- <账号名>`，面向长期无人值守定时任务（身份与个人解耦）
+- **确认策略三档**（服务端强制 + agent 纪律双层）：
+
+| 档位     | 操作                                        | 规则                                  |
+| -------- | ------------------------------------------- | ------------------------------------- |
+| 自主     | 查询 / 统计 / 解析 / 预览 / 暂存 / 科目指派 | 随时可做                              |
+| 指令授权 | 新增改记录 / 确认导入 / 到账 / 调整提交     | 任务指令明确列出才做                  |
+| 硬排除   | 作废 / 审批 / 成员管理                      | 无人值守凭证服务端直接 403 + 审计留痕 |
+
+### 无人值守示例
+
+结算单收件箱流程：把财务系统导出的 xlsx 丢进 `~/budget-inbox/<项目编号>/`，agent 定时扫描 → 上传解析 → 按科目映射记忆自动指派科目 → 暂存（或授权后确认导入）→ 成功移 `_done/`、失败移 `_failed/` 并汇报。
+
+```bash
+npm run make-agent -- agent-bot    # 建服务账号 + 发 key（明文仅一次，写入 ~/.budget-agent.json）
+npm run mcp                        # 启动 MCP stdio server
+```
 
 ## 🏗️ 项目结构
 
 ```
 budget-management/
 ├── prisma/
-│   ├── schema.prisma          # 数据模型(21 个模型)
+│   ├── schema.prisma          # 数据模型(22 个模型)
 │   ├── migrations/            # 数据库迁移
 │   └── seed.ts                # 种子数据
 ├── src/
 │   ├── app/
-│   │   ├── (dashboard)/       # 页面(项目/台账/记录/调整/审批/统计/日志...)
-│   │   └── api/               # 54 个 Route Handler
+│   │   ├── (dashboard)/       # 页面(项目/台账/记录/调整/审批/统计/日志/API 凭证...)
+│   │   └── api/               # 59 个 Route Handler
 │   ├── components/
 │   │   ├── ui/                # shadcn/ui 组件集(含日期/金额/可搜下拉等复合组件)
-│   │   ├── records/           # 业务记录域组件(附件抽屉/预览/按科目打包)
+│   │   ├── records/           # 业务记录域组件(附件抽屉/预览/按科目打包/导入预览)
 │   │   └── layout/            # 布局壳(侧边栏/顶栏/项目 Tab)
-│   ├── lib/                   # 预算公式库(占用/可调额度/汇总)、decimal、鉴权
+│   ├── lib/                   # 预算公式库(占用/可调额度/汇总)、decimal、鉴权(API Key/权限矩阵)
 │   └── server/
-│       └── services/          # 业务服务(编制/记录/调整/台账/导出/统计/附件...)
-└── tests/                     # Vitest 集成测试(31 个文件)
+│       └── services/          # 业务服务(编制/记录/调整/台账/导出/统计/附件/导入/凭证...)
+├── mcp/                       # MCP stdio server(budget_* 工具)
+├── skills/budget-ops/         # Coding Agent 操作手册
+├── scripts/                   # make-admin / make-agent / 运维脚本
+├── docs/adr/                  # 架构决策记录
+└── tests/                     # Vitest 集成测试(36 个文件)
 ```
 
 ## 🧮 关键设计
@@ -173,7 +213,7 @@ budget-management/
 | 科目     | 原总预算 | 总预算调整额 | 调整后总预算 | 原年度预算 | 年度调整额 | 调整后年度预算 |
 | -------- | -------- | ------------ | ------------ | ---------- | ---------- | -------------- |
 | 材料费   | 60,000   | -10,000      | **50,000**   | 60,000     | -10,000    | **50,000**     |
-| 劳务费   | 40,000   | +10,000      | **50,000**   | 40,000     | +10,000    | **50,000**     |
+| 劳务费   | 40,000   | +10,000      | **50,000**   | 40,000     | -10,000    | **50,000**     |
 | **汇总** |          | **0** ✓      |              |            | **0** ✓    |                |
 
 - **两维度各自收支平衡**（Σ = 0），提交前强制校验
@@ -189,7 +229,7 @@ budget-management/
 
 台账的结余、执行率均实时计算，无需定时结转。
 
-### 经费余额统计（v0.5.0）
+### 经费余额统计
 
 统计分析页第 4 个 tab，回答"某个科目在所有项目里还剩多少钱"：
 
@@ -202,31 +242,39 @@ budget-management/
 - 合计行按命中科目去重叶集合计算，父子科目同时命中不重复计数
 - 可选年度切换年度口径（年度预算 − 当年占用）；"仅看结余为负"一击定位风险科目
 
+### Agent 权限模型
+
+机器凭证绑定真实用户，**scope 只收窄不放大**：实际权限 = 用户权限 ∩ 凭证范围（档位 × 项目范围），全部拦截统一收口在权限层；无人值守凭证对不可逆动作（作废/审批/成员管理）服务端强制 403，被拒尝试全量审计。详见 [AGENTS.md](./AGENTS.md) 与 [ADR 0001](./docs/adr/0001-service-account-api-key.md)。
+
 ## 🧪 测试
 
 ```bash
-npm test                       # 229 项集成测试(直连真实 PostgreSQL)
+npm test                       # 293 项集成测试(直连真实 PostgreSQL)
 ```
 
-覆盖：编制审批、业务记录、双维度调整（含 §7.4/§7.5 可调额度与安全护栏）、台账上卷、Excel 导入、年度结转、统计（含经费余额口径/模糊匹配/非叶汇总）、附件（上传/打包路径构建/IDOR 防护）、审计快照等。
+覆盖：编制审批、业务记录、双维度调整（含 §7.4/§7.5 可调额度与安全护栏）、台账上卷、Excel 导入（标准模板 + 个人结算单）、年度结转、统计（含经费余额口径/模糊匹配/非叶汇总）、附件（上传/打包路径构建/IDOR 防护）、审计快照、API Key（签发/撤销/过期/硬排除/scope 收窄/科目映射）等。
 
 ## 📜 脚本
 
-| 命令                     | 说明                |
-| ------------------------ | ------------------- |
-| `npm run dev`            | 开发服务器          |
-| `npm run build`          | 生产构建            |
-| `npm run start`          | 生产启动            |
-| `npm test`               | 运行测试            |
-| `npm run check-types`    | TypeScript 类型检查 |
-| `npm run lint`           | ESLint              |
-| `npx prisma migrate dev` | 应用数据库迁移      |
-| `npm run db:seed`        | 写入种子数据        |
+| 命令                     | 说明                              |
+| ------------------------ | --------------------------------- |
+| `npm run dev`            | 开发服务器                        |
+| `npm run build`          | 生产构建                          |
+| `npm run start`          | 生产启动                          |
+| `npm test`               | 运行测试                          |
+| `npm run check-types`    | TypeScript 类型检查               |
+| `npm run lint`           | ESLint                            |
+| `npx prisma migrate dev` | 应用数据库迁移                    |
+| `npm run db:seed`        | 写入种子数据                      |
+| `npm run make-admin`     | 提升用户为管理员（SSO 首管引导）  |
+| `npm run make-agent`     | 服务账号签发/管理（无人值守场景） |
+| `npm run mcp`            | 启动 MCP stdio server             |
 
 ## 📄 文档
 
 - [产品需求文档 PRD V1.0](./prd/预算管理系统_V1.0_PRD.md)
 - [更新日志](./CHANGELOG.md) · [仓库工作约定](./AGENTS.md) · [设计规范](./DESIGN.md)
+- [领域术语表](./CONTEXT.md) · [ADR 0001：服务账号 + API Key 机器认证](./docs/adr/0001-service-account-api-key.md)
 - 功能设计文档（附件上传 / 按科目打包 / 附件预览）：[docs/superpowers/specs](./docs/superpowers/specs)
 
 ## 📝 License
