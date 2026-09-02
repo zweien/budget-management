@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getCurrentUser, HTTPError } from '@/lib/auth/session';
-import { can } from '@/lib/auth/permissions';
+import { can, denyApiKeyCrossProject } from '@/lib/auth/permissions';
 import { env } from '@/lib/env';
 import { prisma } from '@/lib/prisma';
 
@@ -28,6 +28,7 @@ export async function GET() {
     if (!user) {
       throw new HTTPError(401, '未登录');
     }
+    await denyApiKeyCrossProject(user, 'user:list'); // 用户列表为跨项目数据:指定项目范围的凭证拒绝(codex P1)
     if (!can(user, 'user:list')) {
       throw new HTTPError(403, '仅管理员可列出全部用户');
     }

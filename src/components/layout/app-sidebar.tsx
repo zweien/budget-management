@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   ClipboardPlus,
   FolderKanban,
+  KeyRound,
   LayoutDashboard,
   NotebookText,
   ScrollText,
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { href: '/approvals', label: '审批中心', icon: ClipboardCheck },
   { href: '/statistics', label: '统计分析', icon: ChartColumn },
   { href: '/audit-logs', label: '操作日志', icon: ScrollText },
+  { href: '/api-keys', label: 'API 凭证', icon: KeyRound },
 ] as const;
 
 const CHANGELOG_ITEM = { href: '/changelog', label: '更新日志', icon: NotebookText } as const;

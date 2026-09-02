@@ -25,6 +25,43 @@
 `AUTHENTIK_ISSUER` / `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` / `AUTH_SECRET`(`openssl rand -base64 32`)/ `APP_BASE_URL`。
 Authentik 侧:建 OAuth2 Provider(Confidential,Redirect URI `<APP_BASE_URL>/api/auth/callback`,Subject mode=User ID)+ Application(slug 与 ISSUER 路径一致)。
 
+## Coding Agent 自动化(个人凭证 / 服务账号 + API Key)
+
+coding agent 以 API Key 绑定的用户身份经 HTTP API 操作本系统(交互与无人值守皆可)。决策记录见 [docs/adr/0001](./docs/adr/0001-service-account-api-key.md);术语见 [CONTEXT.md](./CONTEXT.md)。
+
+### 凭证与接入
+
+- **个人凭证(自助)**:任意用户在「API 凭证」页(侧边栏)签发/撤销自己的 key,权限 = 本人权限 ∩ 凭证范围(档位 × 项目范围,创建后不可改,可选有效期)。适合交互式与临时任务。
+- **服务账号(脚本)**:`npm run make-agent -- <账号名>` 建 USER 账号 + 发无人值守 key;`--attended` 发在场交互 key;`--list` / `--revoke` 管理。适合长期无人值守定时任务(身份与个人解耦)。
+- 认证:`Authorization: Bearer bma_…`,`getCurrentUser()` 优先识别(两种 MOCK 模式均可用);凭据写 `~/.budget-agent.json`(chmod 600),`BUDGET_BASE_URL`/`BUDGET_TOKEN` 可覆盖。
+- MCP:`npm run mcp`(stdio,`mcp/server.ts`,工具名 `budget_*`,策略写在工具描述里);Skill:仓库 `skills/budget-ops/`(已装 `~/.agents/skills/budget-ops/`)——skill 以 HTTP 为准、不依赖 MCP。
+- 项目授权:个人凭证跟随本人成员关系;服务账号由 ADMIN 在「成员管理」加入项目(OWNER 可编辑)。
+
+### 凭证范围(scope 只收窄,不放大)
+
+| 维度     | 取值                | 语义                                                                                                                    |
+| -------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 档位     | 只读 / 读写 / 完整  | 只读=查询统计;读写=加业务记录、导入、到账;完整=与本人相同                                                               |
+| 项目范围 | 全部 / 指定项目     | 指定后:其他项目上下文 403;跨项目/无项目上下文接口(统计、审计全量、审批待办、用户列表、建项目)403;项目列表仅返回指定项目 |
+| 模式     | 无人值守 / 在场交互 | 无人值守时,作废/审批/成员管理被服务端拒绝                                                                               |
+| 有效期   | 永久 / N 天         | 过期后凭证即失效(401)                                                                                                   |
+
+被拒尝试写审计:硬排除 `action=unattended.denied`,scope 收窄 `action=apikey.denied`。
+**红线:凭证管理接口(`/api/api-keys*`)拒绝一切 Bearer 凭证调用(含 attended)——防 agent 自我签发凭证。**
+
+### 确认策略(agent 会话必须遵守;操作目录见 skill)
+
+| 档位     | 操作                                                                   | 规则                                                                                                 |
+| -------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 自主     | 查询/统计/审计/解析/预览/暂存/科目指派                                 | 随时可做                                                                                             |
+| 指令授权 | 新增改记录、确认导入、到账登记、调整编制提交                           | 任务指令明确列出才做                                                                                 |
+| 硬排除   | 作废(`record:void`)、审批(`budget:approve`)、成员管理(`member:manage`) | 无人值守凭证服务端直接 403(`UNATTENDED_EXCLUDED_ACTIONS`),被拒尝试进审计(`action=unattended.denied`) |
+
+### 无人值守约定
+
+- 收件箱:`~/budget-inbox/<项目编号>/*.xlsx`,成功移 `_done/`、失败移 `_failed/`(附原因 txt)。
+- 科目自动指派:`GET /api/projects/:id/subject-mappings`(摘要→科目历史统计)+ agent 语义判断;拿不准留暂存并汇报待指派,不强行确认。
+
 ## 版本发布流程(确保版本号唯一)
 
 **唯一事实源:`package.json` 的 `version` 字段;git tag `vX.Y.Z` 与其一一对应。**
