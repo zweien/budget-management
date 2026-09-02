@@ -8,6 +8,7 @@ import { D, ZERO, fromStored, toStored } from '@/lib/decimal';
 import { computeOccupancy } from '@/lib/budget';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
+import { checkDuplicates, type DuplicateConflict } from '@/server/services/duplicateCheck.service';
 
 /** §8 四态枚举(便于上层校验集合)。 */
 const BUSINESS_STATUSES: readonly BusinessStatus[] = [
@@ -63,6 +64,8 @@ export interface ListRecordsFilters {
 export interface RecordWithWarning {
   record: BusinessRecord;
   overBudget: boolean;
+  /** 疑似重复提示(ADR 0002):指纹命中既有记录;仅警示不阻断。 */
+  duplicateHints?: DuplicateConflict[];
 }
 
 /** 把 BusinessRecord 行序列化为快照对象(用于 history before/after 与审计)。 */
@@ -223,6 +226,28 @@ export async function createRecord(
   // 校验科目属于该项目且为叶节点。
   await requireLeafSubject(prisma, projectId, input.subjectId);
 
+  // 重复防护(ADR 0002):docNo 与项目内未作废记录同号 → 硬重复,409 阻断;
+  // 无编号行走指纹 → 疑似重复,提示随响应返回(不阻断)。
+  const docNo = normalizeDocNo(input.docNo);
+  const [verdict] = await checkDuplicates(projectId, [
+    {
+      rowKey: 'new',
+      docNo,
+      budgetYear: input.budgetYear,
+      amount: amount.toFixed(2),
+      businessDate: businessDate.toISOString().slice(0, 10),
+      summary: input.summary,
+    },
+  ]);
+  if (verdict.hard) {
+    const c = verdict.conflicts[0];
+    throw new HTTPError(
+      409,
+      `单据编号 ${docNo} 已存在:${c ? `${c.businessDate} 的 ${c.amount} 元「${c.summary}」` : '项目内已有未作废记录'};不可重复入账,如需重新导入请先作废旧记录`,
+    );
+  }
+  const duplicateHints = verdict.suspected ? verdict.conflicts : undefined;
+
   // §8.4 超预算预警(在事务外读,不影响保存)。
   const { overBudget } = await computeOverBudget(
     projectId,
@@ -232,38 +257,50 @@ export async function createRecord(
   );
 
   const id = uuidv7();
-  const record = await prisma.$transaction(async (tx) => {
-    const created = await tx.businessRecord.create({
-      data: {
-        id,
+  const record = await prisma
+    .$transaction(async (tx) => {
+      const created = await tx.businessRecord.create({
+        data: {
+          id,
+          projectId,
+          budgetYear: input.budgetYear,
+          subjectId: input.subjectId,
+          amount: toStored(amount),
+          businessDate,
+          handler: input.handler.trim(),
+          summary: input.summary.trim(),
+          status: input.status,
+          docNo,
+          remark: input.remark ?? null,
+          isVoid: false,
+          createdById: user.id,
+        },
+      });
+
+      await recordAudit(tx, {
         projectId,
-        budgetYear: input.budgetYear,
-        subjectId: input.subjectId,
-        amount: toStored(amount),
-        businessDate,
-        handler: input.handler.trim(),
-        summary: input.summary.trim(),
-        status: input.status,
-        docNo: normalizeDocNo(input.docNo),
-        remark: input.remark ?? null,
-        isVoid: false,
-        createdById: user.id,
-      },
+        objectType: 'business_records',
+        objectId: created.id,
+        action: 'create',
+        operatorId: user.id,
+        after: snapshotRecord(created),
+      });
+
+      return created;
+    })
+    .catch((e) => {
+      // 并发窗口兜底(codex P2):判定器通过后、提交前,他人插入了同号记录 →
+      // 唯一索引 P2002;翻译为与硬重复一致的 409(表内唯一约束仅此索引与主键)。
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new HTTPError(
+          409,
+          `单据编号 ${docNo ?? ''} 已存在(并发导入);不可重复入账,如需重新导入请先作废旧记录`,
+        );
+      }
+      throw e;
     });
 
-    await recordAudit(tx, {
-      projectId,
-      objectType: 'business_records',
-      objectId: created.id,
-      action: 'create',
-      operatorId: user.id,
-      after: snapshotRecord(created),
-    });
-
-    return created;
-  });
-
-  return { record, overBudget };
+  return { record, overBudget, duplicateHints };
 }
 
 /**
@@ -367,6 +404,31 @@ export async function updateRecord(
     recordId,
   );
 
+  // 重复防护(ADR 0002):按"生效后值"判定;排除自身。docNo 同号 → 409;指纹 → 提示。
+  const newDocNo = input.docNo !== undefined ? normalizeDocNo(input.docNo) : before.docNo;
+  const [verdict] = await checkDuplicates(
+    before.projectId,
+    [
+      {
+        rowKey: 'self',
+        docNo: newDocNo,
+        budgetYear: newYear,
+        amount: amount.toFixed(2),
+        businessDate: newBusinessDate.toISOString().slice(0, 10),
+        summary: input.summary !== undefined ? input.summary : before.summary,
+      },
+    ],
+    { excludeRecordId: recordId },
+  );
+  if (verdict.hard) {
+    const c = verdict.conflicts[0];
+    throw new HTTPError(
+      409,
+      `单据编号 ${newDocNo} 已存在:${c ? `${c.businessDate} 的 ${c.amount} 元「${c.summary}」` : '项目内已有未作废记录'};不可重复入账,如需重新导入请先作废旧记录`,
+    );
+  }
+  const duplicateHints = verdict.suspected ? verdict.conflicts : undefined;
+
   const data: Prisma.BusinessRecordUpdateInput = {
     budgetYear: newYear,
     subject: { connect: { id: newSubjectId } },
@@ -377,38 +439,49 @@ export async function updateRecord(
   };
   if (input.handler !== undefined) data.handler = input.handler.trim();
   if (input.summary !== undefined) data.summary = input.summary.trim();
-  if (input.docNo !== undefined) data.docNo = normalizeDocNo(input.docNo);
+  if (input.docNo !== undefined) data.docNo = newDocNo;
   if (input.remark !== undefined) data.remark = input.remark;
 
-  const after = await prisma.$transaction(async (tx) => {
-    const updated = await tx.businessRecord.update({ where: { id: recordId }, data });
+  const after = await prisma
+    .$transaction(async (tx) => {
+      const updated = await tx.businessRecord.update({ where: { id: recordId }, data });
 
-    // §8.5 history:before/after 整行快照。
-    await tx.businessRecordHistory.create({
-      data: {
-        id: uuidv7(),
-        businessRecordId: recordId,
+      // §8.5 history:before/after 整行快照。
+      await tx.businessRecordHistory.create({
+        data: {
+          id: uuidv7(),
+          businessRecordId: recordId,
+          action: 'update',
+          beforeData: snapshotRecord(before) as Prisma.InputJsonValue,
+          afterData: snapshotRecord(updated) as Prisma.InputJsonValue,
+          operatorId: user.id,
+        },
+      });
+
+      await recordAudit(tx, {
+        projectId: before.projectId,
+        objectType: 'business_records',
+        objectId: recordId,
         action: 'update',
-        beforeData: snapshotRecord(before) as Prisma.InputJsonValue,
-        afterData: snapshotRecord(updated) as Prisma.InputJsonValue,
         operatorId: user.id,
-      },
+        before: snapshotRecord(before),
+        after: snapshotRecord(updated),
+      });
+
+      return updated;
+    })
+    .catch((e) => {
+      // 并发窗口兜底(codex P2):docNo 改为同号时与他人撞唯一索引 → 与硬重复一致的 409。
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new HTTPError(
+          409,
+          `单据编号 ${newDocNo ?? ''} 已存在(并发修改);不可重复入账,如需重新导入请先作废旧记录`,
+        );
+      }
+      throw e;
     });
 
-    await recordAudit(tx, {
-      projectId: before.projectId,
-      objectType: 'business_records',
-      objectId: recordId,
-      action: 'update',
-      operatorId: user.id,
-      before: snapshotRecord(before),
-      after: snapshotRecord(updated),
-    });
-
-    return updated;
-  });
-
-  return { record: after, overBudget };
+  return { record: after, overBudget, duplicateHints };
 }
 
 /** 计算超预算预警,但排除指定的某条记录(用于 update:本条将被改写,不再算旧占用)。 */

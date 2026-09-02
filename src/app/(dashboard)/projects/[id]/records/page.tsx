@@ -403,21 +403,41 @@ function BusinessRecordsPageInner() {
       setSubmitting(true);
       try {
         let savedRecordId = editing?.id ?? '';
+        /** 疑似重复提示(ADR 0002):指纹命中既有记录,仅警示不阻断。 */
+        const hintDup = (
+          hints: Array<{ businessDate: string; amount: string; summary: string }>,
+        ) => {
+          const c = hints[0];
+          if (c)
+            toast.warning(
+              `疑似重复:与 ${c.businessDate} 的 ${c.amount} 元「${c.summary}」相似,请确认是否两笔`,
+            );
+        };
         if (editing) {
-          const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
-            `/api/projects/${projectId}/records/${editing.id}`,
-            { method: 'PATCH', body: JSON.stringify(payload) },
-          );
+          const res = await apiFetch<{
+            record: BusinessRecordRow;
+            overBudget: boolean;
+            duplicateHints?: Array<{ businessDate: string; amount: string; summary: string }>;
+          }>(`/api/projects/${projectId}/records/${editing.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+          });
           toast.success('已保存修改');
           if (res.overBudget) setOverBudgetOpen(true);
+          if (res.duplicateHints?.length) hintDup(res.duplicateHints);
           setFormOpen(false);
         } else {
-          const res = await apiFetch<{ record: BusinessRecordRow; overBudget: boolean }>(
-            `/api/projects/${projectId}/records`,
-            { method: 'POST', body: JSON.stringify(payload) },
-          );
+          const res = await apiFetch<{
+            record: BusinessRecordRow;
+            overBudget: boolean;
+            duplicateHints?: Array<{ businessDate: string; amount: string; summary: string }>;
+          }>(`/api/projects/${projectId}/records`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
           toast.success('已新增业务记录');
           if (res.overBudget) setOverBudgetOpen(true);
+          if (res.duplicateHints?.length) hintDup(res.duplicateHints);
           savedRecordId = res.record.id;
           if (keepOpen) {
             form.reset({

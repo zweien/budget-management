@@ -44,10 +44,13 @@ interface PreviewRow {
     summary: string | null;
     businessStatus: string | null;
     remark: string | null;
+    docNo: string | null;
   };
   validationStatus: 'valid' | 'error';
   errors: { field: string; message: string }[];
   duplicateFlag: boolean;
+  /** 重复档位(ADR 0002):hard=单据编号硬重复,禁止导入;旧数据无档位按 suspected。 */
+  duplicateLevel: 'none' | 'hard' | 'suspected';
   forcedImport: boolean;
   normalizedAmount: string | null;
   normalizedStatus: string | null;
@@ -124,12 +127,15 @@ function PreviewTable({
   selectable,
   selected,
   onToggle,
+  isHardRow,
   emptyText,
 }: {
   rows: PreviewRow[];
   selectable: boolean;
   selected: Set<string>;
   onToggle: (id: string) => void;
+  /** 硬重复行(仅重复分组传入):勾选框禁用,行内展示「硬重复」徽标。 */
+  isHardRow?: (r: PreviewRow) => boolean;
   emptyText: string;
 }) {
   if (rows.length === 0) {
@@ -148,62 +154,81 @@ function PreviewTable({
           <TableHead className="w-28">业务日期</TableHead>
           <TableHead className="w-20">经办人</TableHead>
           <TableHead>摘要</TableHead>
+          <TableHead className="w-28">单据编号</TableHead>
           <TableHead className="w-24">业务状态</TableHead>
           <TableHead>备注</TableHead>
           <TableHead className="w-56">错误</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((r) => (
-          <TableRow key={r.rowId}>
-            {selectable ? (
-              <TableCell className="pr-0">
-                <Checkbox
-                  checked={selected.has(r.rowId)}
-                  onCheckedChange={() => onToggle(r.rowId)}
-                  aria-label={`选择第 ${r.rowNo} 行`}
-                />
+        {rows.map((r) => {
+          const hard = isHardRow?.(r) ?? false;
+          return (
+            <TableRow key={r.rowId} className={hard ? 'opacity-60' : undefined}>
+              {selectable ? (
+                <TableCell className="pr-0">
+                  {hard ? (
+                    <span
+                      className="inline-block size-4 rounded border border-input bg-muted"
+                      title="硬重复:单据编号与未作废记录重复,禁止导入"
+                      aria-label={`第 ${r.rowNo} 行硬重复,不可导入`}
+                    />
+                  ) : (
+                    <Checkbox
+                      checked={selected.has(r.rowId)}
+                      onCheckedChange={() => onToggle(r.rowId)}
+                      aria-label={`选择第 ${r.rowNo} 行`}
+                    />
+                  )}
+                </TableCell>
+              ) : null}
+              <TableCell className="tabular-nums">{r.rowNo}</TableCell>
+              <TableCell className="font-mono text-xs">{r.parsedData.projectCode ?? '—'}</TableCell>
+              <TableCell className="tabular-nums">{r.parsedData.budgetYear ?? '—'}</TableCell>
+              <TableCell>
+                {r.parsedData.subjectName ?? r.parsedData.subjectCode ?? (
+                  <span className="text-mute">—</span>
+                )}
               </TableCell>
-            ) : null}
-            <TableCell className="tabular-nums">{r.rowNo}</TableCell>
-            <TableCell className="font-mono text-xs">{r.parsedData.projectCode ?? '—'}</TableCell>
-            <TableCell className="tabular-nums">{r.parsedData.budgetYear ?? '—'}</TableCell>
-            <TableCell>
-              {r.parsedData.subjectName ?? r.parsedData.subjectCode ?? (
-                <span className="text-mute">—</span>
-              )}
-            </TableCell>
-            <TableCell>
-              {r.normalizedAmount ? (
-                <MoneyText value={r.normalizedAmount} riskOnNegative={false} />
-              ) : (
-                <span className="block text-right text-mute">—</span>
-              )}
-            </TableCell>
-            <TableCell className="tabular-nums">{r.parsedData.businessDate ?? '—'}</TableCell>
-            <TableCell>{r.parsedData.handler ?? '—'}</TableCell>
-            <TableCell className="max-w-36 truncate" title={r.parsedData.summary ?? undefined}>
-              {r.parsedData.summary ?? '—'}
-            </TableCell>
-            <TableCell>{r.parsedData.businessStatus ?? '—'}</TableCell>
-            <TableCell className="max-w-36 truncate" title={r.parsedData.remark ?? undefined}>
-              {r.parsedData.remark ?? <span className="text-mute">—</span>}
-            </TableCell>
-            <TableCell>
-              {r.errors.length > 0 ? (
-                <div className="space-y-0.5">
-                  {r.errors.map((e, i) => (
-                    <p key={i} className="text-xs text-error-deep">
-                      {e.field}:{e.message}
-                    </p>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-mute">—</span>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
+              <TableCell>
+                {r.normalizedAmount ? (
+                  <MoneyText value={r.normalizedAmount} riskOnNegative={false} />
+                ) : (
+                  <span className="block text-right text-mute">—</span>
+                )}
+              </TableCell>
+              <TableCell className="tabular-nums">{r.parsedData.businessDate ?? '—'}</TableCell>
+              <TableCell>{r.parsedData.handler ?? '—'}</TableCell>
+              <TableCell className="max-w-36 truncate" title={r.parsedData.summary ?? undefined}>
+                {r.parsedData.summary ?? '—'}
+              </TableCell>
+              <TableCell className="font-mono text-xs">
+                {hard ? (
+                  <Badge variant="error">硬重复</Badge>
+                ) : (
+                  (r.parsedData.docNo ?? <span className="text-mute">—</span>)
+                )}
+              </TableCell>
+              <TableCell>{r.parsedData.businessStatus ?? '—'}</TableCell>
+              <TableCell className="max-w-36 truncate" title={r.parsedData.remark ?? undefined}>
+                {r.parsedData.remark ?? <span className="text-mute">—</span>}
+              </TableCell>
+              <TableCell>
+                {r.errors.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {r.errors.map((e, i) => (
+                      <p key={i} className="text-xs text-error-deep">
+                        {e.field}:{e.message}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-mute">—</span>
+                )}
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );
@@ -311,6 +336,12 @@ function ImportPageInner() {
     });
   };
 
+  /** 硬重复行(单据编号同号)不可勾选——服务端 confirm 亦会拒绝。 */
+  const isHard = (r: PreviewRow) => r.duplicateLevel === 'hard';
+  const hardCount = preview
+    ? ((preview as BatchPreview).duplicates?.filter(isHard).length ?? 0)
+    : 0;
+
   const handleConfirm = async () => {
     if (!preview) return;
     setConfirming(true);
@@ -403,10 +434,13 @@ function ImportPageInner() {
             </p>
           </Card>
           <Card className="p-3">
-            <p className="caption-mono">疑似重复</p>
+            <p className="caption-mono">重复行</p>
             <p className="mt-1 text-xl font-semibold text-warning-deep tabular-nums">
               {stats?.duplicates ?? 0}
             </p>
+            {hardCount > 0 && (
+              <p className="text-xs text-error-deep">其中硬重复 {hardCount} 行不可导入</p>
+            )}
           </Card>
           <Card className="p-3">
             <p className="caption-mono">已勾选</p>
@@ -421,7 +455,7 @@ function ImportPageInner() {
           <AlertDescription>
             {confirmed
               ? '该批次已确认入库。'
-              : '勾选要导入的行(疑似重复行默认不勾选,可手动勾选强制导入,§10.3)。错误行不可导入,请修正后重新上传。'}
+              : '勾选要导入的行。未填单据编号的行按(年度+金额+日期+摘要)识别疑似重复,默认不勾选、可强制导入;单据编号与未作废记录同号为硬重复,禁止导入(先作废旧记录方可重导)。错误行不可导入,请修正后重新上传。'}
           </AlertDescription>
         </Alert>
 
@@ -443,7 +477,9 @@ function ImportPageInner() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              疑似重复行({standard.duplicates.length})<Badge variant="warning">默认不导入</Badge>
+              重复行({standard.duplicates.length})
+              {hardCount > 0 && <Badge variant="error">硬重复 {hardCount} 行禁止导入</Badge>}
+              <Badge variant="warning">疑似默认不导入</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -452,7 +488,8 @@ function ImportPageInner() {
               selectable={!confirmed}
               selected={selected}
               onToggle={toggleRow}
-              emptyText="无疑似重复行"
+              isHardRow={isHard}
+              emptyText="无重复行"
             />
           </CardContent>
         </Card>

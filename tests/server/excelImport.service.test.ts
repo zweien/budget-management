@@ -32,6 +32,7 @@ interface RowData {
   summary?: string;
   businessStatus?: string;
   remark?: string;
+  docNo?: string;
 }
 
 /** 用 exceljs 在内存中构造 .xlsx Buffer(单工作表,首行表头 + 数据行)。 */
@@ -51,6 +52,7 @@ async function buildXlsx(rows: RowData[]): Promise<Buffer> {
       summary: r.summary ?? '',
       businessStatus: r.businessStatus ?? '',
       remark: r.remark ?? '',
+      docNo: r.docNo ?? '',
     });
   }
   const buf = await wb.xlsx.writeBuffer();
@@ -447,5 +449,83 @@ describe('excelImport.service (integration, real PG)', () => {
         role: UserRole.USER,
       }),
     ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('标准模板 docNo 列:硬重复 → duplicateLevel=hard + 确认 422;干净行带 docNo 入库(ADR 0002)', async () => {
+    const { project, leafCode } = await seedProject('DOCN');
+    const subject = await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, code: leafCode },
+    });
+    await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        budgetYear: 2026,
+        subjectId: subject!.id,
+        amount: toStored(new Prisma.Decimal('50.00')) as unknown as Prisma.Decimal,
+        businessDate: new Date('2026-05-06T00:00:00Z'),
+        handler: '基准',
+        summary: '硬重复基准',
+        status: BusinessStatus.PAID,
+        docNo: 'STD-HARD-1',
+        isVoid: false,
+        createdById: adminId,
+      },
+    });
+
+    const buf = await buildXlsx([
+      {
+        projectCode: project.code,
+        budgetYear: 2026,
+        subjectCode: leafCode,
+        amount: 60,
+        businessDate: '2026-05-07',
+        handler: '甲',
+        summary: '同号新行',
+        businessStatus: '合同',
+        docNo: 'STD-HARD-1',
+      },
+      {
+        projectCode: project.code,
+        budgetYear: 2026,
+        subjectCode: leafCode,
+        amount: 70,
+        businessDate: '2026-05-07',
+        handler: '乙',
+        summary: '无编号行',
+        businessStatus: '合同',
+      },
+      {
+        projectCode: project.code,
+        budgetYear: 2026,
+        subjectCode: leafCode,
+        amount: 80,
+        businessDate: '2026-05-08',
+        handler: '丙',
+        summary: '干净行',
+        businessStatus: '合同',
+        docNo: 'STD-OK-1',
+      },
+    ]);
+    const batchId = await parseAndValidate(buf, project.id, adminUser());
+    const preview = await getImportBatch(batchId, adminUser());
+
+    const hardRow = preview.duplicates.find((r) => r.parsedData.docNo === 'STD-HARD-1');
+    expect(hardRow?.duplicateLevel).toBe('hard');
+    const okRow = preview.valid.find((r) => r.parsedData.docNo === 'STD-OK-1');
+    expect(okRow).toBeDefined();
+
+    // 硬行被选中 → 确认 422,消息点名硬重复。
+    await expect(
+      confirmImport(batchId, [hardRow!.rowId, okRow!.rowId], adminUser()),
+    ).rejects.toMatchObject({ status: 422, message: expect.stringContaining('硬重复') });
+
+    // 只确认干净行 → 入库且带 docNo。
+    const res = await confirmImport(batchId, [okRow!.rowId], adminUser());
+    expect(res.created).toBe(1);
+    const created = await prisma.businessRecord.findFirst({
+      where: { projectId: project.id, docNo: 'STD-OK-1' },
+    });
+    expect(created).not.toBeNull();
   });
 });

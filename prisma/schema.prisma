@@ -430,6 +430,9 @@ model ImportRow {
   validationStatus String  @map("validation_status")
   errors           Json?
   duplicateFlag    Boolean @default(false) @map("duplicate_flag")
+  /// 重复档位:none(非重复)/ hard(单据编号硬重复,禁止确认)/ suspected(指纹疑似,可强制导入)。
+  /// 旧行(0.10.x 前)duplicateFlag=true 而 duplicate_level='none' 时按 suspected 对待。
+  duplicateLevel   String  @default("none") @map("duplicate_level")
   forcedImport     Boolean @default(false) @map("forced_import")
 
   batch ImportBatch @relation(fields: [batchId], references: [id])
