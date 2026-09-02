@@ -150,6 +150,15 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
     texts: [{ text: '日期格式:YYYY-MM-DD(例如 2026-07-30)' }],
   };
 
+  // 「单据编号」列预格式化为文本(codex P2):防止 Excel 把 00123/超 15 位编号
+  // 强转数值,导致上传后与既有编号对不上、绕过硬重复。
+  const docNoColIdx = EXCEL_COLUMNS.findIndex((c) => c.key === 'docNo') + 1;
+  if (docNoColIdx > 0) {
+    for (let r = 2; r <= 200; r++) {
+      sheet.getCell(r, docNoColIdx).numFmt = '@';
+    }
+  }
+
   // 追加一个"填写说明"工作表。
   const guide = workbook.addWorksheet('填写说明');
   guide.getColumn(1).width = 24;

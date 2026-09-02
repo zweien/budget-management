@@ -628,109 +628,117 @@ export async function confirmSettlementImport(
   const now = new Date();
   const createdIds: string[] = [];
 
-  await prisma.$transaction(async (tx) => {
-    // 原子占用批次,防并发重复确认。
-    const claimed = await tx.importBatch.updateMany({
-      where: { id: batchId, status: 'pending' },
-      data: { status: 'confirming' },
-    });
-    if (claimed.count === 0) {
-      throw new HTTPError(409, '该批次正在被确认或已确认,不可重复操作');
-    }
-
-    // docNo 兜底复查(解析到确认之间可能已有同单号入库)。
-    const checkDocNos = [
-      ...new Set(
-        eligibleRows
-          .map((r) => (r.parsedData as unknown as SettlementParsedRow).docNo)
-          .filter((d): d is string => !!d),
-      ),
-    ];
-    if (checkDocNos.length > 0) {
-      const conflicts = await tx.businessRecord.findMany({
-        where: { projectId: batch.projectId, isVoid: false, docNo: { in: checkDocNos } },
-        select: { docNo: true },
+  await prisma
+    .$transaction(async (tx) => {
+      // 原子占用批次,防并发重复确认。
+      const claimed = await tx.importBatch.updateMany({
+        where: { id: batchId, status: 'pending' },
+        data: { status: 'confirming' },
       });
-      if (conflicts.length > 0) {
-        // 硬重复无强制通道(ADR 0002):同号已入库一律拒绝,无 forcedImport 豁免。
-        const conflictSet = new Set(conflicts.map((c) => c.docNo));
-        const badRows = eligibleRows
-          .filter((r) => {
-            const d = (r.parsedData as unknown as SettlementParsedRow).docNo;
-            return d && conflictSet.has(d);
-          })
-          .map((r) => r.rowNo);
-        if (badRows.length > 0) {
-          throw new HTTPError(
-            422,
-            `以下行的单据编号已被未作废记录占用(第 ${badRows.join('、')} 行),硬重复不可强制导入;请先作废旧记录`,
-          );
+      if (claimed.count === 0) {
+        throw new HTTPError(409, '该批次正在被确认或已确认,不可重复操作');
+      }
+
+      // docNo 兜底复查(解析到确认之间可能已有同单号入库)。
+      const checkDocNos = [
+        ...new Set(
+          eligibleRows
+            .map((r) => (r.parsedData as unknown as SettlementParsedRow).docNo)
+            .filter((d): d is string => !!d),
+        ),
+      ];
+      if (checkDocNos.length > 0) {
+        const conflicts = await tx.businessRecord.findMany({
+          where: { projectId: batch.projectId, isVoid: false, docNo: { in: checkDocNos } },
+          select: { docNo: true },
+        });
+        if (conflicts.length > 0) {
+          // 硬重复无强制通道(ADR 0002):同号已入库一律拒绝,无 forcedImport 豁免。
+          const conflictSet = new Set(conflicts.map((c) => c.docNo));
+          const badRows = eligibleRows
+            .filter((r) => {
+              const d = (r.parsedData as unknown as SettlementParsedRow).docNo;
+              return d && conflictSet.has(d);
+            })
+            .map((r) => r.rowNo);
+          if (badRows.length > 0) {
+            throw new HTTPError(
+              422,
+              `以下行的单据编号已被未作废记录占用(第 ${badRows.join('、')} 行),硬重复不可强制导入;请先作废旧记录`,
+            );
+          }
         }
       }
-    }
 
-    for (const row of eligibleRows) {
-      const data = row.parsedData as unknown as SettlementParsedRow;
-      const amount = normalizeAmount(data.amount);
-      if (!amount) {
-        throw new HTTPError(422, `第 ${row.rowNo} 行金额无效`);
-      }
-      const date = normalizeDate(data.businessDate);
-      if (!date) {
-        throw new HTTPError(422, `第 ${row.rowNo} 行填制日期无效`);
-      }
+      for (const row of eligibleRows) {
+        const data = row.parsedData as unknown as SettlementParsedRow;
+        const amount = normalizeAmount(data.amount);
+        if (!amount) {
+          throw new HTTPError(422, `第 ${row.rowNo} 行金额无效`);
+        }
+        const date = normalizeDate(data.businessDate);
+        if (!date) {
+          throw new HTTPError(422, `第 ${row.rowNo} 行填制日期无效`);
+        }
 
-      const recordId = uuidv7();
-      const created = await tx.businessRecord.create({
-        data: {
-          id: recordId,
-          projectId: batch.projectId,
-          budgetYear: data.budgetYear,
-          subjectId: data.subjectId!,
-          amount: toStored(fromStored(amount)),
-          businessDate: new Date(`${date}T00:00:00Z`),
-          handler: data.handler,
-          summary: data.summary,
-          status: data.status,
-          docNo: data.docNo,
-          isVoid: false,
-          createdById: user.id,
-        },
-      });
-
-      if (row.duplicateFlag) {
-        await tx.importRow.update({
-          where: { id: row.id },
-          data: { forcedImport: true },
+        const recordId = uuidv7();
+        const created = await tx.businessRecord.create({
+          data: {
+            id: recordId,
+            projectId: batch.projectId,
+            budgetYear: data.budgetYear,
+            subjectId: data.subjectId!,
+            amount: toStored(fromStored(amount)),
+            businessDate: new Date(`${date}T00:00:00Z`),
+            handler: data.handler,
+            summary: data.summary,
+            status: data.status,
+            docNo: data.docNo,
+            isVoid: false,
+            createdById: user.id,
+          },
         });
+
+        if (row.duplicateFlag) {
+          await tx.importRow.update({
+            where: { id: row.id },
+            data: { forcedImport: true },
+          });
+        }
+
+        const after = snapshotRow({
+          ...created,
+          amount: created.amount.toFixed(2),
+          businessDate: formatYmd(created.businessDate),
+          importBatchId: batchId,
+          importRowNo: row.rowNo,
+          forcedImport: row.duplicateFlag,
+        });
+
+        await recordAudit(tx, {
+          projectId: batch.projectId,
+          objectType: 'business_records',
+          objectId: recordId,
+          action: 'import',
+          operatorId: user.id,
+          after,
+        });
+
+        createdIds.push(recordId);
       }
 
-      const after = snapshotRow({
-        ...created,
-        amount: created.amount.toFixed(2),
-        businessDate: formatYmd(created.businessDate),
-        importBatchId: batchId,
-        importRowNo: row.rowNo,
-        forcedImport: row.duplicateFlag,
+      await tx.importBatch.update({
+        where: { id: batchId },
+        data: { status: 'confirmed', confirmedAt: now },
       });
-
-      await recordAudit(tx, {
-        projectId: batch.projectId,
-        objectType: 'business_records',
-        objectId: recordId,
-        action: 'import',
-        operatorId: user.id,
-        after,
-      });
-
-      createdIds.push(recordId);
-    }
-
-    await tx.importBatch.update({
-      where: { id: batchId },
-      data: { status: 'confirmed', confirmedAt: now },
+    })
+    .catch((e) => {
+      // 并发窗口兜底(codex P2):同号行与他批并发确认 → 撞唯一索引 → 可读 422(硬重复无豁免)。
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new HTTPError(422, '单据编号已被并发导入占用;请刷新预览后重试(硬重复不可导入)');
+      }
+      throw e;
     });
-  });
 
   return { created: createdIds.length, batchId };
 }

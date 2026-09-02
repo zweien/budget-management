@@ -257,36 +257,48 @@ export async function createRecord(
   );
 
   const id = uuidv7();
-  const record = await prisma.$transaction(async (tx) => {
-    const created = await tx.businessRecord.create({
-      data: {
-        id,
+  const record = await prisma
+    .$transaction(async (tx) => {
+      const created = await tx.businessRecord.create({
+        data: {
+          id,
+          projectId,
+          budgetYear: input.budgetYear,
+          subjectId: input.subjectId,
+          amount: toStored(amount),
+          businessDate,
+          handler: input.handler.trim(),
+          summary: input.summary.trim(),
+          status: input.status,
+          docNo,
+          remark: input.remark ?? null,
+          isVoid: false,
+          createdById: user.id,
+        },
+      });
+
+      await recordAudit(tx, {
         projectId,
-        budgetYear: input.budgetYear,
-        subjectId: input.subjectId,
-        amount: toStored(amount),
-        businessDate,
-        handler: input.handler.trim(),
-        summary: input.summary.trim(),
-        status: input.status,
-        docNo,
-        remark: input.remark ?? null,
-        isVoid: false,
-        createdById: user.id,
-      },
-    });
+        objectType: 'business_records',
+        objectId: created.id,
+        action: 'create',
+        operatorId: user.id,
+        after: snapshotRecord(created),
+      });
 
-    await recordAudit(tx, {
-      projectId,
-      objectType: 'business_records',
-      objectId: created.id,
-      action: 'create',
-      operatorId: user.id,
-      after: snapshotRecord(created),
+      return created;
+    })
+    .catch((e) => {
+      // 并发窗口兜底(codex P2):判定器通过后、提交前,他人插入了同号记录 →
+      // 唯一索引 P2002;翻译为与硬重复一致的 409(表内唯一约束仅此索引与主键)。
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new HTTPError(
+          409,
+          `单据编号 ${docNo ?? ''} 已存在(并发导入);不可重复入账,如需重新导入请先作废旧记录`,
+        );
+      }
+      throw e;
     });
-
-    return created;
-  });
 
   return { record, overBudget, duplicateHints };
 }
@@ -430,33 +442,44 @@ export async function updateRecord(
   if (input.docNo !== undefined) data.docNo = newDocNo;
   if (input.remark !== undefined) data.remark = input.remark;
 
-  const after = await prisma.$transaction(async (tx) => {
-    const updated = await tx.businessRecord.update({ where: { id: recordId }, data });
+  const after = await prisma
+    .$transaction(async (tx) => {
+      const updated = await tx.businessRecord.update({ where: { id: recordId }, data });
 
-    // §8.5 history:before/after 整行快照。
-    await tx.businessRecordHistory.create({
-      data: {
-        id: uuidv7(),
-        businessRecordId: recordId,
+      // §8.5 history:before/after 整行快照。
+      await tx.businessRecordHistory.create({
+        data: {
+          id: uuidv7(),
+          businessRecordId: recordId,
+          action: 'update',
+          beforeData: snapshotRecord(before) as Prisma.InputJsonValue,
+          afterData: snapshotRecord(updated) as Prisma.InputJsonValue,
+          operatorId: user.id,
+        },
+      });
+
+      await recordAudit(tx, {
+        projectId: before.projectId,
+        objectType: 'business_records',
+        objectId: recordId,
         action: 'update',
-        beforeData: snapshotRecord(before) as Prisma.InputJsonValue,
-        afterData: snapshotRecord(updated) as Prisma.InputJsonValue,
         operatorId: user.id,
-      },
-    });
+        before: snapshotRecord(before),
+        after: snapshotRecord(updated),
+      });
 
-    await recordAudit(tx, {
-      projectId: before.projectId,
-      objectType: 'business_records',
-      objectId: recordId,
-      action: 'update',
-      operatorId: user.id,
-      before: snapshotRecord(before),
-      after: snapshotRecord(updated),
+      return updated;
+    })
+    .catch((e) => {
+      // 并发窗口兜底(codex P2):docNo 改为同号时与他人撞唯一索引 → 与硬重复一致的 409。
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new HTTPError(
+          409,
+          `单据编号 ${newDocNo ?? ''} 已存在(并发修改);不可重复入账,如需重新导入请先作废旧记录`,
+        );
+      }
+      throw e;
     });
-
-    return updated;
-  });
 
   return { record: after, overBudget, duplicateHints };
 }

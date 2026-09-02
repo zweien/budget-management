@@ -608,105 +608,113 @@ export async function confirmImport(
   const now = new Date();
   const createdIds: string[] = [];
 
-  await prisma.$transaction(async (tx) => {
-    // 原子地占用批次(pending→confirming),防止并发重复确认导致业务记录重复创建。
-    const claimed = await tx.importBatch.updateMany({
-      where: { id: batchId, status: 'pending' },
-      data: { status: 'confirming' },
-    });
-    if (claimed.count === 0) {
-      throw new HTTPError(409, '该批次正在被确认或已确认,不可重复操作');
-    }
-    // 事务内兜底复查(ADR 0002):预览到确认之间,同号记录可能已被其他入口写入;
-    // DB 部分唯一索引是最后防线,这里给出可读的 422 而非裸 P2002。
-    const confirmDocNos = [...selectedDocNos.keys()];
-    if (confirmDocNos.length > 0) {
-      const occupied = await tx.businessRecord.findMany({
-        where: { projectId: batch.projectId, isVoid: false, docNo: { in: confirmDocNos } },
-        select: { docNo: true },
+  await prisma
+    .$transaction(async (tx) => {
+      // 原子地占用批次(pending→confirming),防止并发重复确认导致业务记录重复创建。
+      const claimed = await tx.importBatch.updateMany({
+        where: { id: batchId, status: 'pending' },
+        data: { status: 'confirming' },
       });
-      if (occupied.length > 0) {
-        throw new HTTPError(
-          422,
-          `单据编号已被占用:${occupied.map((d) => d.docNo).join('、')};请返回预览刷新后重试`,
-        );
+      if (claimed.count === 0) {
+        throw new HTTPError(409, '该批次正在被确认或已确认,不可重复操作');
       }
-    }
-    for (const row of eligibleRows) {
-      const data = row.parsedData as unknown as ParsedRowData;
-      const subj = data.subjectCode ? subjectByCode.get(data.subjectCode) : null;
-      // 行已校验通过,理论上科目一定存在;防御性兜底。
-      if (!subj) {
-        throw new HTTPError(422, `第 ${row.rowNo} 行科目编码无效:${data.subjectCode}`);
-      }
-      const amount = normalizeAmount(data.amount);
-      if (!amount) {
-        throw new HTTPError(422, `第 ${row.rowNo} 行金额无效`);
-      }
-      const date = normalizeDate(data.businessDate);
-      if (!date) {
-        throw new HTTPError(422, `第 ${row.rowNo} 行业务日期无效`);
-      }
-      const statusEnum = data.businessStatus
-        ? (STATUS_CN_TO_ENUM[data.businessStatus] as BusinessStatus | undefined)
-        : undefined;
-      if (!statusEnum) {
-        throw new HTTPError(422, `第 ${row.rowNo} 行业务状态无效`);
-      }
-
-      const recordId = uuidv7();
-      const created = await tx.businessRecord.create({
-        data: {
-          id: recordId,
-          projectId: batch.projectId,
-          budgetYear: Number(data.budgetYear),
-          subjectId: subj.id,
-          amount: toStored(fromStored(amount)),
-          businessDate: new Date(`${date}T00:00:00Z`),
-          handler: data.handler!,
-          summary: data.summary!,
-          status: statusEnum,
-          docNo: data.docNo ?? null,
-          remark: data.remark ?? null,
-          isVoid: false,
-          createdById: user.id,
-        },
-      });
-
-      // §10.3 强制导入重复行留痕:置 forcedImport=true + 审计 after 附 forcedImport。
-      if (row.duplicateFlag) {
-        await tx.importRow.update({
-          where: { id: row.id },
-          data: { forcedImport: true },
+      // 事务内兜底复查(ADR 0002):预览到确认之间,同号记录可能已被其他入口写入;
+      // DB 部分唯一索引是最后防线,这里给出可读的 422 而非裸 P2002。
+      const confirmDocNos = [...selectedDocNos.keys()];
+      if (confirmDocNos.length > 0) {
+        const occupied = await tx.businessRecord.findMany({
+          where: { projectId: batch.projectId, isVoid: false, docNo: { in: confirmDocNos } },
+          select: { docNo: true },
         });
+        if (occupied.length > 0) {
+          throw new HTTPError(
+            422,
+            `单据编号已被占用:${occupied.map((d) => d.docNo).join('、')};请返回预览刷新后重试`,
+          );
+        }
+      }
+      for (const row of eligibleRows) {
+        const data = row.parsedData as unknown as ParsedRowData;
+        const subj = data.subjectCode ? subjectByCode.get(data.subjectCode) : null;
+        // 行已校验通过,理论上科目一定存在;防御性兜底。
+        if (!subj) {
+          throw new HTTPError(422, `第 ${row.rowNo} 行科目编码无效:${data.subjectCode}`);
+        }
+        const amount = normalizeAmount(data.amount);
+        if (!amount) {
+          throw new HTTPError(422, `第 ${row.rowNo} 行金额无效`);
+        }
+        const date = normalizeDate(data.businessDate);
+        if (!date) {
+          throw new HTTPError(422, `第 ${row.rowNo} 行业务日期无效`);
+        }
+        const statusEnum = data.businessStatus
+          ? (STATUS_CN_TO_ENUM[data.businessStatus] as BusinessStatus | undefined)
+          : undefined;
+        if (!statusEnum) {
+          throw new HTTPError(422, `第 ${row.rowNo} 行业务状态无效`);
+        }
+
+        const recordId = uuidv7();
+        const created = await tx.businessRecord.create({
+          data: {
+            id: recordId,
+            projectId: batch.projectId,
+            budgetYear: Number(data.budgetYear),
+            subjectId: subj.id,
+            amount: toStored(fromStored(amount)),
+            businessDate: new Date(`${date}T00:00:00Z`),
+            handler: data.handler!,
+            summary: data.summary!,
+            status: statusEnum,
+            docNo: data.docNo ?? null,
+            remark: data.remark ?? null,
+            isVoid: false,
+            createdById: user.id,
+          },
+        });
+
+        // §10.3 强制导入重复行留痕:置 forcedImport=true + 审计 after 附 forcedImport。
+        if (row.duplicateFlag) {
+          await tx.importRow.update({
+            where: { id: row.id },
+            data: { forcedImport: true },
+          });
+        }
+
+        const after = snapshotRow({
+          ...created,
+          amount: created.amount.toFixed(2),
+          businessDate: formatYmd(created.businessDate),
+          importBatchId: batchId,
+          importRowNo: row.rowNo,
+          forcedImport: row.duplicateFlag,
+        });
+
+        await recordAudit(tx, {
+          projectId: batch.projectId,
+          objectType: 'business_records',
+          objectId: recordId,
+          action: 'import',
+          operatorId: user.id,
+          after,
+        });
+
+        createdIds.push(recordId);
       }
 
-      const after = snapshotRow({
-        ...created,
-        amount: created.amount.toFixed(2),
-        businessDate: formatYmd(created.businessDate),
-        importBatchId: batchId,
-        importRowNo: row.rowNo,
-        forcedImport: row.duplicateFlag,
+      await tx.importBatch.update({
+        where: { id: batchId },
+        data: { status: 'confirmed', confirmedAt: now },
       });
-
-      await recordAudit(tx, {
-        projectId: batch.projectId,
-        objectType: 'business_records',
-        objectId: recordId,
-        action: 'import',
-        operatorId: user.id,
-        after,
-      });
-
-      createdIds.push(recordId);
-    }
-
-    await tx.importBatch.update({
-      where: { id: batchId },
-      data: { status: 'confirmed', confirmedAt: now },
+    })
+    .catch((e) => {
+      // 并发窗口兜底(codex P2):两个批次同时确认同号行 → 后者撞唯一索引 → 可读 422。
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new HTTPError(422, '单据编号已被并发导入占用;请刷新预览后重试(硬重复不可导入)');
+      }
+      throw e;
     });
-  });
 
   return { created: createdIds.length, batchId };
 }
