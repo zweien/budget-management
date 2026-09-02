@@ -110,14 +110,29 @@ export async function createProject(
 /**
  * 列出项目。
  * v0.3.0 起普通用户全局只读 → 所有登录用户看到全部(未归档)项目;
+ * 指定项目范围的凭证仅看到 allowlist 内项目(codex P1,列表语义=过滤而非拒绝);
  * 编辑权不在此处区分(由 canEditProject / requirePermission 在编辑动作上拦截)。
  */
 export async function listProjects(
-  user: { id: string; role: User['role'] },
+  user: {
+    id: string;
+    role: User['role'];
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
   opts: { includeArchived?: boolean } = {},
 ): Promise<(Project & { canEdit: boolean })[]> {
+  const scoped =
+    user.viaApiKey && user.keyProjectScope === 'selected'
+      ? { id: { in: user.keyProjectIds ?? [] } }
+      : undefined;
   const projects = await prisma.project.findMany({
-    where: opts.includeArchived ? undefined : { archivedAt: null },
+    where: scoped
+      ? { ...scoped, ...(opts.includeArchived ? {} : { archivedAt: null }) }
+      : opts.includeArchived
+        ? undefined
+        : { archivedAt: null },
     orderBy: { createdAt: 'desc' },
     // 负责人展示取当前 OWNER 成员(§codex P2):成员管理可降级/移除原负责人,
     // Project.ownerId 不会随之回写,按 ownerId 展示会与实际编辑权漂移。
@@ -154,13 +169,21 @@ export interface ProjectWithPermissions {
 /**
  * 列出全部(未归档)项目并附带当前用户的权限标记。
  * 查看本身全员开放;标记供统一录入页做项目选择与行级门控。
+ * 指定项目范围的凭证仅返回 allowlist 内项目(codex P1)。
  */
 export async function listProjectsWithPermissions(user: {
   id: string;
   role: User['role'];
+  viaApiKey?: boolean;
+  keyProjectScope?: string;
+  keyProjectIds?: string[];
 }): Promise<ProjectWithPermissions[]> {
+  const scoped =
+    user.viaApiKey && user.keyProjectScope === 'selected'
+      ? { id: { in: user.keyProjectIds ?? [] } }
+      : undefined;
   const projects = await prisma.project.findMany({
-    where: { archivedAt: null },
+    where: scoped ? { ...scoped, archivedAt: null } : { archivedAt: null },
     orderBy: { code: 'asc' },
     select: { id: true, code: true, name: true },
   });

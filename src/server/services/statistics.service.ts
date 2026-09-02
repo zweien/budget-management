@@ -2,7 +2,7 @@ import { BusinessStatus, Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
-import { requirePermission } from '@/lib/auth/permissions';
+import { requirePermission, denyApiKeyCrossProject } from '@/lib/auth/permissions';
 import { D, ZERO, fromStored, sumAmounts } from '@/lib/decimal';
 import { computeOccupancy, executionRate } from '@/lib/budget';
 
@@ -89,9 +89,12 @@ export async function customStatistics(
   filters: CustomStatisticsFilters,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<CustomStatisticsResult> {
-  // 1) 权限:v0.3.0 起普通用户全局只读,跨项目查询对所有登录用户开放。
+  // 1) 权限:v0.3.0 起普通用户全局只读,跨项目查询对所有登录用户开放;
+  //    指定项目范围的凭证无 projectId 时拒绝(codex P1)。
   if (filters.projectId) {
     await requirePermission(user, 'project:view', filters.projectId);
+  } else {
+    denyApiKeyCrossProject(user);
   }
 
   // 2) 科目模糊检索:取项目(或全部)科目树,contains 匹配后展开为叶 ID 集合。
@@ -273,8 +276,9 @@ export async function crossProjectStatistics(
   filters: CrossProjectStatisticsFilters,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<CrossProjectStatisticsResult> {
-  // v0.3.0 起普通用户全局只读 → 跨项目统计对所有登录用户开放(只读聚合)。
-  await requirePermission(user, 'project:view');
+  // v0.3.0 起普通用户全局只读 → 跨项目统计对所有登录用户开放(只读聚合);
+  // 指定项目范围的凭证拒绝(天然跨项目,codex P1)。
+  denyApiKeyCrossProject(user);
 
   // 1) 全部项目(非归档)逐项汇总。
   const projects = await prisma.project.findMany({
@@ -457,7 +461,8 @@ export async function balanceStatistics(
   if (filters.projectId) {
     await requirePermission(user, 'project:view', filters.projectId);
   } else {
-    await requirePermission(user, 'project:view');
+    // 无 projectId 的余额统计跨全部项目:指定项目范围的凭证拒绝(codex P1)。
+    denyApiKeyCrossProject(user);
   }
 
   // 1) 项目与科目树。

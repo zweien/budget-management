@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { HTTPError, requireUser } from '@/lib/auth/session';
+import { requirePermission, denyApiKeyCrossProject } from '@/lib/auth/permissions';
 import { listAuditLogs, type AuditLogFilters } from '@/server/services/auditLog.service';
 
 /**
@@ -49,6 +50,14 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'offset 参数无效' }, { status: 400 });
       }
       pagination.offset = n;
+    }
+
+    // 项目范围收窄(codex P1):带 projectId 时校验该projectId 在 allowlist;
+    // 无 projectId 的全量审计为跨项目接口,selected-scope 凭证拒绝。
+    if (filters.projectId) {
+      await requirePermission(user, 'project:view', filters.projectId);
+    } else {
+      denyApiKeyCrossProject(user);
     }
 
     const result = await listAuditLogs(filters, user, pagination);

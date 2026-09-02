@@ -28,24 +28,23 @@ interface AgentConfig {
 }
 
 function loadConfig(): AgentConfig {
-  const baseUrl = process.env.BUDGET_BASE_URL;
-  const token = process.env.BUDGET_TOKEN;
-  if (baseUrl && token) return { baseUrl: baseUrl.replace(/\/+$/, ''), token };
   const cfgPath = process.env.BUDGET_CONFIG ?? join(homedir(), '.budget-agent.json');
-  let raw: { baseUrl?: string; token?: string };
+  let raw: { baseUrl?: string; token?: string } = {};
   try {
     raw = JSON.parse(readFileSync(cfgPath, 'utf8'));
   } catch {
-    // 延迟到首请求才读:未配置时给出可操作的报错,而非启动即崩。
+    // 无配置文件时仅环境变量生效;两者皆缺才在下方报错。
+  }
+  // 环境变量逐项覆盖配置文件(可只换 baseUrl 或只换 token,codex P2)。
+  const baseUrl = process.env.BUDGET_BASE_URL ?? raw.baseUrl;
+  const token = process.env.BUDGET_TOKEN ?? raw.token;
+  if (!baseUrl || !token) {
     throw new Error(
       `缺少预算系统凭据:请先创建 ${cfgPath}(内容 {"baseUrl","token"},见 npm run make-agent 输出)` +
         `或设置 BUDGET_BASE_URL / BUDGET_TOKEN 环境变量`,
     );
   }
-  if (!raw.baseUrl || !raw.token) {
-    throw new Error(`配置不完整:${cfgPath} 需要 baseUrl 与 token 字段`);
-  }
-  return { baseUrl: raw.baseUrl.replace(/\/+$/, ''), token: raw.token };
+  return { baseUrl: baseUrl.replace(/\/+$/, ''), token };
 }
 
 let cached: AgentConfig | null = null;

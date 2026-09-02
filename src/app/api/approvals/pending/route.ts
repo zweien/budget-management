@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { ApprovalStatus } from '@prisma/client';
 
 import { HTTPError, requireUser } from '@/lib/auth/session';
-import { can } from '@/lib/auth/permissions';
+import { can, denyApiKeyCrossProject } from '@/lib/auth/permissions';
 import { prisma } from '@/lib/prisma';
 
 /**
@@ -20,6 +20,7 @@ import { prisma } from '@/lib/prisma';
 export async function GET() {
   try {
     const user = await requireUser();
+    denyApiKeyCrossProject(user); // 跨项目待办聚合:指定项目范围的凭证拒绝(codex P1)
     if (!can(user, 'budget:approve')) {
       throw new HTTPError(403, '审批中心仅预算管理员可用');
     }

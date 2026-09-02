@@ -91,15 +91,68 @@ export async function issueApiKey(
   return { record, plaintext };
 }
 
-/** 列出某用户的全部凭证(创建时间倒序)。 */
-export async function listApiKeys(userId: string) {
-  return prisma.apiKey.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+/** 对外可见字段(绝不包含 keyHash——哈希不出库,明文仅签发瞬间存在)。 */
+export type ApiKeyPublic = Pick<
+  Prisma.ApiKeyGetPayload<Record<string, never>>,
+  | 'id'
+  | 'name'
+  | 'prefix'
+  | 'unattended'
+  | 'tier'
+  | 'projectScope'
+  | 'projectIds'
+  | 'expiresAt'
+  | 'lastUsedAt'
+  | 'revokedAt'
+  | 'createdAt'
+>;
+
+export function toPublicApiKey(rec: Prisma.ApiKeyGetPayload<Record<string, never>>): ApiKeyPublic {
+  return {
+    id: rec.id,
+    name: rec.name,
+    prefix: rec.prefix,
+    unattended: rec.unattended,
+    tier: rec.tier,
+    projectScope: rec.projectScope,
+    projectIds: rec.projectIds,
+    expiresAt: rec.expiresAt,
+    lastUsedAt: rec.lastUsedAt,
+    revokedAt: rec.revokedAt,
+    createdAt: rec.createdAt,
+  };
+}
+
+/** 列出某用户的全部凭证(创建时间倒序;仅公开字段)。 */
+export async function listApiKeys(userId: string): Promise<ApiKeyPublic[]> {
+  const rows = await prisma.apiKey.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      name: true,
+      prefix: true,
+      unattended: true,
+      tier: true,
+      projectScope: true,
+      projectIds: true,
+      expiresAt: true,
+      lastUsedAt: true,
+      revokedAt: true,
+      createdAt: true,
+    },
+  });
+  return rows;
 }
 
 /** 撤销凭证(仅限本人;脚本场景先自行按前缀定位再调用)。已撤销幂等返回。 */
-export async function revokeApiKey(userId: string, keyId: string) {
+export async function revokeApiKey(userId: string, keyId: string): Promise<ApiKeyPublic> {
   const rec = await prisma.apiKey.findFirst({ where: { id: keyId, userId } });
   if (!rec) throw new HTTPError(404, '凭证不存在');
-  if (rec.revokedAt) return rec;
-  return prisma.apiKey.update({ where: { id: rec.id }, data: { revokedAt: new Date() } });
+  if (rec.revokedAt) return toPublicApiKey(rec);
+  const updated = await prisma.apiKey.update({
+    where: { id: rec.id },
+    data: { revokedAt: new Date() },
+  });
+  return toPublicApiKey(updated);
 }

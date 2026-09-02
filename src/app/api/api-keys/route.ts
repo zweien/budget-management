@@ -6,6 +6,7 @@ import {
   CreateApiKeyInput,
   issueApiKey,
   listApiKeys,
+  toPublicApiKey,
 } from '@/server/services/apiKey.service';
 
 /**
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
       projectIds: Array.isArray(body.projectIds) ? (body.projectIds as string[]) : undefined,
       expiresInDays: body.expiresInDays ?? null,
     });
-    return NextResponse.json({ key: record, plaintext }, { status: 201 });
+    return NextResponse.json({ key: toPublicApiKey(record), plaintext }, { status: 201 });
   } catch (e) {
     if (e instanceof HTTPError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

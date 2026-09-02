@@ -83,9 +83,25 @@ function printIssued(
   console.log(JSON.stringify({ baseUrl, token: plaintext }, null, 2));
 }
 
+/** 解析参数:位置参数 + --name <名称>(codex P2:`--key alice --name nightly` 生效)。 */
+function parseArgs(argv: string[]) {
+  const positional: string[] = [];
+  let nameOption: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--name') {
+      nameOption = argv[++i];
+      if (!nameOption) usage();
+    } else {
+      positional.push(argv[i]);
+    }
+  }
+  return { positional, nameOption };
+}
+
 async function main() {
   loadEnvConfig(process.cwd());
-  const [first, second, third] = process.argv.slice(2);
+  const { positional, nameOption } = parseArgs(process.argv.slice(2));
+  const [first, second] = positional;
   const baseUrl = (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 
   if (!first) usage();
@@ -109,7 +125,7 @@ async function main() {
       process.exit(1);
     }
     const unattended = first === '--key';
-    const name = third ?? (unattended ? 'default' : 'attended');
+    const name = nameOption ?? (unattended ? 'default' : 'attended');
     const { record, plaintext } = await issue(user.id, unattended, name);
     printIssued(record, plaintext, baseUrl);
     return;

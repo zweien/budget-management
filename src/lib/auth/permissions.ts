@@ -1,4 +1,4 @@
-import { UserRole, Prisma } from '@prisma/client';
+import { User, UserRole, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
 import { HTTPError } from '@/lib/auth/session';
@@ -113,7 +113,28 @@ function apiKeyScopeDenial(
   ) {
     return '凭证未授权访问该项目';
   }
+  // selected-scope 且无项目上下文:除列表类(project:view,由 service 过滤到 allowlist)
+  // 外一律拒绝,防止跨项目聚合/管理接口(统计/审计/建项目/用户列表)绕过范围。
+  if ((scopes.keyProjectScope ?? 'all') === 'selected' && !projectId && action !== 'project:view') {
+    return '指定项目范围的凭证禁止执行跨项目操作(请携带 projectId)';
+  }
   return null;
+}
+
+/**
+ * 跨项目/无项目上下文接口的 scope 门卫:指定项目范围的凭证一律 403。
+ * 用于不经 requirePermission 的聚合接口(审计日志、审批待办、用户列表、
+ * 无 projectId 的统计/导出);项目列表类接口不走此门卫,由 service 过滤到 allowlist。
+ */
+export function denyApiKeyCrossProject(
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+  },
+): void {
+  if (user.viaApiKey && (user.keyProjectScope ?? 'all') === 'selected') {
+    throw new HTTPError(403, '指定项目范围的凭证禁止访问跨项目接口');
+  }
 }
 
 /** 机器凭证被拒审计:operator=凭证所属用户,失败不掩盖随后的 403。
