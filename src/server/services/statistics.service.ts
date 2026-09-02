@@ -94,7 +94,7 @@ export async function customStatistics(
   if (filters.projectId) {
     await requirePermission(user, 'project:view', filters.projectId);
   } else {
-    denyApiKeyCrossProject(user);
+    await denyApiKeyCrossProject(user, 'project:view');
   }
 
   // 2) 科目模糊检索:取项目(或全部)科目树,contains 匹配后展开为叶 ID 集合。
@@ -278,7 +278,7 @@ export async function crossProjectStatistics(
 ): Promise<CrossProjectStatisticsResult> {
   // v0.3.0 起普通用户全局只读 → 跨项目统计对所有登录用户开放(只读聚合);
   // 指定项目范围的凭证拒绝(天然跨项目,codex P1)。
-  denyApiKeyCrossProject(user);
+  await denyApiKeyCrossProject(user, 'project:view');
 
   // 1) 全部项目(非归档)逐项汇总。
   const projects = await prisma.project.findMany({
@@ -462,7 +462,7 @@ export async function balanceStatistics(
     await requirePermission(user, 'project:view', filters.projectId);
   } else {
     // 无 projectId 的余额统计跨全部项目:指定项目范围的凭证拒绝(codex P1)。
-    denyApiKeyCrossProject(user);
+    await denyApiKeyCrossProject(user, 'project:view');
   }
 
   // 1) 项目与科目树。

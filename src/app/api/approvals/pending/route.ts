@@ -20,7 +20,7 @@ import { prisma } from '@/lib/prisma';
 export async function GET() {
   try {
     const user = await requireUser();
-    denyApiKeyCrossProject(user); // 跨项目待办聚合:指定项目范围的凭证拒绝(codex P1)
+    await denyApiKeyCrossProject(user, 'budget:approve'); // 跨项目待办聚合:指定项目范围的凭证拒绝(codex P1)
     if (!can(user, 'budget:approve')) {
       throw new HTTPError(403, '审批中心仅预算管理员可用');
     }

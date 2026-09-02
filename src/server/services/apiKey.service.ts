@@ -51,6 +51,11 @@ export async function issueApiKey(
   if (!API_KEY_TIERS.includes(input.tier)) {
     throw new HTTPError(422, `凭证档位无效:${input.tier}(应为 read/write/full)`);
   }
+  // 枚举严校验(codex P1):未知的 projectScope 一律拒绝,
+  // 否则会被权限层当作 'all' 处理——凭证实际范围比用户请求的更宽。
+  if (input.projectScope !== 'all' && input.projectScope !== 'selected') {
+    throw new HTTPError(422, `项目范围无效:${input.projectScope}(应为 all/selected)`);
+  }
   const uniqueProjectIds = [...new Set(input.projectIds ?? [])];
   if (input.projectScope === 'selected') {
     if (uniqueProjectIds.length === 0) {

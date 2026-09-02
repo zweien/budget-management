@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     if (filters.projectId) {
       await requirePermission(user, 'project:view', filters.projectId);
     } else {
-      denyApiKeyCrossProject(user);
+      await denyApiKeyCrossProject(user, 'project:view');
     }
 
     const result = await listAuditLogs(filters, user, pagination);

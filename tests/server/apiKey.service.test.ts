@@ -86,6 +86,10 @@ describe('apiKey.service (integration, real PG)', () => {
     await expect(issueApiKey({ ...base, tier: 'read', expiresInDays: 4000 })).rejects.toMatchObject(
       { status: 422 },
     );
+    // 未知 projectScope 必须拒绝,否则权限层按 'all' 处理、范围比请求的更宽(codex P1)
+    await expect(
+      issueApiKey({ ...base, tier: 'read', projectScope: 'selected ' as never }),
+    ).rejects.toMatchObject({ status: 422, message: expect.stringContaining('项目范围无效') });
   });
 
   it('issueApiKey:签发 → 明文可认证 → 列表可见 → 撤销后 401', async () => {

@@ -106,18 +106,28 @@ describe('apiKey scope narrowing (integration, real PG)', () => {
     await expect(requirePermission(user!, 'project:view')).resolves.toBeUndefined();
   });
 
-  it('denyApiKeyCrossProject:跨项目接口门卫(统计/审计/审批/用户列表用)', () => {
-    const base = { id: 'u1', role: UserRole.USER };
-    expect(() =>
-      denyApiKeyCrossProject({ ...base, viaApiKey: true, keyProjectScope: 'selected' }),
-    ).toThrow(
-      expect.objectContaining({ status: 403, message: expect.stringContaining('跨项目接口') }),
-    );
+  it('denyApiKeyCrossProject:跨项目接口门卫,先审计再 403(codex 复审 P2)', async () => {
+    const base = { id: adminId, role: UserRole.ADMIN };
+    await expect(
+      denyApiKeyCrossProject(
+        { ...base, viaApiKey: true, keyProjectScope: 'selected' },
+        'project:view',
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringContaining('跨项目接口'),
+    });
+    // 拒绝已写入 apikey.denied 审计
+    const denied = await prisma.auditLog.findFirst({
+      where: { operatorId: adminId, action: 'apikey.denied' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect(denied?.afterData).toMatchObject({ attemptedAction: 'project:view' });
     // 全部项目范围/会话用户不受影响
-    expect(() =>
-      denyApiKeyCrossProject({ ...base, viaApiKey: true, keyProjectScope: 'all' }),
-    ).not.toThrow();
-    expect(() => denyApiKeyCrossProject({ ...base })).not.toThrow();
+    await expect(
+      denyApiKeyCrossProject({ ...base, viaApiKey: true, keyProjectScope: 'all' }, 'project:view'),
+    ).resolves.toBeUndefined();
+    await expect(denyApiKeyCrossProject({ ...base }, 'project:view')).resolves.toBeUndefined();
   });
 
   it('过期凭证:verifyApiKey → null(按 401 处理)', async () => {

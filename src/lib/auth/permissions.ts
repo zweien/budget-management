@@ -122,19 +122,26 @@ function apiKeyScopeDenial(
 }
 
 /**
- * 跨项目/无项目上下文接口的 scope 门卫:指定项目范围的凭证一律 403。
+ * 跨项目/无项目上下文接口的 scope 门卫:指定项目范围的凭证一律 403(codex P2:先写被拒审计再抛)。
  * 用于不经 requirePermission 的聚合接口(审计日志、审批待办、用户列表、
  * 无 projectId 的统计/导出);项目列表类接口不走此门卫,由 service 过滤到 allowlist。
+ * action 传该接口的权限门动作(审计 attemptedAction 用)。
  */
-export function denyApiKeyCrossProject(
+export async function denyApiKeyCrossProject(
   user: Pick<User, 'id' | 'role'> & {
     viaApiKey?: boolean;
     keyProjectScope?: string;
+    apiKeyPrefix?: string;
   },
-): void {
-  if (user.viaApiKey && (user.keyProjectScope ?? 'all') === 'selected') {
-    throw new HTTPError(403, '指定项目范围的凭证禁止访问跨项目接口');
-  }
+  action: Action,
+  projectId?: string,
+): Promise<void> {
+  if (!(user.viaApiKey && (user.keyProjectScope ?? 'all') === 'selected')) return;
+  await auditMachineDenied(user, action, projectId, 'apikey.denied', {
+    reason: '指定项目范围的凭证禁止访问跨项目接口',
+    keyProjectScope: 'selected',
+  });
+  throw new HTTPError(403, '指定项目范围的凭证禁止访问跨项目接口');
 }
 
 /** 机器凭证被拒审计:operator=凭证所属用户,失败不掩盖随后的 403。

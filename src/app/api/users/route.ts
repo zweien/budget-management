@@ -28,7 +28,7 @@ export async function GET() {
     if (!user) {
       throw new HTTPError(401, '未登录');
     }
-    denyApiKeyCrossProject(user); // 用户列表为跨项目数据:指定项目范围的凭证拒绝(codex P1)
+    await denyApiKeyCrossProject(user, 'user:list'); // 用户列表为跨项目数据:指定项目范围的凭证拒绝(codex P1)
     if (!can(user, 'user:list')) {
       throw new HTTPError(403, '仅管理员可列出全部用户');
     }
