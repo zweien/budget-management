@@ -167,20 +167,26 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
   const [expanded, setExpanded] = useState<ExpandedState>(true);
 
   const columns = useMemo<ColumnDef<TreeNode>[]>(() => {
-    // 合计行 footer(可选):金额列 = 一级科目之和;对齐各列右对齐样式。
-    const moneyFooter = (id: (typeof MONEY_COLUMN_IDS)[number]) =>
-      showLevel1Total
-        ? () => (
-            <span className="block text-right tabular-nums">
-              {plainMoney(String(level1Total.sums.get(id) ?? 0))}
-            </span>
-          )
-        : undefined;
-    const moneyCol = (id: keyof TreeNode & string, label: string): ColumnDef<TreeNode> => ({
+    // 合计行 footer(可选):金额列 = 一级科目之和。
+    // 结余列(codex P2)与数据行同款走 MoneyText 风险色——合计为负 = 项目整体超预算,
+    // 合计行不能吞掉这个信号。footer 须为 string | 函数(ColumnDefTemplate),
+    // 内联箭头直接写在列定义里(工厂返回匿名组件会触发 display-name 规则)。
+    const moneySum = (id: (typeof MONEY_COLUMN_IDS)[number]) =>
+      String(level1Total.sums.get(id) ?? 0);
+    const moneyCol = (
+      id: keyof TreeNode & string,
+      label: string,
+      sumId?: (typeof MONEY_COLUMN_IDS)[number],
+    ): ColumnDef<TreeNode> => ({
       id,
       accessorKey: id,
       header: () => <span className="block text-right">{label}</span>,
-      footer: moneyFooter(id as (typeof MONEY_COLUMN_IDS)[number]),
+      footer:
+        showLevel1Total && sumId
+          ? () => (
+              <span className="block text-right tabular-nums">{plainMoney(moneySum(sumId))}</span>
+            )
+          : undefined,
       cell: ({ row }) => (
         <span className="block text-right tabular-nums">
           {plainMoney(String(row.original[id]))}
@@ -193,7 +199,7 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
         id: 'subject',
         accessorKey: 'name',
         header: () => '预算科目',
-        footer: showLevel1Total ? () => '合计(一级科目汇总)' : undefined,
+        footer: showLevel1Total ? '合计(一级科目汇总)' : undefined,
         cell: ({ row }) => (
           <span
             className="flex items-center gap-1 whitespace-nowrap"
@@ -235,20 +241,26 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
           </span>
         ),
       },
-      moneyCol('totalInitial', '总预算·原始'),
-      moneyCol('totalAdjustment', '总预算·调整'),
-      moneyCol('totalCurrent', '总预算·当前'),
-      moneyCol('initial', '年度·原始'),
-      moneyCol('adjustment', '年度·调整'),
-      moneyCol('current', '年度·当前'),
-      moneyCol('paid', '已支出'),
-      moneyCol('payable', '应付未付'),
-      moneyCol('totalOccupied', '总占用'),
+      moneyCol('totalInitial', '总预算·原始', 'totalInitial'),
+      moneyCol('totalAdjustment', '总预算·调整', 'totalAdjustment'),
+      moneyCol('totalCurrent', '总预算·当前', 'totalCurrent'),
+      moneyCol('initial', '年度·原始', 'initial'),
+      moneyCol('adjustment', '年度·调整', 'adjustment'),
+      moneyCol('current', '年度·当前', 'current'),
+      moneyCol('paid', '已支出', 'paid'),
+      moneyCol('payable', '应付未付', 'payable'),
+      moneyCol('totalOccupied', '总占用', 'totalOccupied'),
       {
         id: 'balance',
         accessorKey: 'balance',
         header: () => <span className="block text-right">结余</span>,
-        footer: moneyFooter('balance'),
+        footer: showLevel1Total
+          ? () => (
+              <span className="block text-right">
+                <MoneyText value={moneySum('balance')} riskOnNegative />
+              </span>
+            )
+          : undefined,
         // 负结余 → MoneyText 风险色 + "超预算"(§12.2)。
         cell: ({ row }) => <MoneyText value={row.original.balance} riskOnNegative />,
       },
