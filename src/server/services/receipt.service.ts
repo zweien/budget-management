@@ -108,6 +108,8 @@ export async function createReceipt(
 
   const id = uuidv7();
   return prisma.$transaction(async (tx) => {
+    // §codex P2 review:锁项目行,与「预算类型切换」串行化(空白检查把到账计为非空)。
+    await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId}::uuid FOR UPDATE`;
     const created = await tx.receiptRecord.create({
       data: {
         id,

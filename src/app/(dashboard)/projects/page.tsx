@@ -44,6 +44,8 @@ interface ProjectRow {
   name: string;
   level: string | null;
   projectType: string | null;
+  /** 预算类型(§包干制):GENERAL / LUMP_SUM。 */
+  budgetMode: string;
   undertakingUnit: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -137,6 +139,7 @@ export default function ProjectsPage() {
       name: r.name,
       level: r.level,
       projectType: r.projectType,
+      budgetMode: r.budgetMode,
       undertakingUnit: r.undertakingUnit,
       startDate: r.startDate,
       endDate: r.endDate,
@@ -163,6 +166,7 @@ export default function ProjectsPage() {
               name: String(project.name ?? r.name),
               level: (project.level as string | null) ?? null,
               projectType: (project.projectType as string | null) ?? null,
+              budgetMode: (project.budgetMode as string | undefined) ?? r.budgetMode,
               undertakingUnit: (project.undertakingUnit as string | null) ?? null,
               startDate: (project.startDate as string | null) ?? null,
               endDate: (project.endDate as string | null) ?? null,

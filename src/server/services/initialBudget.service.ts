@@ -91,8 +91,13 @@ export interface InitialBudgetDraftView {
  *  - 规则3:每个叶科目跨年度分配合计 ≤ 该科目总预算(§B model NEW,留余额允许)
  * 其余结构性校验(总预算非负、编码唯一、parentCode 合法、叶节点预算只填叶节点)
  * 保持不变。
+ *
+ * §包干制(LUMP_SUM):无科目总预算层——规则 7/8/9 整体跳过,payload 里的
+ * subjectTotalBudgets 视为空(不校验、不落库);规则 5/6(Σ年度 ≤ 总预算、
+ * 同年度叶合计 ≤ 年度预算)照常。
  */
-function validatePayload(payload: InitialBudgetPayload): void {
+function validatePayload(payload: InitialBudgetPayload, opts: { lumpSum?: boolean } = {}): void {
+  const lumpSum = opts.lumpSum === true;
   const projectTotal = new D(payload.projectTotal);
 
   // 0) year 必须是合理的正整数(1900~9999),覆盖 annualBudgets 与 subjectBudgets。
@@ -210,19 +215,22 @@ function validatePayload(payload: InitialBudgetPayload): void {
 
   // 7) §B model — subjectTotalBudgets 结构性校验:仅引用叶科目、金额非负、项目内唯一。
   //    防御性:前端页面尚未传该字段时,缺省视为空数组(过渡期兼容)。
+  //    §包干制:整体跳过(无科目总预算层)。
   const totalByCode = new Map<string, D>();
-  for (const st of payload.subjectTotalBudgets ?? []) {
-    if (!leafCodes.has(st.subjectCode)) {
-      throw new HTTPError(422, `科目 ${st.subjectCode} 不是叶节点,跨年度总预算只允许填在叶节点`);
+  if (!lumpSum) {
+    for (const st of payload.subjectTotalBudgets ?? []) {
+      if (!leafCodes.has(st.subjectCode)) {
+        throw new HTTPError(422, `科目 ${st.subjectCode} 不是叶节点,跨年度总预算只允许填在叶节点`);
+      }
+      const amt = new D(st.amount);
+      if (!amt.gte(ZERO)) {
+        throw new HTTPError(422, `科目 ${st.subjectCode} 的跨年度总预算不得为负`);
+      }
+      if (totalByCode.has(st.subjectCode)) {
+        throw new HTTPError(422, `科目 ${st.subjectCode} 的跨年度总预算重复声明`);
+      }
+      totalByCode.set(st.subjectCode, amt);
     }
-    const amt = new D(st.amount);
-    if (!amt.gte(ZERO)) {
-      throw new HTTPError(422, `科目 ${st.subjectCode} 的跨年度总预算不得为负`);
-    }
-    if (totalByCode.has(st.subjectCode)) {
-      throw new HTTPError(422, `科目 ${st.subjectCode} 的跨年度总预算重复声明`);
-    }
-    totalByCode.set(st.subjectCode, amt);
   }
 
   // 8) §B model 规则1:Σ 叶科目跨年度总预算 ≤ 项目初始总预算。
@@ -308,7 +316,7 @@ export async function createDraft(
   // 项目必须存在(避免悬空外键)。
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, archivedAt: true },
+    select: { id: true, archivedAt: true, budgetMode: true },
   });
   if (!project) {
     throw new HTTPError(404, '项目不存在');
@@ -316,8 +324,10 @@ export async function createDraft(
   if (project.archivedAt) {
     throw new HTTPError(409, '项目已归档,不可编制预算');
   }
+  // §包干制:无科目总预算层——校验跳过规则7/8/9,落库不写 SubjectTotalBudget。
+  const lumpSum = project.budgetMode === 'LUMP_SUM';
 
-  validatePayload(payload);
+  validatePayload(payload, { lumpSum });
   const levels = computeLevels(payload);
 
   const projectTotal = new D(payload.projectTotal);
@@ -325,6 +335,18 @@ export async function createDraft(
 
   try {
     await prisma.$transaction(async (tx) => {
+      // §codex P2 review:锁项目行,与「预算类型切换」串行化;锁内重读模式并
+      // 复跑校验——防事务外读到的模式在提交前被并发切换翻转(如 GENERAL 下
+      // 读到模式、LUMP_SUM 下落库,留下孤儿科目总预算行)。
+      await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId}::uuid FOR UPDATE`;
+      const freshMode = (
+        await tx.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } })
+      )?.budgetMode;
+      const txLumpSum = freshMode === 'LUMP_SUM';
+      if (txLumpSum !== lumpSum) {
+        validatePayload(payload, { lumpSum: txLumpSum });
+      }
+
       await tx.initialBudgetApplication.create({
         data: {
           id: appId,
@@ -426,7 +448,9 @@ export async function createDraft(
       // §B model 叶科目跨年度总预算:initial = 总预算,current = 0(§6.3 同其他三层,
       // 审批生效才置位)。仅对声明了总预算的叶科目落库,一行一科目。
       // 缺省视为空数组(前端页面过渡期兼容)。
-      for (const st of payload.subjectTotalBudgets ?? []) {
+      // §包干制:不落库(LUMP_SUM 项目没有科目总预算层,即使 payload 误带也被忽略)。
+      // 以锁内重读的模式为准(txLumpSum),而非事务外的快照。
+      for (const st of txLumpSum ? [] : (payload.subjectTotalBudgets ?? [])) {
         const subjectId = codeToId.get(st.subjectCode);
         if (!subjectId) {
           throw new HTTPError(422, `科目 ${st.subjectCode} 不存在`);
@@ -510,9 +534,11 @@ export async function updateDraft(
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) throw new HTTPError(404, '项目不存在');
   if (project.archivedAt) throw new HTTPError(409, '项目已归档,不可编制预算');
+  // §包干制:校验跳过科目总预算规则,落库不写 SubjectTotalBudget。
+  const lumpSum = project.budgetMode === 'LUMP_SUM';
   await requirePermission(user, 'budget:editInitial', projectId);
 
-  validatePayload(payload);
+  validatePayload(payload, { lumpSum });
   const projectTotal = fromStored(payload.projectTotal);
   // 与 createInitialBudget 一致:按 parentCode 链计算层级(根=1)。
   // 此前 PATCH 重建时硬编码 level:0,导致再修改过的项目科目层级丢失,
@@ -588,7 +614,8 @@ export async function updateDraft(
     }
     // §B model:重建叶科目跨年度总预算(current 保持 0,§6.3 审批前不影响)。
     // 缺省视为空数组(前端页面过渡期兼容)。
-    for (const st of payload.subjectTotalBudgets ?? []) {
+    // §包干制:不重建(LUMP_SUM 无科目总预算层;开头 deleteMany 已清掉旧行)。
+    for (const st of lumpSum ? [] : (payload.subjectTotalBudgets ?? [])) {
       const subjectId = codeToId.get(st.subjectCode);
       if (!subjectId) throw new HTTPError(422, `科目 ${st.subjectCode} 不存在`);
       await tx.subjectTotalBudget.create({
@@ -851,7 +878,12 @@ export async function approveApplication(
   const updated = await prisma.$transaction(async (tx) => {
     // §6.4 复跑:数据落库后可能被改,生效前再校验一次,失败抛 422(整体事务回滚)。
     const payload = await rebuildPayloadFromStored(tx, app.projectId);
-    validatePayload(payload);
+    // §包干制:按项目预算类型跳过科目总预算规则(LUMP_SUM 本就不落该层,防御性兜底)。
+    const project = await tx.project.findUnique({
+      where: { id: app.projectId },
+      select: { budgetMode: true },
+    });
+    validatePayload(payload, { lumpSum: project?.budgetMode === 'LUMP_SUM' });
 
     // §6.3 整体生效:三层 current ← initial。
     // 1) ProjectBudget.currentAmount = initialAmount。

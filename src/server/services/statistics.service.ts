@@ -510,24 +510,43 @@ export async function balanceStatistics(
   });
 
   // 2) 预算 + 记录一次性取齐(全量非作废,跨年度),按 项目×科目 分组。
+  //    科目预算取全年度:§包干制的科目总口径 = Σ 各年度 SubjectBudget(回退),年份筛选在内存做。
   const [totalBudgets, records, subjectBudgets] = await Promise.all([
     prisma.subjectTotalBudget.findMany({ where: { projectId: { in: projectIds } } }),
     prisma.businessRecord.findMany({
       where: { projectId: { in: projectIds }, isVoid: false },
     }),
-    filters.year !== undefined
-      ? prisma.subjectBudget.findMany({
-          where: { projectId: { in: projectIds }, year: filters.year },
-        })
-      : Promise.resolve([]),
+    prisma.subjectBudget.findMany({ where: { projectId: { in: projectIds } } }),
   ]);
 
+  // §包干制(LUMP_SUM)项目集合:科目总预算口径回退为 Σ 各年度 SubjectBudget(Q6a)。
+  const lumpSumProjects = new Set(
+    projects.filter((p) => p.budgetMode === 'LUMP_SUM').map((p) => p.id),
+  );
   const stbByProjectSubject = new Map(
     totalBudgets.map((t) => [`${t.projectId}|${t.subjectId}`, t]),
   );
   const sbByProjectSubject = new Map(
-    subjectBudgets.map((t) => [`${t.projectId}|${t.subjectId}`, t]),
+    subjectBudgets
+      .filter((t) => filters.year === undefined || t.year === filters.year)
+      .map((t) => [`${t.projectId}|${t.subjectId}`, t]),
   );
+  const annualSumByProjectSubject = new Map<string, D>();
+  for (const sb of subjectBudgets) {
+    const key = `${sb.projectId}|${sb.subjectId}`;
+    annualSumByProjectSubject.set(
+      key,
+      (annualSumByProjectSubject.get(key) ?? ZERO).plus(fromStored(sb.currentAmount)),
+    );
+  }
+  /** 科目总预算口径:一般项目取 SubjectTotalBudget.currentAmount;包干项目 = Σ 各年度科目预算。 */
+  const totalBudgetOf = (projectId: string, subjectId: string): D => {
+    if (lumpSumProjects.has(projectId)) {
+      return annualSumByProjectSubject.get(`${projectId}|${subjectId}`) ?? ZERO;
+    }
+    const stb = stbByProjectSubject.get(`${projectId}|${subjectId}`);
+    return stb ? fromStored(stb.currentAmount) : ZERO;
+  };
 
   interface OccAgg {
     paid: D;
@@ -578,8 +597,7 @@ export async function balanceStatistics(
       let yearPaid = ZERO;
       let yearPayable = ZERO;
       for (const leafId of m.leafIds) {
-        const stb = stbByProjectSubject.get(`${p.id}|${leafId}`);
-        if (stb) totalBudget = totalBudget.plus(fromStored(stb.currentAmount));
+        totalBudget = totalBudget.plus(totalBudgetOf(p.id, leafId));
         const occ = occByProjectSubject.get(`${p.id}|${leafId}`);
         if (occ) {
           paid = paid.plus(occ.paid);
@@ -630,8 +648,8 @@ export async function balanceStatistics(
   let tYearPaid = ZERO;
   let tYearPayable = ZERO;
   for (const key of dedupLeafKeys) {
-    const stb = stbByProjectSubject.get(key);
-    if (stb) tTotal = tTotal.plus(fromStored(stb.currentAmount));
+    const [pid, sid] = key.split('|');
+    tTotal = tTotal.plus(totalBudgetOf(pid, sid));
     const occ = occByProjectSubject.get(key);
     if (occ) {
       tPaid = tPaid.plus(occ.paid);

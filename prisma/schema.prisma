@@ -46,6 +46,13 @@ enum AdjustmentKind {
   ALLOCATE
 }
 
+// 预算类型(§包干制):GENERAL=一般(科目总预算 + 年度分解);
+// LUMP_SUM=包干制(总预算只是一个数,不编制科目总预算层;年度预算仍分解到各科目)。
+enum BudgetMode {
+  GENERAL
+  LUMP_SUM
+}
+
 model User {
   id        String     @id @db.Uuid
   name      String
@@ -110,6 +117,9 @@ model Project {
   startDate  DateTime? @map("start_date") @db.Date
   endDate    DateTime? @map("end_date") @db.Date
   ownerId    String   @map("owner_id") @db.Uuid
+  // 预算类型(§包干制):LUMP_SUM 项目编制时无科目总预算层,年度预算仍分解到科目;
+  // 调整仅允许年度维度(totalAdjustment 恒 0)。空项目才可切换(§切变锁定)。
+  budgetMode BudgetMode @default(GENERAL) @map("budget_mode")
   remark     String?
   archivedAt DateTime? @map("archived_at")
   createdAt  DateTime @default(now()) @map("created_at")

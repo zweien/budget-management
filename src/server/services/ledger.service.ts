@@ -54,7 +54,8 @@ export async function getProjectLedger(
   await requirePermission(user, 'project:view', projectId);
 
   // 1) 科目树(全部,按编制顺序排序)+ 该年度 subject_budgets + 科目总预算(B模型) + 该年度非作废 business_records。
-  const [subjects, subjectBudgets, subjectTotalBudgets, records] = await Promise.all([
+  const [project, subjects, subjectBudgets, subjectTotalBudgets, records] = await Promise.all([
+    prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
     prisma.budgetSubject.findMany({
       where: { projectId },
       orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
@@ -69,6 +70,25 @@ export async function getProjectLedger(
       where: { projectId, budgetYear: year, isVoid: false },
     }),
   ]);
+
+  // §包干制(LUMP_SUM):无科目总预算层,总口径回退为该科目各年度 SubjectBudget 之和
+  // (Q6a,与结余统计同口径)——需全年度科目预算另行汇总。
+  const lumpSum = project?.budgetMode === 'LUMP_SUM';
+  const allYearSumsBySubject = new Map<string, { initial: D; adjustment: D; current: D }>();
+  if (lumpSum) {
+    const allYears = await prisma.subjectBudget.findMany({ where: { projectId } });
+    for (const sb of allYears) {
+      const acc = allYearSumsBySubject.get(sb.subjectId) ?? {
+        initial: ZERO,
+        adjustment: ZERO,
+        current: ZERO,
+      };
+      acc.initial = acc.initial.plus(fromStored(sb.initialAmount));
+      acc.adjustment = acc.adjustment.plus(fromStored(sb.adjustmentAmount));
+      acc.current = acc.current.plus(fromStored(sb.currentAmount));
+      allYearSumsBySubject.set(sb.subjectId, acc);
+    }
+  }
 
   // 2) 索引:subjectId → 该年度预算(可能没有,如未编制或非叶节点)。
   const budgetBySubject = new Map(subjectBudgets.map((sb) => [sb.subjectId, sb]));
@@ -110,10 +130,21 @@ export async function getProjectLedger(
       const current = sb ? fromStored(sb.currentAmount) : ZERO;
       const adjustment = current.minus(initial);
       // 科目总预算三维度(叶节点取自身 SubjectTotalBudget;未编制则为 0)。
-      const stb = totalBudgetBySubject.get(s.id);
-      const totalInitial = stb ? fromStored(stb.initialAmount) : ZERO;
-      const totalAdjustment = stb ? fromStored(stb.adjustmentAmount) : ZERO;
-      const totalCurrent = stb ? fromStored(stb.currentAmount) : ZERO;
+      // §包干制:回退为各年度 SubjectBudget 三维度之和(总口径 = Σ年度)。
+      let totalInitial: D;
+      let totalAdjustment: D;
+      let totalCurrent: D;
+      if (lumpSum) {
+        const sums = allYearSumsBySubject.get(s.id);
+        totalInitial = sums?.initial ?? ZERO;
+        totalAdjustment = sums?.adjustment ?? ZERO;
+        totalCurrent = sums?.current ?? ZERO;
+      } else {
+        const stb = totalBudgetBySubject.get(s.id);
+        totalInitial = stb ? fromStored(stb.initialAmount) : ZERO;
+        totalAdjustment = stb ? fromStored(stb.adjustmentAmount) : ZERO;
+        totalCurrent = stb ? fromStored(stb.currentAmount) : ZERO;
+      }
       const occ = computeOccupancy({
         records: (recordsBySubject.get(s.id) ?? []).map((r) => ({
           amount: r.amount,

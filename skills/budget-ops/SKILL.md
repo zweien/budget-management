@@ -68,6 +68,8 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 
 科目树接口 `GET /projects/$PID/subjects` 可取叶科目(指派科目时 subjectId 必须是叶科目)。
 
+> **预算类型口径**:项目详情的 `budgetMode` 有两值——`GENERAL`(一般,默认)与 `LUMP_SUM`(包干制)。包干制项目**没有科目总预算**(台账 `totalCurrent` 与余额统计 `totalBudget` 已自动回退为该科目各年度预算之和),也**不支持总维度调整**(调整单 totalAdjustment 恒 0);查询/汇报科目结余直接用上述回退口径即可。
+
 ## 4. 无人值守:结算单收件箱流程
 
 定时任务提示词通常是「扫描收件箱并处理」。流程:
