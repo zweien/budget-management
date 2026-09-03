@@ -11,7 +11,7 @@ import {
   type InitialBudgetPayload,
 } from '@/server/services/initialBudget.service';
 import { createProject } from '@/server/services/project.service';
-import { getProjectLedger } from '@/server/services/ledger.service';
+import { getProjectLedger, getProjectTotalLedger } from '@/server/services/ledger.service';
 import {
   approveAdjustment,
   createAdjustment,
@@ -474,5 +474,70 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
     // 总预算维度(totalCurrent)变化:A 600→500,B 400→500。
     expect(aAfter.totalCurrent).toBe('500.00');
     expect(bAfter.totalCurrent).toBe('500.00');
+  });
+
+  it('§总预算台账 getProjectTotalLedger:跨年度占用 + 总预算口径结余/执行率,作废不计,年度维度恒 0', async () => {
+    const { project, root, leafA, leafB } = await seedApprovedProject('TOTLEDGER');
+    const adminUser = { id: adminId, role: UserRole.ADMIN };
+
+    // A:2026 已支出 100;2027 财务系统审批(应付未付)50 → 跨年度累计占用 150。
+    await insertRecord({
+      projectId: project.id,
+      subjectId: leafA.id,
+      budgetYear: 2026,
+      amount: '100.00',
+      status: BusinessStatus.PAID,
+      createdById: adminId,
+    });
+    await insertRecord({
+      projectId: project.id,
+      subjectId: leafA.id,
+      budgetYear: 2027,
+      amount: '50.00',
+      status: BusinessStatus.FINANCE_APPROVAL,
+      createdById: adminId,
+    });
+    // B:2026 合同 400;另插一条作废记录(不计占用)。
+    await insertRecord({
+      projectId: project.id,
+      subjectId: leafB.id,
+      budgetYear: 2026,
+      amount: '400.00',
+      status: BusinessStatus.CONTRACT,
+      createdById: adminId,
+    });
+    await insertRecord({
+      projectId: project.id,
+      subjectId: leafA.id,
+      budgetYear: 2026,
+      amount: '100.00',
+      status: BusinessStatus.PAID,
+      isVoid: true,
+      createdById: adminId,
+    });
+
+    const ledger = await getProjectTotalLedger(project.id, adminUser);
+    const a = ledger.nodes.find((n) => n.code === 'A')!;
+    const b = ledger.nodes.find((n) => n.code === 'B')!;
+    const rootNode = ledger.nodes.find((n) => n.code === 'ROOT')!;
+
+    // 总预算口径:A 总 600,占用 150(作废 100 不计),结余 450,执行率 25%。
+    expect(a.totalCurrent).toBe('600.00');
+    expect(a.paid).toBe('100.00');
+    expect(a.payable).toBe('50.00');
+    expect(a.totalOccupied).toBe('150.00');
+    expect(a.balance).toBe('450.00');
+    expect(a.executionRate ?? 0).toBeCloseTo(0.25);
+    // B:占用 400 / 总 400 → 100%。
+    expect(b.totalOccupied).toBe('400.00');
+    expect(b.executionRate ?? 0).toBeCloseTo(1);
+    // 根节点上卷:总占用 550 / 总预算 1000 → 55%。
+    expect(rootNode.totalCurrent).toBe('1000.00');
+    expect(rootNode.totalOccupied).toBe('550.00');
+    expect(rootNode.balance).toBe('450.00');
+    expect(rootNode.executionRate ?? 0).toBeCloseTo(0.55);
+    // 总口径无年度维度:年度三列恒 0(前端整组隐藏)。
+    expect(a.initial).toBe('0.00');
+    expect(a.current).toBe('0.00');
   });
 });

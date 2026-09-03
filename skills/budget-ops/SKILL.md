@@ -46,6 +46,7 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 | 项目列表           | `GET /projects?includeArchived=1`                                                                                                                                            |
 | 项目详情           | `GET /projects/$PID`                                                                                                                                                         |
 | 执行台账           | `GET /projects/$PID/ledger?year=2026`                                                                                                                                        |
+| 总预算台账(跨年度) | `GET /projects/$PID/ledger-total` — 占用/结余/执行率按科目总预算(包干制 = Σ年度)对全部年度记录计算                                                                           |
 | 业务记录列表       | `GET /projects/$PID/records?year=&subjectId=&status=&includeVoid=1&handler=&summary=&businessDateFrom=&businessDateTo=`(status ∈ PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/PAID) |
 | 记录变更历史       | `GET /projects/$PID/records/:recordId/history`                                                                                                                               |
 | 导入批次列表       | `GET /projects/$PID/imports`(最近 20 条)                                                                                                                                     |

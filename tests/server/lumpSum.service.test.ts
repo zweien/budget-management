@@ -16,7 +16,7 @@ import {
   submitAdjustment,
 } from '@/server/services/adjustment.service';
 import { balanceStatistics } from '@/server/services/statistics.service';
-import { getProjectLedger } from '@/server/services/ledger.service';
+import { getProjectLedger, getProjectTotalLedger } from '@/server/services/ledger.service';
 import { fromStored, sumAmounts } from '@/lib/decimal';
 
 // §包干制(LUMP_SUM)集成测试:总预算不编科目总预算层,年度预算仍分解到科目。
@@ -305,6 +305,45 @@ describe('lumpSum 预算类型(§包干制, integration, real PG)', () => {
     const rowA = stats.rows.find((r) => r.subjectId === leafA)!;
     expect(rowA.totalBudget).toBe('800.00');
     expect(rowA.yearBudget).toBe('300.00');
+
+    // §总预算台账(跨年度):插入跨年度记录后,占用/结余/执行率全部按总口径。
+    // A 总口径 = 500(2026,调剂后) + 300(2027) = 800;占用 = 200(PAID) + 100(应付) = 300。
+    await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        budgetYear: 2026,
+        subjectId: leafA,
+        amount: '200.00',
+        businessDate: new Date('2026-05-01'),
+        handler: '测试',
+        summary: '总台账-已支出',
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      },
+    });
+    await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        budgetYear: 2027,
+        subjectId: leafA,
+        amount: '100.00',
+        businessDate: new Date('2027-05-01'),
+        handler: '测试',
+        summary: '总台账-应付未付',
+        status: BusinessStatus.FINANCE_APPROVAL,
+        createdById: adminId,
+      },
+    });
+    const totalLedger = await getProjectTotalLedger(project.id, adminUser());
+    const ta = totalLedger.nodes.find((n) => n.subjectId === leafA)!;
+    expect(ta.totalCurrent).toBe('800.00');
+    expect(ta.paid).toBe('200.00');
+    expect(ta.payable).toBe('100.00');
+    expect(ta.totalOccupied).toBe('300.00');
+    expect(ta.balance).toBe('500.00');
+    expect(ta.executionRate ?? 0).toBeCloseTo(0.375);
   });
 
   it('ALLOCATE 池内分配:容量护栏改为项目级(总预算 − Σ历年年度预算),超项目池 422', async () => {

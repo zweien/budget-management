@@ -24,6 +24,7 @@ import {
 
 import { apiFetch } from '@/lib/api/client';
 import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
+import { D } from '@/lib/decimal';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { PackageAttachmentsDialog } from '@/components/records/PackageAttachmentsDialog';
@@ -916,6 +917,21 @@ function BusinessRecordsPageInner() {
     .map((r) => r.original.id);
   const selectedVisibleCount = visibleVoidableIds.filter((id) => selectedIds.has(id)).length;
 
+  // §总计行:对当前表头筛选结果统计(所见即所总,便于筛选后直接看合计);
+  // 作废记录不计入(与执行统计口径一致),有作废行混入时在标签上注明。
+  const filteredRows = table.getFilteredRowModel().rows;
+  let totalValidCount = 0;
+  let totalVoidCount = 0;
+  let amountSum = new D(0);
+  for (const r of filteredRows) {
+    if (r.original.isVoid) {
+      totalVoidCount++;
+      continue;
+    }
+    totalValidCount++;
+    amountSum = amountSum.plus(new D(r.original.amount));
+  }
+
   if (loadingMeta) {
     return (
       <div className="space-y-3">
@@ -1030,6 +1046,25 @@ function BusinessRecordsPageInner() {
             ))}
           </TableHeader>
           <TableBody>
+            {/* §总计行:首行显示当前筛选结果的笔数与金额合计(作废不计);
+                用普通 tr 渲染在首行(浏览器把 tfoot 固定在底部),列序随可见列动态对齐。
+                门槛 = 筛选模型有行即可(§codex P2):全部为作废时也渲染
+                「总计 0 笔(作废不计)/ 0.00」,恰好在对全部行排除合计的时刻。 */}
+            {!loadingRecords && filteredRows.length > 0 ? (
+              <TableRow className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40">
+                {table.getVisibleLeafColumns().map((col, idx) => (
+                  <TableCell key={col.id} className="py-1.5">
+                    {col.id === 'amount' ? (
+                      <span className="block text-right tabular-nums">{amountSum.toFixed(2)}</span>
+                    ) : idx === 0 ? (
+                      <span className="whitespace-nowrap tabular-nums">
+                        总计 {totalValidCount} 笔{totalVoidCount > 0 ? '(作废不计)' : ''}
+                      </span>
+                    ) : null}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ) : null}
             {loadingRecords ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="hover:bg-transparent">

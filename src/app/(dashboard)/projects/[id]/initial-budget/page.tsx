@@ -1243,7 +1243,7 @@ export default function InitialBudgetPage() {
         </Alert>
         <h2 className="text-base font-semibold tracking-[-0.3px]">{ledgerYear} 年度预算执行台账</h2>
         {ledgerNodes.length > 0 ? (
-          <BudgetTreeTable nodes={ledgerNodes} showLevel1Total />
+          <BudgetTreeTable nodes={ledgerNodes} showLevel1Total yearLabel={ledgerYear} />
         ) : (
           <ReadOnlyView
             projectTotal={draft?.projectTotal ?? ''}
