@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { BusinessStatus, UserRole } from '@prisma/client';
+import { BusinessStatus, Prisma, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
@@ -123,6 +123,38 @@ describe('statistics.service (integration, real PG)', () => {
 
     return { project, leafA, leafB };
   }
+
+  // ---------------- crossProjectStatistics:年度口径 ----------------
+
+  it('crossProjectStatistics: 年度视图预算取年度预算——只编总预算未编年度的项目贡献 0', async () => {
+    // A:完整编制(2026 年度 1000);B:仅项目总预算 780 万,无任何年度/科目预算。
+    const { project: pa } = await seedApprovedProject('XANNUAL');
+    const projectB = await createProject(
+      { code: `STAT-XTOTAL-${uuidv7().slice(0, 8)}`, name: 'stat xtotal' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(projectB.id);
+    await prisma.projectBudget.updateMany({
+      where: { projectId: projectB.id },
+      data: {
+        initialAmount: new Prisma.Decimal('7800000'),
+        currentAmount: new Prisma.Decimal('7800000'),
+      },
+    });
+
+    // 年度视图:预算 = 年度预算;B 未编年度 → 0。
+    const { projects } = await crossProjectStatistics({ year: 2026 }, adminUser());
+    const rowA = projects.find((r) => r.projectId === pa.id)!;
+    const rowB = projects.find((r) => r.projectId === projectB.id)!;
+    expect(rowA.currentBudget).toBe('1000.00');
+    expect(rowB.currentBudget).toBe('0.00');
+    expect(rowB.totalOccupied).toBe('0.00');
+
+    // 未指定年度:仍为项目层总预算口径,B 显示 7800000。
+    const all = await crossProjectStatistics({}, adminUser());
+    const rowBAll = all.projects.find((r) => r.projectId === projectB.id)!;
+    expect(rowBAll.currentBudget).toBe('7800000.00');
+  });
 
   // ---------------- customStatistics(§11.3) ----------------
 

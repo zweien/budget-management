@@ -289,8 +289,15 @@ export async function crossProjectStatistics(
   const projectIds = projects.map((p) => p.id);
 
   // 2) 一次性查预算 + 记录,再按项目分组,避免 N+1。
-  const [projectBudgets, records] = await Promise.all([
+  // 指定年度时同时取年度预算:年度视图的预算口径 = Σ 年度预算(§codex 修复)——
+  // 只编项目总预算、未编年度预算的项目在该年贡献 0 预算,与年度口径的占用一致。
+  const [projectBudgets, annualBudgets, records] = await Promise.all([
     prisma.projectBudget.findMany({ where: { projectId: { in: projectIds } } }),
+    filters.year !== undefined
+      ? prisma.annualBudget.findMany({
+          where: { projectId: { in: projectIds }, year: filters.year },
+        })
+      : Promise.resolve([]),
     prisma.businessRecord.findMany({
       where: {
         projectId: { in: projectIds },
@@ -301,6 +308,7 @@ export async function crossProjectStatistics(
   ]);
 
   const budgetByProject = new Map(projectBudgets.map((pb) => [pb.projectId, pb]));
+  const annualByProject = new Map(annualBudgets.map((ab) => [ab.projectId, ab]));
   const recordsByProject = new Map<string, typeof records>();
   for (const r of records) {
     const list = recordsByProject.get(r.projectId) ?? [];
@@ -308,10 +316,19 @@ export async function crossProjectStatistics(
     recordsByProject.set(r.projectId, list);
   }
 
-  // 3) 逐项目计算。
+  // 3) 逐项目计算。预算口径:指定年度 → 该年度预算(未编年度的项目为 0);
+  //    未指定年度 → 项目层当前总预算(§11.5)。
   const rows: CrossProjectStatisticsRow[] = projects.map((p) => {
     const pb = budgetByProject.get(p.id);
-    const currentBudget: D = pb ? fromStored(pb.currentAmount) : ZERO;
+    const ab = annualByProject.get(p.id);
+    const currentBudget: D =
+      filters.year !== undefined
+        ? ab
+          ? fromStored(ab.currentAmount)
+          : ZERO
+        : pb
+          ? fromStored(pb.currentAmount)
+          : ZERO;
     const occ = computeOccupancy({
       records: (recordsByProject.get(p.id) ?? []).map((r) => ({
         amount: r.amount,
