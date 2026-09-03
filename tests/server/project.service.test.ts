@@ -412,4 +412,61 @@ describe('project.service (integration, real PG)', () => {
     expect(cleared.startDate).toBeNull();
     expect(cleared.endDate).toBeNull();
   });
+
+  it('createProject:不存在的日历日期(2024-02-30)→ 422,而非静默归一化为 03-01(codex P2)', async () => {
+    await expect(
+      createProject(
+        { code: `PD-${uuidv7().slice(0, 8)}`, name: '假日期', startDate: '2024-02-30' },
+        { id: adminId, role: UserRole.ADMIN },
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('开始日期格式无效'),
+    });
+  });
+
+  it('createProject/updateProject:结束早于开始 → 422(服务层强制,防 API 绕过表单)', async () => {
+    // create:两边界同时给出。
+    await expect(
+      createProject(
+        {
+          code: `PD-${uuidv7().slice(0, 8)}`,
+          name: '顺序错',
+          startDate: '2026-12-31',
+          endDate: '2026-01-01',
+        },
+        { id: adminId, role: UserRole.ADMIN },
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('结束日期不能早于开始日期'),
+    });
+
+    // create:无日期 → 不触发顺序校验(都可选)。
+    const project = await createProject(
+      { code: `PD-${uuidv7().slice(0, 8)}`, name: '无日期' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    // update:只改开始日期,与库中已有结束日期合并后无效 → 422。
+    await updateProject(
+      project.id,
+      { endDate: '2026-06-30' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    await expect(
+      updateProject(project.id, { startDate: '2026-12-31' }, { id: adminId, role: UserRole.ADMIN }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('结束日期不能早于开始日期'),
+    });
+
+    // 合法对可正常更新。
+    await updateProject(
+      project.id,
+      { startDate: '2026-01-01' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+  });
 });
