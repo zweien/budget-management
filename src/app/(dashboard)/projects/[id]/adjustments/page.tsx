@@ -148,6 +148,8 @@ const genKey = () => `line-${++keySeq}`;
 
 /** 新增科目 Select 哨兵值。 */
 const NEW_SUBJECT = '__NEW__';
+/** 新增科目父节点哨兵:作为一级科目(顶层,无父节点)。 */
+const NEW_ROOT = '__NEW_ROOT__';
 
 function yearOptions(): number[] {
   const now = new Date().getFullYear();
@@ -201,7 +203,7 @@ export default function AdjustmentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [baselineLoading, setBaselineLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  // 科目全树(用于新增科目的父节点下拉,只取非叶)。
+  // 科目全树(用于新增科目的父节点下拉:非叶 + 无预算叶)。
   const [subjectTree, setSubjectTree] = useState<SubjectNode[]>([]);
   // 调整原因:原生受控 textarea(React 受控原生元素无中文输入法问题,
   // 历史问题源于 antd TextArea 的内部重格式化)。
@@ -310,19 +312,21 @@ export default function AdjustmentsPage() {
     }
   };
 
-  /** 父节点候选:非叶科目,带层级缩进显示。 */
-  const parentOptions = useMemo(
-    () =>
-      // 防御:level 异常(如历史 PATCH 写坏的 0)时不崩页,repeat 负数会抛 RangeError。
-      subjectTree
-        .filter((s) => !s.isLeaf)
+  /** 父节点候选:一级科目哨兵 + 全部非叶科目 + 无预算的叶科目(挂上子科目后即转为非叶;
+   *  已有预算的叶科目被服务端拒绝,其预算基数即明细行科目候选)。 */
+  const parentOptions = useMemo(() => {
+    const budgeted = new Set(baseline.map((s) => s.subjectId));
+    return [
+      { value: NEW_ROOT, label: '★ 作为一级科目(顶层)', keywords: '一级 顶层 根' },
+      ...subjectTree
+        .filter((s) => !s.isLeaf || !budgeted.has(s.id))
         .map((s) => ({
           value: s.id,
           label: `${'　'.repeat(Math.max(0, s.level - 1))}${s.name}`,
           keywords: s.name,
         })),
-    [subjectTree],
-  );
+    ];
+  }, [subjectTree, baseline]);
 
   /** 明细行科目候选:叶科目(名称/编号可搜)+ 新增科目哨兵项。 */
   const subjectPickOptions = useMemo(
@@ -402,7 +406,8 @@ export default function AdjustmentsPage() {
   const buildPayload = (
     requireBalance: boolean,
   ): { ok: boolean; payload?: unknown; error?: string } => {
-    // 有效行:现有科目(subjectId)或新增科目(isNew 且 newName+newParentId 齐备)。
+    // 有效行:现有科目(subjectId)或新增科目(isNew 且 newName 填写;
+    // newParentId 可缺省 = 作为一级科目,NEW_ROOT 哨兵)。
     const valid = formLines.filter(
       (l) => l.subjectId || (l.isNew && l.newName.trim() && l.newParentId),
     );
@@ -463,7 +468,7 @@ export default function AdjustmentsPage() {
           ? {
               subjectId: null,
               newSubjectName: l.newName.trim(),
-              newSubjectParentId: l.newParentId,
+              newSubjectParentId: l.newParentId === NEW_ROOT ? null : l.newParentId,
             }
           : { subjectId: l.subjectId }),
       }));
@@ -509,7 +514,7 @@ export default function AdjustmentsPage() {
           ...base,
           subjectId: null,
           newSubjectName: l.newName.trim(),
-          newSubjectParentId: l.newParentId,
+          newSubjectParentId: l.newParentId === NEW_ROOT ? null : l.newParentId,
         };
       }
       return { ...base, subjectId: l.subjectId };
@@ -963,9 +968,9 @@ export default function AdjustmentsPage() {
                           options={parentOptions}
                           value={r.newParentId ?? undefined}
                           onChange={(v) => updateLine(r.key, { newParentId: v })}
-                          placeholder="选择父节点(非叶)"
+                          placeholder="选择父节点"
                           searchPlaceholder="输入名称筛选…"
-                          emptyText="无非叶科目"
+                          emptyText="无可选父节点"
                         />
                       </div>
                     ) : (

@@ -31,7 +31,7 @@ import { buildBaselineAmounts } from '@/server/services/adjustmentBaseline.servi
 export interface AdjustmentLineInput {
   // 引用现有科目;新增科目时省略(填 newSubjectName/newSubjectParentId)。
   subjectId?: string | null;
-  // 新增科目(仅 subjectId 为空时):名称 + 父节点(非叶科目 id)。
+  // 新增科目(仅 subjectId 为空时):名称 + 父节点(可省略 = 一级科目;无预算的叶节点亦可挂子科目)。
   newSubjectName?: string | null;
   newSubjectParentId?: string | null;
   // ALLOCATE 模式下必须为 0(或省略,按 0 处理)。
@@ -123,19 +123,37 @@ async function requireLeafSubject(
   return subject;
 }
 
-/** 校验新增科目:父节点存在且为非叶;名称项目内不重名。 */
+/**
+ * 校验新增科目:父节点存在;名称项目内不重名。
+ * 父节点(codex 放宽):**无预算的叶节点亦可挂子科目**——挂上后该节点转为非叶,
+ * 预算由子科目汇总;已有预算(年度科目预算或科目总预算)的叶节点仍拒绝,
+ * 否则其原有预算会因转为非叶而从汇总中消失,须先走拆分流程。
+ */
 async function validateNewSubject(
   tx: Prisma.TransactionClient | typeof prisma,
   projectId: string,
   name: string,
-  parentId: string,
+  parentId: string | null,
 ): Promise<void> {
-  const parent = await tx.budgetSubject.findUnique({ where: { id: parentId } });
-  if (!parent || parent.projectId !== projectId) {
-    throw new HTTPError(422, `新增科目的父节点 ${parentId} 不属于该项目`);
+  let parent: { name: string; isLeaf: boolean } | null = null;
+  if (parentId) {
+    const found = await tx.budgetSubject.findUnique({ where: { id: parentId } });
+    if (!found || found.projectId !== projectId) {
+      throw new HTTPError(422, `新增科目的父节点 ${parentId} 不属于该项目`);
+    }
+    parent = { name: found.name, isLeaf: found.isLeaf };
   }
-  if (parent.isLeaf) {
-    throw new HTTPError(422, `新增科目必须挂在非叶节点下,${parent.name} 是叶节点`);
+  if (parent?.isLeaf && parentId) {
+    const [hasAnnual, hasTotal] = await Promise.all([
+      tx.subjectBudget.count({ where: { subjectId: parentId } }),
+      tx.subjectTotalBudget.count({ where: { subjectId: parentId } }),
+    ]);
+    if (hasAnnual > 0 || hasTotal > 0) {
+      throw new HTTPError(
+        422,
+        `新增科目必须挂在无预算的节点下,${parent.name} 已有预算;如需拆分请先调整其预算结构`,
+      );
+    }
   }
   const dup = await tx.budgetSubject.findFirst({
     where: { projectId, name },
@@ -165,11 +183,11 @@ function validateAndParseLines(payload: AdjustmentPayload): ParsedLine[] {
     const subjectId = line.subjectId?.trim() || null;
     const newName = line.newSubjectName?.trim() || null;
     const newParentId = line.newSubjectParentId?.trim() || null;
-    // 二选一:要么引用现有科目,要么新增科目(name+parentId 齐备)。
+    // 二选一:要么引用现有科目,要么新增科目(名称必填;父节点可省略 = 一级科目)。
     const isExisting = !!subjectId;
-    const isNew = !!newName && !!newParentId;
+    const isNew = !!newName;
     if (!isExisting && !isNew) {
-      throw new HTTPError(422, `第 ${i + 1} 行需选择现有科目,或填写新增科目名称与父节点`);
+      throw new HTTPError(422, `第 ${i + 1} 行需选择现有科目,或填写新增科目名称`);
     }
     if (isExisting && isNew) {
       throw new HTTPError(422, `第 ${i + 1} 行不能同时指定现有科目和新增科目`);
@@ -1141,23 +1159,33 @@ export async function approveAdjustment(
       for (const line of parsedLines) {
         if (line.subjectId) continue;
         await validateNewSubject(tx, adj.projectId, line.newSubjectName!, line.newSubjectParentId!);
-        const parent = await tx.budgetSubject.findUnique({
-          where: { id: line.newSubjectParentId! },
-          select: { level: true },
-        });
+        const newParentId = line.newSubjectParentId;
+        const parent = newParentId
+          ? await tx.budgetSubject.findUnique({
+              where: { id: newParentId },
+              select: { level: true },
+            })
+          : null;
         const newSubjectId = uuidv7();
         await tx.budgetSubject.create({
           data: {
             id: newSubjectId,
             projectId: adj.projectId,
-            parentId: line.newSubjectParentId,
+            parentId: newParentId, // null = 一级科目
             code: uuidv7(),
             name: line.newSubjectName!,
-            level: (parent?.level ?? 1) + 1,
+            level: (parent?.level ?? 0) + 1,
             isLeaf: true,
             sortOrder: nextSort++,
           },
         });
+        // 叶父节点挂上首个子科目后转为非叶(预算由子科目汇总;无预算叶已过校验)。
+        if (newParentId) {
+          await tx.budgetSubject.update({
+            where: { id: newParentId },
+            data: { isLeaf: false },
+          });
+        }
         // 该年 SubjectBudget:全部计入 adjustmentAmount(initial 保持 0,与调剂口径一致)。
         await tx.subjectBudget.create({
           data: {
@@ -1360,25 +1388,32 @@ export async function approveAdjustment(
     let nextSort = (maxSortOrder._max.sortOrder ?? -1) + 1;
     for (const line of parsedLines) {
       if (line.subjectId) continue;
-      // 校验父节点(非叶)+ 重名(草稿后可能已被改)。
+      // 校验父节点(无预算叶亦可)+ 重名(草稿后可能已被改)。
       await validateNewSubject(tx, adj.projectId, line.newSubjectName!, line.newSubjectParentId!);
-      const parent = await tx.budgetSubject.findUnique({
-        where: { id: line.newSubjectParentId! },
-        select: { level: true },
-      });
+      const newParentId = line.newSubjectParentId;
+      const parent = newParentId
+        ? await tx.budgetSubject.findUnique({ where: { id: newParentId }, select: { level: true } })
+        : null;
       const newSubjectId = uuidv7();
       await tx.budgetSubject.create({
         data: {
           id: newSubjectId,
           projectId: adj.projectId,
-          parentId: line.newSubjectParentId,
+          parentId: newParentId, // null = 一级科目
           code: uuidv7(), // 项目内唯一(用 uuid 兜底)
           name: line.newSubjectName!,
-          level: (parent?.level ?? 1) + 1,
+          level: (parent?.level ?? 0) + 1,
           isLeaf: true,
           sortOrder: nextSort++,
         },
       });
+      // 叶父节点挂上首个子科目后转为非叶(预算由子科目汇总;无预算叶已过校验)。
+      if (newParentId) {
+        await tx.budgetSubject.update({
+          where: { id: newParentId },
+          data: { isLeaf: false },
+        });
+      }
       // 初始化该年度 SubjectBudget(initial=0,current=0)。
       await tx.subjectBudget.create({
         data: {
