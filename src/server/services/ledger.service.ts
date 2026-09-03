@@ -37,6 +37,188 @@ export interface ProjectLedger {
   nodes: LedgerNode[];
 }
 
+export interface ProjectTotalLedger {
+  nodes: LedgerNode[];
+}
+
+/**
+ * §总预算台账(跨年度口径):预算 = 科目总预算(SubjectTotalBudget;包干制回退为
+ * 该科目各年度 SubjectBudget 之和),占用 = 全部年度非作废业务记录;
+ * 结余 = 总预算·当前 − 总占用;执行率 = 总占用 ÷ 总预算·当前(0 → null)。
+ * 年度维度列(initial/adjustment/current)恒 0——总口径下无年度维度,前端整组隐藏。
+ */
+export async function getProjectTotalLedger(
+  projectId: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<ProjectTotalLedger> {
+  await requirePermission(user, 'project:view', projectId);
+
+  const [project, subjects, subjectTotalBudgets, subjectBudgets, records] = await Promise.all([
+    prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
+    prisma.budgetSubject.findMany({
+      where: { projectId },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+    }),
+    prisma.subjectTotalBudget.findMany({ where: { projectId } }),
+    // 全年度科目预算:包干制的科目总口径 = Σ 各年度(Q6a,与结余统计同口径)。
+    prisma.subjectBudget.findMany({ where: { projectId } }),
+    prisma.businessRecord.findMany({ where: { projectId, isVoid: false } }),
+  ]);
+
+  const lumpSum = project?.budgetMode === 'LUMP_SUM';
+  const totalBudgetBySubject = new Map(subjectTotalBudgets.map((stb) => [stb.subjectId, stb]));
+  const lumpSumSumsBySubject = new Map<string, { initial: D; adjustment: D; current: D }>();
+  if (lumpSum) {
+    for (const sb of subjectBudgets) {
+      const acc = lumpSumSumsBySubject.get(sb.subjectId) ?? {
+        initial: ZERO,
+        adjustment: ZERO,
+        current: ZERO,
+      };
+      acc.initial = acc.initial.plus(fromStored(sb.initialAmount));
+      acc.adjustment = acc.adjustment.plus(fromStored(sb.adjustmentAmount));
+      acc.current = acc.current.plus(fromStored(sb.currentAmount));
+      lumpSumSumsBySubject.set(sb.subjectId, acc);
+    }
+  }
+  const recordsBySubject = new Map<string, typeof records>();
+  for (const r of records) {
+    const list = recordsBySubject.get(r.subjectId) ?? [];
+    list.push(r);
+    recordsBySubject.set(r.subjectId, list);
+  }
+
+  type TotalAgg = {
+    subjectId: string;
+    code: string;
+    name: string;
+    isLeaf: boolean;
+    level: number;
+    parentId: string | null;
+    totalInitial: D;
+    totalAdjustment: D;
+    totalCurrent: D;
+    paid: D;
+    payable: D;
+    totalOccupied: D;
+  };
+
+  const aggById = new Map<string, TotalAgg>();
+  for (const s of subjects) {
+    const base = {
+      subjectId: s.id,
+      code: s.code,
+      name: s.name,
+      isLeaf: s.isLeaf,
+      level: s.level,
+      parentId: s.parentId,
+      totalInitial: ZERO,
+      totalAdjustment: ZERO,
+      totalCurrent: ZERO,
+      paid: ZERO,
+      payable: ZERO,
+      totalOccupied: ZERO,
+    };
+    if (!s.isLeaf) {
+      aggById.set(s.id, base);
+      continue;
+    }
+    // 科目总预算三维度:一般项目取 SubjectTotalBudget;包干制回退 Σ 各年度。
+    let totalInitial: D;
+    let totalAdjustment: D;
+    let totalCurrent: D;
+    if (lumpSum) {
+      const sums = lumpSumSumsBySubject.get(s.id);
+      totalInitial = sums?.initial ?? ZERO;
+      totalAdjustment = sums?.adjustment ?? ZERO;
+      totalCurrent = sums?.current ?? ZERO;
+    } else {
+      const stb = totalBudgetBySubject.get(s.id);
+      totalInitial = stb ? fromStored(stb.initialAmount) : ZERO;
+      totalAdjustment = stb ? fromStored(stb.adjustmentAmount) : ZERO;
+      totalCurrent = stb ? fromStored(stb.currentAmount) : ZERO;
+    }
+    const occ = computeOccupancy({
+      records: (recordsBySubject.get(s.id) ?? []).map((r) => ({
+        amount: r.amount,
+        status: r.status,
+        isVoid: r.isVoid,
+      })),
+    });
+    aggById.set(s.id, {
+      ...base,
+      totalInitial,
+      totalAdjustment,
+      totalCurrent,
+      paid: occ.paid,
+      payable: occ.payable,
+      totalOccupied: occ.totalOccupied,
+    });
+  }
+
+  // 上卷:非叶节点 = 全部叶后代之和,自底向上递归。
+  const rollup = (
+    nodeId: string,
+  ): Omit<TotalAgg, 'subjectId' | 'code' | 'name' | 'isLeaf' | 'level' | 'parentId'> => {
+    const node = aggById.get(nodeId);
+    if (!node) {
+      return {
+        totalInitial: ZERO,
+        totalAdjustment: ZERO,
+        totalCurrent: ZERO,
+        paid: ZERO,
+        payable: ZERO,
+        totalOccupied: ZERO,
+      };
+    }
+    if (node.isLeaf) {
+      return node;
+    }
+    const children = subjects.filter((s) => s.parentId === nodeId);
+    if (children.length === 0) {
+      return node;
+    }
+    const childResults = children.map((c) => rollup(c.id));
+    node.totalInitial = sumAmounts(childResults.map((c) => c.totalInitial));
+    node.totalAdjustment = sumAmounts(childResults.map((c) => c.totalAdjustment));
+    node.totalCurrent = sumAmounts(childResults.map((c) => c.totalCurrent));
+    node.paid = sumAmounts(childResults.map((c) => c.paid));
+    node.payable = sumAmounts(childResults.map((c) => c.payable));
+    node.totalOccupied = sumAmounts(childResults.map((c) => c.totalOccupied));
+    return node;
+  };
+  for (const s of subjects) {
+    if (s.parentId === null) rollup(s.id);
+  }
+
+  const nodes: LedgerNode[] = subjects.map((s) => {
+    const a = aggById.get(s.id)!;
+    const balance = a.totalCurrent.minus(a.totalOccupied);
+    return {
+      subjectId: a.subjectId,
+      code: a.code,
+      name: a.name,
+      isLeaf: a.isLeaf,
+      level: a.level,
+      parentId: a.parentId,
+      totalInitial: a.totalInitial.toFixed(2),
+      totalAdjustment: a.totalAdjustment.toFixed(2),
+      totalCurrent: a.totalCurrent.toFixed(2),
+      // 总口径下无年度维度,恒 0(前端整组隐藏)。
+      initial: ZERO.toFixed(2),
+      adjustment: ZERO.toFixed(2),
+      current: ZERO.toFixed(2),
+      paid: a.paid.toFixed(2),
+      payable: a.payable.toFixed(2),
+      totalOccupied: a.totalOccupied.toFixed(2),
+      balance: balance.toFixed(2),
+      executionRate: executionRate(a.totalOccupied, a.totalCurrent),
+    };
+  });
+
+  return { nodes };
+}
+
 /**
  * §11.1 取项目某年度的预算执行台账。
  * - 权限:project:view + 项目范围。

@@ -65,6 +65,16 @@ interface Props {
    * 隐藏列不出单元格;折叠/展开不影响结果。
    */
   showLevel1Total?: boolean;
+  /**
+   * 年度注记(可选):执行列(已支出/应付未付/总占用/结余/执行率)表头追加
+   * 「(YYYY)」——台账页按年度筛选,表头标明数字属于哪一年。
+   */
+  yearLabel?: number;
+  /**
+   * 总预算台账视图(可选):隐藏「年度」预算列组(跨年度口径下无年度维度),
+   * 合计行执行率分母改用总预算·当前(current → totalCurrent)。
+   */
+  hideAnnualColumns?: boolean;
 }
 
 /** 金额 → 千分位两位小数字符串(仅展示,不做风险色)。 */
@@ -135,12 +145,19 @@ const MONEY_COLUMN_IDS = [
  *        总占用 / 结余 / 执行率。金额列右对齐两位小数;结余负数走 MoneyText 风险色。
  * 顶部「列设置」控制各金额列显隐(科目列固定)。
  */
-export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) {
+export function BudgetTreeTable({
+  nodes,
+  subjectHref,
+  showLevel1Total,
+  yearLabel,
+  hideAnnualColumns = false,
+}: Props) {
   const treeData = useMemo(() => buildTree(nodes), [nodes]);
 
   /**
    * §主要汇总行:一级科目(parentId 为空)各列之和 = 全体叶科目之和。
-   * 执行率按加权计算(Σ 总占用 ÷ Σ 年度当前预算),与行级口径一致(current=0 → null)。
+   * 执行率按加权计算:年度视图分母 = Σ 年度当前预算;总预算视图分母 = Σ 总预算·当前
+   * (结余口径随之对应)。current=0 → null。
    */
   const level1Total = useMemo(() => {
     const num = (v: string) => {
@@ -149,17 +166,17 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
     };
     const sums = new Map<string, number>(MONEY_COLUMN_IDS.map((id) => [id, 0]));
     let occupied = 0;
-    let current = 0;
+    let denominator = 0;
     for (const n of nodes) {
       if (n.parentId !== null) continue;
       for (const id of MONEY_COLUMN_IDS) {
         sums.set(id, (sums.get(id) ?? 0) + num(String(n[id])));
       }
       occupied += num(n.totalOccupied);
-      current += num(n.current);
+      denominator += num(hideAnnualColumns ? n.totalCurrent : n.current);
     }
-    return { sums, rate: current > 0 ? occupied / current : null };
-  }, [nodes]);
+    return { sums, rate: denominator > 0 ? occupied / denominator : null };
+  }, [nodes, hideAnnualColumns]);
 
   // 列显隐(TanStack columnVisibility);科目列固定不参与。
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
@@ -194,7 +211,10 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
       ),
     });
 
-    return [
+    // §年度注记:执行列表头追加 (YYYY),标明数字属于筛选的年度。
+    const ys = yearLabel === undefined ? '' : `(${yearLabel})`;
+
+    const cols: ColumnDef<TreeNode>[] = [
       {
         id: 'subject',
         accessorKey: 'name',
@@ -244,16 +264,21 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
       moneyCol('totalInitial', '总预算·原始', 'totalInitial'),
       moneyCol('totalAdjustment', '总预算·调整', 'totalAdjustment'),
       moneyCol('totalCurrent', '总预算·当前', 'totalCurrent'),
-      moneyCol('initial', '年度·原始', 'initial'),
-      moneyCol('adjustment', '年度·调整', 'adjustment'),
-      moneyCol('current', '年度·当前', 'current'),
-      moneyCol('paid', '已支出', 'paid'),
-      moneyCol('payable', '应付未付', 'payable'),
-      moneyCol('totalOccupied', '总占用', 'totalOccupied'),
+      // §总预算视图:跨年度口径无年度维度,整组隐藏(hideAnnualColumns)。
+      ...(hideAnnualColumns
+        ? []
+        : [
+            moneyCol('initial', '年度·原始', 'initial'),
+            moneyCol('adjustment', '年度·调整', 'adjustment'),
+            moneyCol('current', '年度·当前', 'current'),
+          ]),
+      moneyCol('paid', `已支出${ys}`, 'paid'),
+      moneyCol('payable', `应付未付${ys}`, 'payable'),
+      moneyCol('totalOccupied', `总占用${ys}`, 'totalOccupied'),
       {
         id: 'balance',
         accessorKey: 'balance',
-        header: () => <span className="block text-right">结余</span>,
+        header: () => <span className="block text-right">结余{ys}</span>,
         footer: showLevel1Total
           ? () => (
               <span className="block text-right">
@@ -267,7 +292,7 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
       {
         id: 'executionRate',
         accessorKey: 'executionRate',
-        header: () => <span className="block text-right">执行率</span>,
+        header: () => <span className="block text-right">执行率{ys}</span>,
         footer: showLevel1Total
           ? () => (
               <span className="block text-right tabular-nums">{formatRate(level1Total.rate)}</span>
@@ -280,7 +305,8 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
         ),
       },
     ];
-  }, [subjectHref, showLevel1Total, level1Total]);
+    return cols;
+  }, [subjectHref, showLevel1Total, level1Total, yearLabel, hideAnnualColumns]);
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -295,7 +321,9 @@ export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) 
     getExpandedRowModel: getExpandedRowModel(),
   });
 
-  const groups: ('总预算' | '年度' | '执行')[] = ['总预算', '年度', '执行'];
+  const groups: ('总预算' | '年度' | '执行')[] = hideAnnualColumns
+    ? ['总预算', '执行']
+    : ['总预算', '年度', '执行'];
 
   return (
     <div className="space-y-2">
