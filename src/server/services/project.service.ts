@@ -51,6 +51,11 @@ export function normalizeBudgetMode(value: unknown): 'GENERAL' | 'LUMP_SUM' {
  * §切变锁定(Q1b/Q8b):预算类型仅「完全空白」的项目可切换——
  * 无任何编制申请(含草稿)、无业务记录、无调整单、无到账登记。
  * 编制草稿已落库科目/年度预算数据,清理逻辑易出暗坑,草稿阶段即锁定。
+ *
+ * 序列化契约(§codex P2 review):本检查必须在**锁住项目行的事务内**执行;
+ * 创建入口 initialBudget.createDraft / adjustment.createAdjustment /
+ * receipt.createReceipt 的事务同样先锁项目行,与之串行化。业务记录/导入
+ * 依赖叶科目外键 → 传递性依赖已提交的编制草稿(持锁),无需自带锁。
  */
 async function assertProjectBlankForModeSwitch(
   db: Prisma.TransactionClient | typeof prisma,
@@ -335,18 +340,25 @@ export async function updateProject(
   if (input.projectType !== undefined) data.projectType = input.projectType;
   if (input.budgetMode !== undefined) {
     const mode = normalizeBudgetMode(input.budgetMode);
-    // §切变锁定:仅在类型真的变化时校验空白,避免普通编辑被误拦。
+    // §切变锁定:仅在类型真的变化时校验空白,避免普通编辑被误拦(检查在下方事务内做)。
     if (mode !== before.budgetMode) {
-      await assertProjectBlankForModeSwitch(prisma, id);
+      data.budgetMode = mode;
     }
-    data.budgetMode = mode;
   }
   if (input.undertakingUnit !== undefined) data.undertakingUnit = input.undertakingUnit;
   if (input.startDate !== undefined) data.startDate = startDate;
   if (input.endDate !== undefined) data.endDate = endDate;
   if (input.remark !== undefined) data.remark = input.remark;
+  const switchingMode = data.budgetMode !== undefined;
 
   return prisma.$transaction(async (tx) => {
+    if (switchingMode) {
+      // §codex P2 review:切换先锁项目行再查空白——与持同一把锁的创建入口
+      // (编制草稿/调整单/业务记录/到账)串行化,杜绝「切换读到空项目 →
+      // 并发创建提交 → 切换后项目非空」的竞态窗口。
+      await tx.$queryRaw`SELECT id FROM projects WHERE id = ${id}::uuid FOR UPDATE`;
+      await assertProjectBlankForModeSwitch(tx, id);
+    }
     const after = await tx.project.update({ where: { id }, data });
     await recordAudit(tx, {
       projectId: id,

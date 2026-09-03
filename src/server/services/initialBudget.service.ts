@@ -335,6 +335,18 @@ export async function createDraft(
 
   try {
     await prisma.$transaction(async (tx) => {
+      // §codex P2 review:锁项目行,与「预算类型切换」串行化;锁内重读模式并
+      // 复跑校验——防事务外读到的模式在提交前被并发切换翻转(如 GENERAL 下
+      // 读到模式、LUMP_SUM 下落库,留下孤儿科目总预算行)。
+      await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId}::uuid FOR UPDATE`;
+      const freshMode = (
+        await tx.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } })
+      )?.budgetMode;
+      const txLumpSum = freshMode === 'LUMP_SUM';
+      if (txLumpSum !== lumpSum) {
+        validatePayload(payload, { lumpSum: txLumpSum });
+      }
+
       await tx.initialBudgetApplication.create({
         data: {
           id: appId,
@@ -437,7 +449,8 @@ export async function createDraft(
       // 审批生效才置位)。仅对声明了总预算的叶科目落库,一行一科目。
       // 缺省视为空数组(前端页面过渡期兼容)。
       // §包干制:不落库(LUMP_SUM 项目没有科目总预算层,即使 payload 误带也被忽略)。
-      for (const st of lumpSum ? [] : (payload.subjectTotalBudgets ?? [])) {
+      // 以锁内重读的模式为准(txLumpSum),而非事务外的快照。
+      for (const st of txLumpSum ? [] : (payload.subjectTotalBudgets ?? [])) {
         const subjectId = codeToId.get(st.subjectCode);
         if (!subjectId) {
           throw new HTTPError(422, `科目 ${st.subjectCode} 不存在`);

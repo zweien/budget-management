@@ -370,5 +370,27 @@ describe('lumpSum 预算类型(§包干制, integration, real PG)', () => {
       status: 422,
       message: expect.stringContaining('超出项目未分配额度'),
     });
+
+    // §codex P1:纯新增科目行同样占项目池——池只剩 100,新增科目 200 → 422。
+    const allNew = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            newSubjectName: `池外新增${uuidv7().slice(-4)}`,
+            newSubjectParentId: null,
+            totalAdjustment: '0',
+            annualAdjustment: '200.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await expect(submitAdjustment(allNew.id, adminUser())).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('超出项目未分配额度'),
+    });
   });
 });

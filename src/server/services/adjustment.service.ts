@@ -385,8 +385,10 @@ async function assertAllocateCapacity(
   }
 
   if (lumpSum) {
-    if (allocatedBySubject.size === 0) return;
-    const requestTotal = sumAmounts([...allocatedBySubject.values()]);
+    // §codex P1:新增科目行(subjectId 为空)同样占项目池——下达总额按**全部行**的
+    // annual 求和(ALLOCATE 语义下 annual 均 ≥ 0),否则纯新增科目单会绕过容量校验。
+    if (parsedLines.length === 0) return;
+    const requestTotal = sumAmounts(parsedLines.map((l) => l.annual));
     const projectBudget = await tx.projectBudget.findUnique({ where: { projectId } });
     if (!projectBudget) {
       throw new HTTPError(422, '项目总预算不存在,请先完成初始预算编制并审批');
@@ -482,6 +484,11 @@ export async function createAdjustment(
   const expandTotals = kind === 'ALLOCATE' && payload.expandTotals === true;
 
   return prisma.$transaction(async (tx) => {
+    // §codex P2 review:锁项目行,与「预算类型切换」串行化;锁内复跑包干制
+    // 总维度拒绝校验——防事务外读到的模式在提交前被并发切换翻转。
+    await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId}::uuid FOR UPDATE`;
+    await assertAnnualOnlyForLumpSum(tx, projectId, parsedLines);
+
     const created = await tx.budgetAdjustment.create({
       data: {
         id,
