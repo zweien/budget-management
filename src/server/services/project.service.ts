@@ -18,8 +18,9 @@ export interface CreateProjectInput {
   level?: string | null;
   projectType?: string | null;
   undertakingUnit?: string | null;
-  startDate?: Date | null;
-  endDate?: Date | null;
+  /** 前端传 YYYY-MM-DD 日期串;服务端规范化为 Date(非法格式 422)。 */
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
   remark?: string | null;
 }
 
@@ -29,9 +30,45 @@ export interface UpdateProjectInput {
   level?: string | null;
   projectType?: string | null;
   undertakingUnit?: string | null;
-  startDate?: Date | null;
-  endDate?: Date | null;
+  /** 前端传 YYYY-MM-DD 日期串;服务端规范化为 Date(非法格式 422)。 */
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
   remark?: string | null;
+}
+
+/**
+ * 起止日期入参规范化(§codex 修复):前端传 YYYY-MM-DD 日期串,而 Prisma 的
+ * DateTime(@db.Date)要求完整 Date/ISO 值——裸日期串会导致 500。
+ * 接受 Date / YYYY-MM-DD;非法格式返回 422(而非 Prisma 错误)。
+ * 日历有效性回验(codex P2):JS 会把 2024-02-30 归一化为 03-01,
+ * 构造结果须与分量一致才算合法日期,否则 422。
+ */
+function normalizeDateInput(value: Date | string | null | undefined, label: string): Date | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === 'string') {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (m) {
+      const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+      const dt = new Date(Date.UTC(y, mo - 1, d));
+      if (
+        !Number.isNaN(dt.getTime()) &&
+        dt.getUTCFullYear() === y &&
+        dt.getUTCMonth() === mo - 1 &&
+        dt.getUTCDate() === d
+      ) {
+        return dt;
+      }
+    }
+  }
+  throw new HTTPError(422, `${label}格式无效(应为合法日历日期 YYYY-MM-DD)`);
+}
+
+/** 起止顺序校验(两者都填时):结束不得早于开始(服务层强制,防 API 直调绕过表单)。 */
+function assertDateOrder(startDate: Date | null, endDate: Date | null): void {
+  if (startDate && endDate && endDate < startDate) {
+    throw new HTTPError(422, '结束日期不能早于开始日期');
+  }
 }
 
 /**
@@ -46,6 +83,9 @@ export async function createProject(
   await requirePermission(user, 'project:create');
   const ownerId = input.ownerId ?? user.id;
   const projectId = uuidv7();
+  const startDate = normalizeDateInput(input.startDate, '开始日期');
+  const endDate = normalizeDateInput(input.endDate, '结束日期');
+  assertDateOrder(startDate, endDate);
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -57,8 +97,8 @@ export async function createProject(
           level: input.level ?? null,
           projectType: input.projectType ?? null,
           undertakingUnit: input.undertakingUnit ?? null,
-          startDate: input.startDate ?? null,
-          endDate: input.endDate ?? null,
+          startDate,
+          endDate,
           ownerId,
           remark: input.remark ?? null,
         },
@@ -245,13 +285,23 @@ export async function updateProject(
     throw new HTTPError(409, '项目已归档,请先恢复后再编辑');
   }
 
+  // 起止日期:规范化入参后按「生效后值」校验顺序(codex P2)——
+  // 只改一个边界时,另一个沿用库中原值,合并后的有效对仍须满足 结束 ≥ 开始。
+  const startDate =
+    input.startDate !== undefined
+      ? normalizeDateInput(input.startDate, '开始日期')
+      : before.startDate;
+  const endDate =
+    input.endDate !== undefined ? normalizeDateInput(input.endDate, '结束日期') : before.endDate;
+  assertDateOrder(startDate, endDate);
+
   const data: Prisma.ProjectUpdateInput = {};
   if (input.name !== undefined) data.name = input.name;
   if (input.level !== undefined) data.level = input.level;
   if (input.projectType !== undefined) data.projectType = input.projectType;
   if (input.undertakingUnit !== undefined) data.undertakingUnit = input.undertakingUnit;
-  if (input.startDate !== undefined) data.startDate = input.startDate;
-  if (input.endDate !== undefined) data.endDate = input.endDate;
+  if (input.startDate !== undefined) data.startDate = startDate;
+  if (input.endDate !== undefined) data.endDate = endDate;
   if (input.remark !== undefined) data.remark = input.remark;
 
   return prisma.$transaction(async (tx) => {
