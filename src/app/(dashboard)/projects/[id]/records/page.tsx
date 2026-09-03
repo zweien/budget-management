@@ -1047,8 +1047,10 @@ function BusinessRecordsPageInner() {
           </TableHeader>
           <TableBody>
             {/* §总计行:首行显示当前筛选结果的笔数与金额合计(作废不计);
-                用普通 tr 渲染在首行(浏览器把 tfoot 固定在底部),列序随可见列动态对齐。 */}
-            {!loadingRecords && totalValidCount > 0 ? (
+                用普通 tr 渲染在首行(浏览器把 tfoot 固定在底部),列序随可见列动态对齐。
+                门槛 = 筛选模型有行即可(§codex P2):全部为作废时也渲染
+                「总计 0 笔(作废不计)/ 0.00」,恰好在对全部行排除合计的时刻。 */}
+            {!loadingRecords && filteredRows.length > 0 ? (
               <TableRow className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40">
                 {table.getVisibleLeafColumns().map((col, idx) => (
                   <TableCell key={col.id} className="py-1.5">
