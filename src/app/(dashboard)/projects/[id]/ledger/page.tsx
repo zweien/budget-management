@@ -124,6 +124,7 @@ export default function ProjectLedgerPage() {
       ) : ledger && ledger.nodes.length > 0 ? (
         <BudgetTreeTable
           nodes={ledger.nodes}
+          showLevel1Total
           subjectHref={(n) =>
             // 业务记录只挂在叶科目上:仅叶科目可点,携带当前年度筛选跳转。
             n.isLeaf

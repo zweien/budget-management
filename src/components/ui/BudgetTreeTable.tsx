@@ -59,6 +59,12 @@ interface Props {
    * 返回 undefined 则纯文本。台账页用它把叶科目链到业务记录筛选视图。
    */
   subjectHref?: (node: LedgerNode) => string | undefined;
+  /**
+   * §主要汇总行(可选):表格底部「合计(一级科目汇总)」行——
+   * 各金额列 = 一级科目(parentId 为空)之和;执行率 = Σ 总占用 ÷ Σ 年度当前预算。
+   * 隐藏列不出单元格;折叠/展开不影响结果。
+   */
+  showLevel1Total?: boolean;
 }
 
 /** 金额 → 千分位两位小数字符串(仅展示,不做风险色)。 */
@@ -109,14 +115,51 @@ const TOGGLE_COLUMNS: { id: string; label: string; group: '总预算' | '年度'
   { id: 'executionRate', label: '执行率', group: '执行' },
 ];
 
+/** 参与列合计的金额字段(执行率不直接求和,按加权计算)。 */
+const MONEY_COLUMN_IDS = [
+  'totalInitial',
+  'totalAdjustment',
+  'totalCurrent',
+  'initial',
+  'adjustment',
+  'current',
+  'paid',
+  'payable',
+  'totalOccupied',
+  'balance',
+] as const;
+
 /**
  * §11.1 预算执行台账树形表(TanStack Table 重写)。
  * 列顺序:科目 / [总预算:原始/调整/当前] / [年度:原始/调整/当前] / 已支出 / 应付未付 /
  *        总占用 / 结余 / 执行率。金额列右对齐两位小数;结余负数走 MoneyText 风险色。
  * 顶部「列设置」控制各金额列显隐(科目列固定)。
  */
-export function BudgetTreeTable({ nodes, subjectHref }: Props) {
+export function BudgetTreeTable({ nodes, subjectHref, showLevel1Total }: Props) {
   const treeData = useMemo(() => buildTree(nodes), [nodes]);
+
+  /**
+   * §主要汇总行:一级科目(parentId 为空)各列之和 = 全体叶科目之和。
+   * 执行率按加权计算(Σ 总占用 ÷ Σ 年度当前预算),与行级口径一致(current=0 → null)。
+   */
+  const level1Total = useMemo(() => {
+    const num = (v: string) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const sums = new Map<string, number>(MONEY_COLUMN_IDS.map((id) => [id, 0]));
+    let occupied = 0;
+    let current = 0;
+    for (const n of nodes) {
+      if (n.parentId !== null) continue;
+      for (const id of MONEY_COLUMN_IDS) {
+        sums.set(id, (sums.get(id) ?? 0) + num(String(n[id])));
+      }
+      occupied += num(n.totalOccupied);
+      current += num(n.current);
+    }
+    return { sums, rate: current > 0 ? occupied / current : null };
+  }, [nodes]);
 
   // 列显隐(TanStack columnVisibility);科目列固定不参与。
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
@@ -124,10 +167,26 @@ export function BudgetTreeTable({ nodes, subjectHref }: Props) {
   const [expanded, setExpanded] = useState<ExpandedState>(true);
 
   const columns = useMemo<ColumnDef<TreeNode>[]>(() => {
-    const moneyCol = (id: keyof TreeNode & string, label: string): ColumnDef<TreeNode> => ({
+    // 合计行 footer(可选):金额列 = 一级科目之和。
+    // 结余列(codex P2)与数据行同款走 MoneyText 风险色——合计为负 = 项目整体超预算,
+    // 合计行不能吞掉这个信号。footer 须为 string | 函数(ColumnDefTemplate),
+    // 内联箭头直接写在列定义里(工厂返回匿名组件会触发 display-name 规则)。
+    const moneySum = (id: (typeof MONEY_COLUMN_IDS)[number]) =>
+      String(level1Total.sums.get(id) ?? 0);
+    const moneyCol = (
+      id: keyof TreeNode & string,
+      label: string,
+      sumId?: (typeof MONEY_COLUMN_IDS)[number],
+    ): ColumnDef<TreeNode> => ({
       id,
       accessorKey: id,
       header: () => <span className="block text-right">{label}</span>,
+      footer:
+        showLevel1Total && sumId
+          ? () => (
+              <span className="block text-right tabular-nums">{plainMoney(moneySum(sumId))}</span>
+            )
+          : undefined,
       cell: ({ row }) => (
         <span className="block text-right tabular-nums">
           {plainMoney(String(row.original[id]))}
@@ -140,6 +199,7 @@ export function BudgetTreeTable({ nodes, subjectHref }: Props) {
         id: 'subject',
         accessorKey: 'name',
         header: () => '预算科目',
+        footer: showLevel1Total ? '合计(一级科目汇总)' : undefined,
         cell: ({ row }) => (
           <span
             className="flex items-center gap-1 whitespace-nowrap"
@@ -181,19 +241,26 @@ export function BudgetTreeTable({ nodes, subjectHref }: Props) {
           </span>
         ),
       },
-      moneyCol('totalInitial', '总预算·原始'),
-      moneyCol('totalAdjustment', '总预算·调整'),
-      moneyCol('totalCurrent', '总预算·当前'),
-      moneyCol('initial', '年度·原始'),
-      moneyCol('adjustment', '年度·调整'),
-      moneyCol('current', '年度·当前'),
-      moneyCol('paid', '已支出'),
-      moneyCol('payable', '应付未付'),
-      moneyCol('totalOccupied', '总占用'),
+      moneyCol('totalInitial', '总预算·原始', 'totalInitial'),
+      moneyCol('totalAdjustment', '总预算·调整', 'totalAdjustment'),
+      moneyCol('totalCurrent', '总预算·当前', 'totalCurrent'),
+      moneyCol('initial', '年度·原始', 'initial'),
+      moneyCol('adjustment', '年度·调整', 'adjustment'),
+      moneyCol('current', '年度·当前', 'current'),
+      moneyCol('paid', '已支出', 'paid'),
+      moneyCol('payable', '应付未付', 'payable'),
+      moneyCol('totalOccupied', '总占用', 'totalOccupied'),
       {
         id: 'balance',
         accessorKey: 'balance',
         header: () => <span className="block text-right">结余</span>,
+        footer: showLevel1Total
+          ? () => (
+              <span className="block text-right">
+                <MoneyText value={moneySum('balance')} riskOnNegative />
+              </span>
+            )
+          : undefined,
         // 负结余 → MoneyText 风险色 + "超预算"(§12.2)。
         cell: ({ row }) => <MoneyText value={row.original.balance} riskOnNegative />,
       },
@@ -201,6 +268,11 @@ export function BudgetTreeTable({ nodes, subjectHref }: Props) {
         id: 'executionRate',
         accessorKey: 'executionRate',
         header: () => <span className="block text-right">执行率</span>,
+        footer: showLevel1Total
+          ? () => (
+              <span className="block text-right tabular-nums">{formatRate(level1Total.rate)}</span>
+            )
+          : undefined,
         cell: ({ row }) => (
           <span className="block text-right tabular-nums">
             {formatRate(row.original.executionRate)}
@@ -208,7 +280,7 @@ export function BudgetTreeTable({ nodes, subjectHref }: Props) {
         ),
       },
     ];
-  }, [subjectHref]);
+  }, [subjectHref, showLevel1Total, level1Total]);
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -278,6 +350,26 @@ export function BudgetTreeTable({ nodes, subjectHref }: Props) {
             ))}
           </TableHeader>
           <TableBody>
+            {/* 合计行用普通 tr 渲染在首行:浏览会把 <tfoot> 固定渲染在表格底部,
+                与「合计在第一行」的需求冲突(codex 实测),故不用 tfoot。 */}
+            {showLevel1Total
+              ? table.getFooterGroups().map((fg) => (
+                  <TableRow
+                    key={fg.id}
+                    className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40"
+                  >
+                    {fg.headers
+                      .filter((h) => h.column.getIsVisible())
+                      .map((h) => (
+                        <TableCell key={h.id} className="whitespace-nowrap py-2">
+                          {h.isPlaceholder
+                            ? null
+                            : flexRender(h.column.columnDef.footer, h.getContext())}
+                        </TableCell>
+                      ))}
+                  </TableRow>
+                ))
+              : null}
             {table.getRowModel().rows.map((row) => (
               <TableRow key={row.id}>
                 {row.getVisibleCells().map((cell) => (

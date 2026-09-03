@@ -858,6 +858,32 @@ export default function InitialBudgetPage() {
     return m;
   }, [leafCodes, subjectAmounts]);
 
+  /**
+   * §主要汇总行:一级科目(顶层行)汇总值之和 = 全体叶科目之和。
+   * 一级行本身是叶时直接取其明细(rollupByCode 只登记非叶行)。
+   */
+  const level1Summary = useMemo(() => {
+    let total = 0;
+    const byYear = new Map<number, number>();
+    for (const root of subjectTree) {
+      const roll = rollupByCode.get(root.code);
+      if (roll) {
+        total += roll.total;
+        for (const [y, v] of roll.byYear) byYear.set(y, (byYear.get(y) ?? 0) + v);
+      } else {
+        total += toDisplayNumber(subjectTotalAmounts[root.code]);
+        for (const [k, amt] of Object.entries(subjectAmounts)) {
+          const [code, yearStr] = k.split('|');
+          if (code !== root.code) continue;
+          const y = Number(yearStr);
+          byYear.set(y, (byYear.get(y) ?? 0) + toDisplayNumber(amt));
+        }
+      }
+    }
+    return { total, byYear };
+  }, [subjectTree, rollupByCode, subjectTotalAmounts, subjectAmounts]);
+  const level1OverTotal = projectTotal !== '' && level1Summary.total > projectTotalNum + 1e-9;
+
   /** 组装提交 payload。isLeaf 由 leafCodes 在提交时推导。 */
   const buildPayload = (): InitialBudgetPayload => {
     // 仅保留叶子科目的预算,且仅对已声明年度。
@@ -1203,7 +1229,7 @@ export default function InitialBudgetPage() {
         </Alert>
         <h2 className="text-base font-semibold tracking-[-0.3px]">{ledgerYear} 年度预算执行台账</h2>
         {ledgerNodes.length > 0 ? (
-          <BudgetTreeTable nodes={ledgerNodes} />
+          <BudgetTreeTable nodes={ledgerNodes} showLevel1Total />
         ) : (
           <ReadOnlyView
             projectTotal={draft?.projectTotal ?? ''}
@@ -1487,6 +1513,35 @@ export default function InitialBudgetPage() {
                 ))}
               </TableHeader>
               <TableBody>
+                {/* §主要汇总行:首行「合计(一级科目汇总)」——各年度列与总预算列
+                    显示全部一级(顶层)行汇总值之和(= 全体叶之和),随输入实时更新;
+                    超过项目总预算红色警示。用普通 tr 渲染在首行(浏览器把 tfoot 固定在底部)。 */}
+                <TableRow className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40">
+                  <TableCell className="py-1.5">
+                    <span className="flex items-center gap-1">
+                      <span className="size-4 shrink-0" />
+                      合计(一级科目汇总)
+                    </span>
+                  </TableCell>
+                  <TableCell className="py-1.5">
+                    <span
+                      className={cn(
+                        'block text-right tabular-nums',
+                        level1OverTotal && 'text-error-deep',
+                      )}
+                    >
+                      {level1Summary.total.toFixed(2)}
+                    </span>
+                  </TableCell>
+                  {declaredYears.map((y) => (
+                    <TableCell key={y} className="py-1.5">
+                      <span className="block text-right tabular-nums">
+                        {(level1Summary.byYear.get(y) ?? 0).toFixed(2)}
+                      </span>
+                    </TableCell>
+                  ))}
+                  {editable ? <TableCell /> : null}
+                </TableRow>
                 {subjectTable.getRowModel().rows.map((row) => (
                   <TableRow key={row.id} className="hover:bg-transparent">
                     {row.getVisibleCells().map((cell) => (
