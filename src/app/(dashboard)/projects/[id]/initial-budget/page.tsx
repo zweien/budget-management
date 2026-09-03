@@ -73,6 +73,8 @@ interface ProjectDetail {
   id: string;
   code: string;
   name: string;
+  /** 预算类型(§包干制):LUMP_SUM 编制页无「科目总预算」列,payload 不带 subjectTotalBudgets。 */
+  budgetMode?: string;
   /** 服务端随详情下发:当前用户是否可编辑该项目(查看态门控)。 */
   canEdit?: boolean;
 }
@@ -580,6 +582,9 @@ export default function InitialBudgetPage() {
 
   const status = draft?.status;
 
+  // §包干制(LUMP_SUM):无科目总预算层——科目表只有各年度列,payload 不带 subjectTotalBudgets。
+  const isLumpSum = project?.budgetMode === 'LUMP_SUM';
+
   // 可编辑态:(无草稿、或草稿处于 DRAFT/REJECTED/WITHDRAWN)且当前用户有该项目编辑权。
   // project.canEdit 由服务端随详情下发(ADMIN 或 OWNER 成员);未取到时保守按可编辑,
   // 服务端 requirePermission 二次拦截兜底。
@@ -927,9 +932,12 @@ export default function InitialBudgetPage() {
         })),
       subjectBudgets,
       // 叶节点总预算(跨年度);仅保留叶节点且有值的。
-      subjectTotalBudgets: Object.entries(subjectTotalAmounts)
-        .filter(([code, amt]) => leafCodes.has(code) && amt !== '' && amt !== undefined)
-        .map(([subjectCode, amount]) => ({ subjectCode, amount })),
+      // §包干制:不携带(LUMP_SUM 无科目总预算层,服务端亦忽略)。
+      subjectTotalBudgets: isLumpSum
+        ? []
+        : Object.entries(subjectTotalAmounts)
+            .filter(([code, amt]) => leafCodes.has(code) && amt !== '' && amt !== undefined)
+            .map(([subjectCode, amount]) => ({ subjectCode, amount })),
     };
   };
 
@@ -1085,42 +1093,47 @@ export default function InitialBudgetPage() {
           );
         },
       },
-      {
-        // 科目总预算(跨年度):叶节点可填;非叶节点显示叶后代汇总(只读)。
-        id: 'subject-total',
-        header: () => <span className="block text-right">总预算</span>,
-        size: 160,
-        cell: ({ row }) => {
-          const node = row.original;
-          if (!editable) {
-            const t = subjectTotalAmounts[node.code];
-            return t ? (
-              <span className="block text-right tabular-nums">{t}</span>
-            ) : (
-              <span className="block text-right text-mute">—</span>
-            );
-          }
-          if (!isLeafRow(node)) {
-            const rolled = rollupByCode.get(node.code)?.total;
-            if (rolled === undefined || rolled === 0) {
-              return <span className="block text-right text-mute">—</span>;
-            }
-            return (
-              <span className="block text-right text-muted-foreground tabular-nums">
-                {rolled.toFixed(2)}
-              </span>
-            );
-          }
-          return (
-            <SubjectTotalInput
-              code={node.code}
-              value={subjectTotalAmounts[node.code] || undefined}
-              onTotal={setSubjectTotal}
-              onEditStart={markDirty}
-            />
-          );
-        },
-      },
+      // §包干制:无「科目总预算」列(LUMP_SUM 项目不编制跨年度科目总额)。
+      ...(isLumpSum
+        ? []
+        : [
+            {
+              // 科目总预算(跨年度):叶节点可填;非叶节点显示叶后代汇总(只读)。
+              id: 'subject-total',
+              header: () => <span className="block text-right">总预算</span>,
+              size: 160,
+              cell: ({ row }) => {
+                const node = row.original;
+                if (!editable) {
+                  const t = subjectTotalAmounts[node.code];
+                  return t ? (
+                    <span className="block text-right tabular-nums">{t}</span>
+                  ) : (
+                    <span className="block text-right text-mute">—</span>
+                  );
+                }
+                if (!isLeafRow(node)) {
+                  const rolled = rollupByCode.get(node.code)?.total;
+                  if (rolled === undefined || rolled === 0) {
+                    return <span className="block text-right text-mute">—</span>;
+                  }
+                  return (
+                    <span className="block text-right text-muted-foreground tabular-nums">
+                      {rolled.toFixed(2)}
+                    </span>
+                  );
+                }
+                return (
+                  <SubjectTotalInput
+                    code={node.code}
+                    value={subjectTotalAmounts[node.code] || undefined}
+                    onTotal={setSubjectTotal}
+                    onEditStart={markDirty}
+                  />
+                );
+              },
+            } as ColumnDef<SubjectTreeNode>,
+          ]),
       ...dynamicYearCols,
     ];
 
@@ -1169,6 +1182,7 @@ export default function InitialBudgetPage() {
   }, [
     editable,
     declaredYears,
+    isLumpSum,
     subjectAmounts,
     subjectDetails,
     subjectTotalAmounts,
@@ -1237,6 +1251,7 @@ export default function InitialBudgetPage() {
             subjects={draft?.subjects ?? []}
             subjectBudgets={draft?.subjectBudgets ?? []}
             subjectTotalBudgets={draft?.subjectTotalBudgets}
+            showSubjectTotal={!isLumpSum}
           />
         )}
       </div>
@@ -1260,6 +1275,7 @@ export default function InitialBudgetPage() {
           subjects={draft?.subjects ?? []}
           subjectBudgets={draft?.subjectBudgets ?? []}
           subjectTotalBudgets={draft?.subjectTotalBudgets}
+          showSubjectTotal={!isLumpSum}
         />
       </div>
     );
@@ -1523,16 +1539,19 @@ export default function InitialBudgetPage() {
                       合计(一级科目汇总)
                     </span>
                   </TableCell>
-                  <TableCell className="py-1.5">
-                    <span
-                      className={cn(
-                        'block text-right tabular-nums',
-                        level1OverTotal && 'text-error-deep',
-                      )}
-                    >
-                      {level1Summary.total.toFixed(2)}
-                    </span>
-                  </TableCell>
+                  {/* §包干制:无「总预算」列,合计行只有各年度单元格(列序与表头一致)。 */}
+                  {!isLumpSum && (
+                    <TableCell className="py-1.5">
+                      <span
+                        className={cn(
+                          'block text-right tabular-nums',
+                          level1OverTotal && 'text-error-deep',
+                        )}
+                      >
+                        {level1Summary.total.toFixed(2)}
+                      </span>
+                    </TableCell>
+                  )}
                   {declaredYears.map((y) => (
                     <TableCell key={y} className="py-1.5">
                       <span className="block text-right tabular-nums">
@@ -1617,6 +1636,8 @@ interface ReadOnlyProps {
   }[];
   subjectBudgets: { year: number; subjectCode: string; amount: string }[];
   subjectTotalBudgets?: { subjectCode: string; amount: string }[];
+  /** §包干制:false = 隐藏「总预算」列(LUMP_SUM 无科目总预算层)。 */
+  showSubjectTotal?: boolean;
 }
 
 function ReadOnlyView({
@@ -1625,6 +1646,7 @@ function ReadOnlyView({
   subjects,
   subjectBudgets,
   subjectTotalBudgets,
+  showSubjectTotal = true,
 }: ReadOnlyProps) {
   const years = annualBudgets.map((a) => a.year);
   const amountFor = (code: string, year: number): string => {
@@ -1675,7 +1697,7 @@ function ReadOnlyView({
                 <TableHead>名称</TableHead>
                 <TableHead className="w-32">父科目</TableHead>
                 <TableHead className="w-20">叶节点</TableHead>
-                <TableHead className="w-32 text-right">总预算</TableHead>
+                {showSubjectTotal && <TableHead className="w-32 text-right">总预算</TableHead>}
                 {years.map((y) => (
                   <TableHead key={y} className="w-32 text-right tabular-nums">
                     {y}
@@ -1696,13 +1718,15 @@ function ReadOnlyView({
                       <Badge variant="secondary">非叶</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {s.isLeaf ? (
-                      totalFor(s.code) || <span className="text-mute">—</span>
-                    ) : (
-                      <span className="text-mute">—</span>
-                    )}
-                  </TableCell>
+                  {showSubjectTotal && (
+                    <TableCell className="text-right tabular-nums">
+                      {s.isLeaf ? (
+                        totalFor(s.code) || <span className="text-mute">—</span>
+                      ) : (
+                        <span className="text-mute">—</span>
+                      )}
+                    </TableCell>
+                  )}
                   {years.map((y) => (
                     <TableCell key={y} className="text-right tabular-nums">
                       {s.isLeaf ? (

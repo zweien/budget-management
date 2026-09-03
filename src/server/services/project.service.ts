@@ -17,6 +17,8 @@ export interface CreateProjectInput {
   ownerId?: string;
   level?: string | null;
   projectType?: string | null;
+  /** 预算类型(§包干制):GENERAL(默认)/ LUMP_SUM;非法值 422。 */
+  budgetMode?: string | null;
   undertakingUnit?: string | null;
   /** 前端传 YYYY-MM-DD 日期串;服务端规范化为 Date(非法格式 422)。 */
   startDate?: Date | string | null;
@@ -29,11 +31,40 @@ export interface UpdateProjectInput {
   name?: string;
   level?: string | null;
   projectType?: string | null;
+  /** 预算类型切换:仅完全空白的项目允许(§切变锁定),否则 422。 */
+  budgetMode?: string | null;
   undertakingUnit?: string | null;
   /** 前端传 YYYY-MM-DD 日期串;服务端规范化为 Date(非法格式 422)。 */
   startDate?: Date | string | null;
   endDate?: Date | string | null;
   remark?: string | null;
+}
+
+/** 归一化预算类型入参:缺省 GENERAL;非法值 422(防 API 直调绕过表单枚举)。 */
+export function normalizeBudgetMode(value: unknown): 'GENERAL' | 'LUMP_SUM' {
+  if (value === undefined || value === null || value === '') return 'GENERAL';
+  if (value === 'GENERAL' || value === 'LUMP_SUM') return value;
+  throw new HTTPError(422, `预算类型无效:${String(value)}(应为 GENERAL 或 LUMP_SUM)`);
+}
+
+/**
+ * §切变锁定(Q1b/Q8b):预算类型仅「完全空白」的项目可切换——
+ * 无任何编制申请(含草稿)、无业务记录、无调整单、无到账登记。
+ * 编制草稿已落库科目/年度预算数据,清理逻辑易出暗坑,草稿阶段即锁定。
+ */
+async function assertProjectBlankForModeSwitch(
+  db: Prisma.TransactionClient | typeof prisma,
+  projectId: string,
+): Promise<void> {
+  const [apps, records, adjustments, receipts] = await Promise.all([
+    db.initialBudgetApplication.count({ where: { projectId } }),
+    db.businessRecord.count({ where: { projectId } }),
+    db.budgetAdjustment.count({ where: { projectId } }),
+    db.receiptRecord.count({ where: { projectId } }),
+  ]);
+  if (apps > 0 || records > 0 || adjustments > 0 || receipts > 0) {
+    throw new HTTPError(422, '项目已有预算编制(含草稿)/业务记录/调整单/到账登记,预算类型不可切换');
+  }
 }
 
 /**
@@ -86,6 +117,7 @@ export async function createProject(
   const startDate = normalizeDateInput(input.startDate, '开始日期');
   const endDate = normalizeDateInput(input.endDate, '结束日期');
   assertDateOrder(startDate, endDate);
+  const budgetMode = normalizeBudgetMode(input.budgetMode);
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -96,6 +128,7 @@ export async function createProject(
           name: input.name,
           level: input.level ?? null,
           projectType: input.projectType ?? null,
+          budgetMode,
           undertakingUnit: input.undertakingUnit ?? null,
           startDate,
           endDate,
@@ -134,6 +167,7 @@ export async function createProject(
           code: project.code,
           name: project.name,
           ownerId: project.ownerId,
+          budgetMode: project.budgetMode,
         },
       });
 
@@ -299,6 +333,14 @@ export async function updateProject(
   if (input.name !== undefined) data.name = input.name;
   if (input.level !== undefined) data.level = input.level;
   if (input.projectType !== undefined) data.projectType = input.projectType;
+  if (input.budgetMode !== undefined) {
+    const mode = normalizeBudgetMode(input.budgetMode);
+    // §切变锁定:仅在类型真的变化时校验空白,避免普通编辑被误拦。
+    if (mode !== before.budgetMode) {
+      await assertProjectBlankForModeSwitch(prisma, id);
+    }
+    data.budgetMode = mode;
+  }
   if (input.undertakingUnit !== undefined) data.undertakingUnit = input.undertakingUnit;
   if (input.startDate !== undefined) data.startDate = startDate;
   if (input.endDate !== undefined) data.endDate = endDate;
@@ -317,6 +359,7 @@ export async function updateProject(
         name: before.name,
         level: before.level,
         projectType: before.projectType,
+        budgetMode: before.budgetMode,
         undertakingUnit: before.undertakingUnit,
         startDate: before.startDate,
         endDate: before.endDate,
@@ -326,6 +369,7 @@ export async function updateProject(
         name: after.name,
         level: after.level,
         projectType: after.projectType,
+        budgetMode: after.budgetMode,
         undertakingUnit: after.undertakingUnit,
         startDate: after.startDate,
         endDate: after.endDate,

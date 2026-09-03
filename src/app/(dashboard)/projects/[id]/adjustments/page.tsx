@@ -68,6 +68,8 @@ interface ProjectDetail {
   id: string;
   code: string;
   name: string;
+  /** 预算类型(§包干制):LUMP_SUM 无科目总预算层,表单隐藏总维度输入(恒 0)。 */
+  budgetMode?: string;
   /** 服务端随详情下发:当前用户是否可编辑该项目(查看态门控)。 */
   canEdit?: boolean;
 }
@@ -220,6 +222,10 @@ export default function AdjustmentsPage() {
 
   /** 初始预算是否已生效(发起调整的前提)。 */
   const isEffective = budgetStatus === 'APPROVED';
+
+  // §包干制(LUMP_SUM):无科目总预算层——总维度调整额恒 0(输入隐藏),
+  // 池内分配的容量护栏由服务端按「项目总预算 − 历年已分配年度预算」项目级校验。
+  const isLumpSum = project?.budgetMode === 'LUMP_SUM';
 
   const baselineMap = useMemo(() => new Map(baseline.map((b) => [b.subjectId, b])), [baseline]);
 
@@ -437,7 +443,8 @@ export default function AdjustmentsPage() {
           }
         }
         // 同科目多行合并后再比剩余额度(与后端聚合口径一致)。
-        if (!formExpandTotals) {
+        // §包干制:无科目总预算池,服务端按项目级未分配额度校验,前端跳过逐科目护栏。
+        if (!formExpandTotals && !isLumpSum) {
           const sumBySubject = new Map<string, number>();
           for (const l of valid) {
             if (l.isNew || !l.subjectId) continue;
@@ -488,17 +495,22 @@ export default function AdjustmentsPage() {
     const sumField = (sel: 'totalAdjustment' | 'annualAdjustment') =>
       valid.reduce((a, l) => a + (Number(l[sel]) || 0), 0);
     if (requireBalance) {
-      // 提交时:每行调整额必须明确填写(可填 0)。
+      // 提交时:每行调整额必须明确填写(可填 0)。§包干制:总维度恒 0(输入隐藏),只要求年度。
       for (const l of valid) {
-        if (l.totalAdjustment === '' || l.annualAdjustment === '') {
+        if (!isLumpSum && l.totalAdjustment === '') {
           return { ok: false, error: '每行的「总预算调整额」「年度调整额」都需填写(可填 0)' };
         }
+        if (l.annualAdjustment === '') {
+          return { ok: false, error: '每行的「年度调整额」需填写(可填 0)' };
+        }
       }
-      const totalSum = sumField('totalAdjustment');
+      if (!isLumpSum) {
+        const totalSum = sumField('totalAdjustment');
+        if (Math.abs(totalSum) > 0.001) {
+          return { ok: false, error: `总预算维度调整不平衡:合计 ${totalSum.toFixed(2)} ≠ 0` };
+        }
+      }
       const annualSum = sumField('annualAdjustment');
-      if (Math.abs(totalSum) > 0.001) {
-        return { ok: false, error: `总预算维度调整不平衡:合计 ${totalSum.toFixed(2)} ≠ 0` };
-      }
       if (Math.abs(annualSum) > 0.001) {
         return { ok: false, error: `年度预算维度调整不平衡:合计 ${annualSum.toFixed(2)} ≠ 0` };
       }
@@ -506,7 +518,12 @@ export default function AdjustmentsPage() {
     const lines = valid.map((l) => {
       const base = {
         // 草稿允许留空,按 0 落库;提交时已保证非空。
-        totalAdjustment: l.totalAdjustment === '' ? '0' : Number(l.totalAdjustment).toFixed(2),
+        // §包干制:总维度恒 0(无科目总预算层,服务端同样拒绝非 0)。
+        totalAdjustment: isLumpSum
+          ? '0'
+          : l.totalAdjustment === ''
+            ? '0'
+            : Number(l.totalAdjustment).toFixed(2),
         annualAdjustment: l.annualAdjustment === '' ? '0' : Number(l.annualAdjustment).toFixed(2),
       };
       if (l.isNew) {
@@ -678,9 +695,9 @@ export default function AdjustmentsPage() {
     return `根据项目研究需要，对经费预算进行调整。${parts.join('，')}。`;
   };
 
-  /** 一键生成两个维度原因(覆盖现有内容)。 */
+  /** 一键生成两个维度原因(覆盖现有内容)。§包干制:总维度恒 0,只生成年度原因。 */
   const handleAutoGenerate = () => {
-    const t = generateReason('total');
+    const t = isLumpSum ? '' : generateReason('total');
     const a = generateReason('annual');
     setTotalReason(t);
     setAnnualReason(a);
@@ -702,7 +719,8 @@ export default function AdjustmentsPage() {
     };
   }, [formLines]);
 
-  /** 追加下达就绪:有正数行,且(池内模式)每科目合计下达不超剩余可分配额。 */
+  /** 追加下达就绪:有正数行,且(池内模式)每科目合计下达不超剩余可分配额。
+   *  §包干制:无科目总预算池,逐科目护栏不适用(服务端按项目级额度校验)。 */
   const allocateReady = useMemo(() => {
     const lines = formLines.filter(
       (l) => l.subjectId || (l.isNew && l.newName.trim() && l.newParentId),
@@ -719,13 +737,13 @@ export default function AdjustmentsPage() {
       }
     }
     if (!hasPositive) return false;
-    if (formExpandTotals) return true;
+    if (formExpandTotals || isLumpSum) return true;
     for (const [sid, sum] of sumBySubject) {
       const remaining = Number(baselineMap.get(sid)?.remaining ?? '0');
       if (sum > remaining + 1e-9) return false;
     }
     return true;
-  }, [formLines, baselineMap, formExpandTotals]);
+  }, [formLines, baselineMap, formExpandTotals, isLumpSum]);
 
   // ------------------------------------------------------------
   // 渲染
@@ -889,7 +907,8 @@ export default function AdjustmentsPage() {
               </Button>
               <span className="text-xs text-mute">根据当前调整明细自动生成,生成后可手动编辑</span>
             </div>
-            {formKind !== 'ALLOCATE' && (
+            {/* §包干制:无科目总预算层,总维度原因不适用(隐藏)。 */}
+            {formKind !== 'ALLOCATE' && !isLumpSum && (
               <div className="grid gap-1.5">
                 <Label className="text-xs font-normal text-muted-foreground">总预算调整原因</Label>
                 <Textarea
@@ -997,7 +1016,9 @@ export default function AdjustmentsPage() {
                         {r.isNew
                           ? '∞(新科目立账)'
                           : r.subjectId
-                            ? (baselineMap.get(r.subjectId)?.remaining ?? '0.00')
+                            ? isLumpSum
+                              ? '—' // §包干制:无科目总预算池,容量由服务端按项目级额度校验。
+                              : (baselineMap.get(r.subjectId)?.remaining ?? '0.00')
                             : '—'}
                       </TableCell>
                       <TableCell>
@@ -1025,19 +1046,26 @@ export default function AdjustmentsPage() {
                             : '—'}
                       </TableCell>
                       <TableCell>
-                        <AmountInput
-                          size="sm"
-                          allowNegative
-                          value={r.totalAdjustment}
-                          onChange={(v) => updateLine(r.key, { totalAdjustment: v ?? '' })}
-                        />
+                        {/* §包干制:无科目总预算层,总维度调整恒 0(只读展示)。 */}
+                        {isLumpSum ? (
+                          <span className="block text-sm text-mute tabular-nums">0.00(包干)</span>
+                        ) : (
+                          <AmountInput
+                            size="sm"
+                            allowNegative
+                            value={r.totalAdjustment}
+                            onChange={(v) => updateLine(r.key, { totalAdjustment: v ?? '' })}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-medium tabular-nums">
-                        {r.isNew
-                          ? (Number(r.totalAdjustment) || 0).toFixed(2)
-                          : r.subjectId
-                            ? afterTotal(r)
-                            : '—'}
+                        {isLumpSum
+                          ? '0.00'
+                          : r.isNew
+                            ? (Number(r.totalAdjustment) || 0).toFixed(2)
+                            : r.subjectId
+                              ? afterTotal(r)
+                              : '—'}
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground tabular-nums">
                         {r.isNew

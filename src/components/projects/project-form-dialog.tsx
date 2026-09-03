@@ -59,6 +59,8 @@ const projectFormSchema = z
     name: z.string().trim().min(1, '请输入项目名称'),
     level: z.string().trim(),
     projectType: z.string().trim(),
+    /** 预算类型(§包干制):一般=科目总预算+年度分解;包干制=总预算一个数,年度仍分解到科目。 */
+    budgetMode: z.enum(['GENERAL', 'LUMP_SUM']),
     undertakingUnit: z.string().trim(),
     /** 起止日期拆为两个字段(可只填其一)。 */
     startDate: z.custom<Date>().optional(),
@@ -98,6 +100,8 @@ export interface ProjectFormTarget {
   name: string;
   level: string | null;
   projectType?: string | null;
+  /** 预算类型(§包干制);缺省 GENERAL。 */
+  budgetMode?: string | null;
   undertakingUnit?: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -141,6 +145,7 @@ export function ProjectFormDialog({
       name: '',
       level: '',
       projectType: '',
+      budgetMode: 'GENERAL',
       undertakingUnit: '',
       remark: '',
       ownerId: '',
@@ -156,6 +161,7 @@ export function ProjectFormDialog({
         name: editing.name,
         level: editing.level ?? '',
         projectType: editing.projectType ?? '',
+        budgetMode: editing.budgetMode === 'LUMP_SUM' ? 'LUMP_SUM' : 'GENERAL',
         undertakingUnit: editing.undertakingUnit ?? '',
         remark: editing.remark ?? '',
         ownerId: '',
@@ -168,6 +174,7 @@ export function ProjectFormDialog({
         name: '',
         level: '',
         projectType: '',
+        budgetMode: 'GENERAL',
         undertakingUnit: '',
         remark: '',
         ownerId: me?.id ?? '',
@@ -189,6 +196,7 @@ export function ProjectFormDialog({
               name: values.name,
               level: values.level || null,
               projectType: values.projectType || null,
+              budgetMode: values.budgetMode,
               undertakingUnit: values.undertakingUnit || null,
               startDate: formatDateOnly(values.startDate),
               endDate: formatDateOnly(values.endDate),
@@ -207,6 +215,7 @@ export function ProjectFormDialog({
             name: values.name,
             level: values.level || null,
             projectType: values.projectType || null,
+            budgetMode: values.budgetMode,
             undertakingUnit: values.undertakingUnit || null,
             startDate: formatDateOnly(values.startDate),
             endDate: formatDateOnly(values.endDate),
@@ -307,6 +316,33 @@ export function ProjectFormDialog({
                 )}
               />
             </div>
+            <FormField
+              control={form.control}
+              name="budgetMode"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>预算类型</FormLabel>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="GENERAL">一般(科目总预算 + 年度分解)</SelectItem>
+                      <SelectItem value="LUMP_SUM">
+                        包干制(总预算不拆科目,年度仍分解到科目)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    包干制项目编制时无需按科目填总预算,仅填项目总额与年度预算;
+                    项目产生编制/记录/调整/到账数据后不可再更改类型。
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <FormField
               control={form.control}
               name="undertakingUnit"

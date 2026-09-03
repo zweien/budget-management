@@ -90,6 +90,29 @@ function assertValidYear(year: number, label = 'year'): void {
   }
 }
 
+/**
+ * §包干制(LUMP_SUM)总维度拒绝:项目没有科目总预算层,任何一行
+ * totalAdjustment ≠ 0 都 422(年度维度照常)。创建与编辑两处入口都拦。
+ */
+async function assertAnnualOnlyForLumpSum(
+  db: Prisma.TransactionClient | typeof prisma,
+  projectId: string,
+  lines: { total: D }[],
+): Promise<void> {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: { budgetMode: true },
+  });
+  if (project?.budgetMode !== 'LUMP_SUM') return;
+  const idx = lines.findIndex((l) => !l.total.eq(ZERO));
+  if (idx >= 0) {
+    throw new HTTPError(
+      422,
+      `包干制项目不编制科目总预算,第 ${idx + 1} 行的总预算调整额须为 0(仅允许年度维度调整)`,
+    );
+  }
+}
+
 /** 解析金额字符串为 Decimal(允许负数、允许 0)。 */
 function parseSignedAmount(amount: string, label: string): D {
   let d: D;
@@ -336,18 +359,52 @@ function validateAllocate(parsedLines: ParsedLine[]): D {
 /**
  * §7 追加下达容量护栏(现有科目行):
  * 分配额 ≤ 科目总预算(currentAmount) − 该科目历年已分配 SubjectBudget.currentAmount 合计。
+ * §包干制(LUMP_SUM):无科目总预算池,改为项目级池——
+ * Σ(本单下达) ≤ ProjectBudget.currentAmount − Σ 全部年度 AnnualBudget.currentAmount(未分配余额),
+ * 与编制期的「Σ年度预算 ≤ 项目总预算」同口径。
  */
 async function assertAllocateCapacity(
   tx: Prisma.TransactionClient,
   projectId: string,
   parsedLines: ParsedLine[],
 ): Promise<void> {
+  const lumpSum =
+    (
+      await tx.project.findUnique({
+        where: { id: projectId },
+        select: { budgetMode: true },
+      })
+    )?.budgetMode === 'LUMP_SUM';
+
   // 按科目合并(同一科目多行相加),跳过新增科目行(无历史总额,首笔立账)。
   const allocatedBySubject = new Map<string, D>();
   for (const line of parsedLines) {
     if (!line.subjectId || line.annual.eq(ZERO)) continue;
     const sid = line.subjectId;
     allocatedBySubject.set(sid, (allocatedBySubject.get(sid) ?? ZERO).plus(line.annual));
+  }
+
+  if (lumpSum) {
+    if (allocatedBySubject.size === 0) return;
+    const requestTotal = sumAmounts([...allocatedBySubject.values()]);
+    const projectBudget = await tx.projectBudget.findUnique({ where: { projectId } });
+    if (!projectBudget) {
+      throw new HTTPError(422, '项目总预算不存在,请先完成初始预算编制并审批');
+    }
+    const annuals = await tx.annualBudget.aggregate({
+      where: { projectId },
+      _sum: { currentAmount: true },
+    });
+    const total = fromStored(projectBudget.currentAmount);
+    const allocated = fromStored(annuals._sum.currentAmount ?? '0');
+    const pool = total.minus(allocated);
+    if (requestTotal.gt(pool)) {
+      throw new HTTPError(
+        422,
+        `超出项目未分配额度:剩余 ${pool.toFixed(2)}(总预算 ${total.toFixed(2)} − 历年已分配年度预算 ${allocated.toFixed(2)}),本次申请 ${requestTotal.toFixed(2)}`,
+      );
+    }
+    return;
   }
 
   for (const [subjectId, amount] of allocatedBySubject.entries()) {
@@ -404,6 +461,8 @@ export async function createAdjustment(
   if (project.archivedAt) {
     throw new HTTPError(409, '项目已归档,不可发起调整');
   }
+  // §包干制:总维度调整额必须为 0(无科目总预算层)。
+  await assertAnnualOnlyForLumpSum(prisma, projectId, parsedLines);
 
   for (const line of parsedLines) {
     if (line.subjectId) {
@@ -503,6 +562,9 @@ export async function updateDraftAdjustment(
       throw new HTTPError(409, `仅草稿或已驳回单可编辑,当前状态:${existing.status}`);
     }
     const projectId = existing.projectId;
+
+    // §包干制:总维度调整额必须为 0(无科目总预算层)。
+    await assertAnnualOnlyForLumpSum(tx, projectId, parsedLines);
 
     for (const line of parsedLines) {
       if (line.subjectId) {
@@ -1114,6 +1176,15 @@ export async function approveAdjustment(
       throw new HTTPError(409, '该调整单已变更(被驳回或重新提交),请刷新后基于最新版本操作');
     }
     await lockAndRecheckStatus(tx, adjId, ApprovalStatus.PENDING);
+    // §包干制:无科目总预算层——新增科目不建 STB,expandTotals 不调 STB,
+    // 总维度 delta 由创建/编辑入口保证恒 0(此处循环自然空转)。
+    const lumpSum =
+      (
+        await tx.project.findUnique({
+          where: { id: adj.projectId },
+          select: { budgetMode: true },
+        })
+      )?.budgetMode === 'LUMP_SUM';
     const parsedLines = adj.lines.map((l) => ({
       id: l.id,
       subjectId: l.subjectId as string | null,
@@ -1199,16 +1270,19 @@ export async function approveAdjustment(
           },
         });
         // 总预算以首笔分配额立账(科目此前不存在,无"编制期总额")。
-        await tx.subjectTotalBudget.create({
-          data: {
-            id: uuidv7(),
-            projectId: adj.projectId,
-            subjectId: newSubjectId,
-            initialAmount: toStored(ZERO),
-            adjustmentAmount: toStored(line.annual),
-            currentAmount: toStored(line.annual),
-          },
-        });
+        // §包干制:不建 STB(LUMP_SUM 无科目总预算层)。
+        if (!lumpSum) {
+          await tx.subjectTotalBudget.create({
+            data: {
+              id: uuidv7(),
+              projectId: adj.projectId,
+              subjectId: newSubjectId,
+              initialAmount: toStored(ZERO),
+              adjustmentAmount: toStored(line.annual),
+              currentAmount: toStored(line.annual),
+            },
+          });
+        }
         line.subjectId = newSubjectId;
         // 回写明细行 subjectId:导出/详情按科目口径渲染时不再重复成行。
         await tx.budgetAdjustmentLine.update({
@@ -1261,7 +1335,8 @@ export async function approveAdjustment(
 
       // 2.5) expandTotals(新经费入账):现有科目的总预算随下达额同步调增。
       //      (isNew 行第 1 步已按首笔分配额立账;池内模式则不动 STB。)
-      if (adj.expandTotals) {
+      //      §包干制:整体跳过(无科目总预算层,经费只入项目总盘 + 年度盘子)。
+      if (adj.expandTotals && !lumpSum) {
         for (const line of parsedLines) {
           if (!line.subjectId || createdNewSubjects.has(line.subjectId)) continue;
           if (line.annual.eq(ZERO)) continue;
@@ -1427,16 +1502,19 @@ export async function approveAdjustment(
         },
       });
       // 初始化 SubjectTotalBudget(initial=0,current=0)。
-      await tx.subjectTotalBudget.create({
-        data: {
-          id: uuidv7(),
-          projectId: adj.projectId,
-          subjectId: newSubjectId,
-          initialAmount: toStored(ZERO),
-          adjustmentAmount: toStored(ZERO),
-          currentAmount: toStored(ZERO),
-        },
-      });
+      // §包干制:不建(LUMP_SUM 无科目总预算层)。
+      if (!lumpSum) {
+        await tx.subjectTotalBudget.create({
+          data: {
+            id: uuidv7(),
+            projectId: adj.projectId,
+            subjectId: newSubjectId,
+            initialAmount: toStored(ZERO),
+            adjustmentAmount: toStored(ZERO),
+            currentAmount: toStored(ZERO),
+          },
+        });
+      }
       line.subjectId = newSubjectId;
       // 回写明细行 subjectId(§issue16 导出防重复成行;提交时已建,审批前作废亦无害)。
       await tx.budgetAdjustmentLine.update({

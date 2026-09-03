@@ -35,6 +35,8 @@ interface ProjectDetail {
   name: string;
   level: string | null;
   projectType: string | null;
+  /** 预算类型(§包干制):GENERAL / LUMP_SUM。 */
+  budgetMode: string | null;
   undertakingUnit: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -263,6 +265,7 @@ export default function ProjectDetailPage() {
           {project.members?.length ? project.members.map((m) => m.user.name).join('/') : '—'}
         </DescCell>
         <DescCell label="级别">{project.level ?? '—'}</DescCell>
+        <DescCell label="项目类型">{project.projectType ?? '—'}</DescCell>
         <DescCell label="起止时间">
           <span className="tabular-nums">
             {formatDate(project.startDate)} ~ {formatDate(project.endDate)}
@@ -282,9 +285,14 @@ export default function ProjectDetailPage() {
             <span className="text-muted-foreground">未编制</span>
           )}
         </DescCell>
-        <DescCell label="备注" span2>
-          {project.remark ?? '—'}
+        <DescCell label="预算类型">
+          {project.budgetMode === 'LUMP_SUM' ? (
+            <Badge variant="warning">包干制</Badge>
+          ) : (
+            <Badge variant="secondary">一般</Badge>
+          )}
         </DescCell>
+        <DescCell label="备注">{project.remark ?? '—'}</DescCell>
       </dl>
 
       {/* 成员管理:仅管理员可见(服务端 member:manage 二次拦截)。 */}
