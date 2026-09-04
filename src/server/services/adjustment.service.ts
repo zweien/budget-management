@@ -17,14 +17,19 @@ import { buildBaselineAmounts } from '@/server/services/adjustmentBaseline.servi
  * - 总预算维度(totalAdjustment)/年度预算维度(annualAdjustment)各自 Σ === 0。
  * - 提交时对年度调减行校验可调额度并写 budget_lock;审批生效后双维度同步更新。
  *
- * kind=ALLOCATE(追加下达) —— 净增做预算("总盘子固定、年度分批做满",含新经费入账):
+ * kind=ALLOCATE(追加下达 / 年度预算编制) —— 净增做预算:
  * - 每行只有年度维度下达额(annualAdjustment ≥ 0,totalAdjustment 必须 0),Σ > 0。
  * - 目标年份未建账则审批生效时自动创建 AnnualBudget 与各行 SubjectBudget。
- * - 护栏:现有科目行的分配额 ≤ 该科目总预算 − 历年已分配年度预算合计(剩余可分配额);
- *   新增科目行无此限制(首笔分配即立账)。
- * - 生效联动:AnnualBudget(该年) 新建或累加 += X;ProjectBudget.currentAmount += X;
- *   SubjectTotalBudget 不动(总额在编制时已定,追加分批落地到年份);
- *   新增科目行的总预算以首笔分配额立账。
+ * - 容量护栏(余额锚定模型):年度预算是当年计划,与总预算不再有「Σ年度 ≤ 总预算」的
+ *   加法约束(没花完的年度计划不占额度,下一年照着剩余额度重新编制);真正的红线是执行占用——
+ *   · 项目层:下达后「目标年剩余计划」(年度计划 − 该年已占用,含本单) ≤ 项目剩余额度
+ *     (总预算 − 全项目累计占用);
+ *   · GENERAL 科目层(镜像 STB):科目本年剩余计划(含本单) ≤ 科目总预算剩余
+ *     (科目总预算 − 该科目累计占用)。
+ *   在途 PENDING 追加单(非 expandTotals)按同口径预订额度;expandTotals 自带经费
+ *   (总预算同步上调),不占他人额度。
+ * - 生效联动:AnnualBudget(该年) 新建或累加 += X;expandTotals 时 ProjectBudget 与
+ *   (GENERAL)现有科目 STB 随下达额同步调增;新增科目行的总预算以首笔分配额立账。
  */
 
 /** 单行入参(来自 payload)。 */
@@ -45,8 +50,8 @@ export interface AdjustmentPayload {
   /** 调整单类型,缺省 ADJUST(调剂)。 */
   kind?: 'ADJUST' | 'ALLOCATE';
   /**
-   * 仅 ALLOCATE:追加的同时调增科目总预算与项目总预算(新经费入账)。
-   * 缺省 false = 池内分配(科目既有总预算落地到年份,各层总额不变)。
+   * 仅 ALLOCATE:追加的同时调增项目总预算与(GENERAL)科目总预算(新经费入账)。
+   * 缺省 false = 余额内下达(各层总额不变,向目标年追加年度计划)。
    */
   expandTotals?: boolean;
   // 调整原因按维度分开(对应总预算/年度预算两份导出文档)。
@@ -357,77 +362,223 @@ function validateAllocate(parsedLines: ParsedLine[]): D {
 }
 
 /**
- * §7 追加下达容量护栏(现有科目行):
- * 分配额 ≤ 科目总预算(currentAmount) − 该科目历年已分配 SubjectBudget.currentAmount 合计。
- * §包干制(LUMP_SUM):无科目总预算池,改为项目级池——
- * Σ(本单下达) ≤ ProjectBudget.currentAmount − Σ 全部年度 AnnualBudget.currentAmount(未分配余额),
- * 与编制期的「Σ年度预算 ≤ 项目总预算」同口径。
+ * §容量护栏共用的读数:总预算、全项目累计占用、目标年计划、目标年已占用。
+ * 占用口径 = 全部非作废业务记录金额合计(computeOccupancy:paid + payable = 全部)。
+ * db 可为事务客户端或 prisma 本体(余额面板接口复用)。
+ */
+export interface CapacityInputs {
+  budgetMode: 'GENERAL' | 'LUMP_SUM';
+  hasProjectBudget: boolean;
+  totalBudget: D;
+  projectOccupied: D;
+  yearPlan: D;
+  yearOccupied: D;
+}
+
+async function readCapacityInputs(
+  db: Prisma.TransactionClient | typeof prisma,
+  projectId: string,
+  year: number,
+): Promise<CapacityInputs> {
+  const [project, projectBudget, projectAgg, annualBudget, yearAgg] = await Promise.all([
+    db.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
+    db.projectBudget.findUnique({ where: { projectId } }),
+    db.businessRecord.aggregate({
+      where: { projectId, isVoid: false },
+      _sum: { amount: true },
+    }),
+    db.annualBudget.findUnique({ where: { projectId_year: { projectId, year } } }),
+    db.businessRecord.aggregate({
+      where: { projectId, budgetYear: year, isVoid: false },
+      _sum: { amount: true },
+    }),
+  ]);
+  return {
+    budgetMode: project?.budgetMode === 'LUMP_SUM' ? 'LUMP_SUM' : 'GENERAL',
+    hasProjectBudget: !!projectBudget,
+    totalBudget: projectBudget ? fromStored(projectBudget.currentAmount) : ZERO,
+    projectOccupied: fromStored(projectAgg._sum.amount ?? '0'),
+    yearPlan: annualBudget ? fromStored(annualBudget.currentAmount) : ZERO,
+    yearOccupied: fromStored(yearAgg._sum.amount ?? '0'),
+  };
+}
+
+/**
+ * §7 追加下达容量护栏(余额锚定,替代旧「Σ年度 ≤ 总预算」加法池):
+ * 年度预算是当年计划,加法合计与总预算脱钩;真正受约束的是执行占用。
+ * - 项目层(两种模式):本单下达后,目标年剩余计划 ≤ 项目剩余额度 − 在途追加预订,
+ *   即 (年度计划 + 本单 + 在途) − 该年已占用 ≤ 总预算 − 全项目累计占用
+ *   (新年无计划无占用时退化为「计划 ≤ 余额」)。
+ * - GENERAL 科目层(镜像 STB):科目总预算剩余(科目总预算 − 累计占用)≥
+ *   本年剩余计划(年度科目计划 + 本单 + 在途 − 该年该科目已占用)。
+ *   新增科目行不做此校验(科目总预算以首笔分配额立账,天花板与计划同增)。
+ * - PENDING 投影:其他在途追加单(非 expandTotals)的年度下达额预订项目额度;
+ *   在途调剂单的年度 delta 挤占科目本年计划、总维度 delta 挪动科目天花板,均按科目计入。
+ *   expandTotals 自带经费(总预算同步上调),不占他人额度,整体不计入。
+ * 提交与审批两处都调:提交时尽早反馈,审批时兜底并发(同 assertTotalDecreaseFloor 思路)。
  */
 async function assertAllocateCapacity(
   tx: Prisma.TransactionClient,
   projectId: string,
+  year: number,
   parsedLines: ParsedLine[],
+  excludeAdjId: string | null,
 ): Promise<void> {
-  const lumpSum =
-    (
-      await tx.project.findUnique({
-        where: { id: projectId },
-        select: { budgetMode: true },
-      })
-    )?.budgetMode === 'LUMP_SUM';
+  if (parsedLines.length === 0) return;
+  const requestTotal = sumAmounts(parsedLines.map((l) => l.annual));
+  if (requestTotal.lte(ZERO)) return;
 
-  // 按科目合并(同一科目多行相加),跳过新增科目行(无历史总额,首笔立账)。
-  const allocatedBySubject = new Map<string, D>();
+  const inputs = await readCapacityInputs(tx, projectId, year);
+  if (!inputs.hasProjectBudget) {
+    throw new HTTPError(422, '项目总预算不存在,请先完成初始预算编制并审批');
+  }
+
+  // 在途 PENDING 投影(排除本单:审批时本单尚是 PENDING,不能把自己算成在途)。
+  const pendingOthers = await tx.budgetAdjustment.findMany({
+    where: {
+      projectId,
+      status: ApprovalStatus.PENDING,
+      ...(excludeAdjId ? { id: { not: excludeAdjId } } : {}),
+    },
+    select: {
+      kind: true,
+      expandTotals: true,
+      year: true,
+      lines: { select: { subjectId: true, totalAdjustment: true, annualAdjustment: true } },
+    },
+  });
+  let pendingAllocateTotal = ZERO;
+  const pendingAnnualBySubject = new Map<string, D>(); // key = `${year}:${subjectId}`
+  const pendingTotalDeltaBySubject = new Map<string, D>(); // 在途调剂的总维度 delta
+  for (const a of pendingOthers) {
+    if (a.kind === AdjustmentKind.ALLOCATE) {
+      if (a.expandTotals) continue;
+      for (const l of a.lines) {
+        const amt = fromStored(String(l.annualAdjustment));
+        if (amt.lte(ZERO)) continue;
+        pendingAllocateTotal = pendingAllocateTotal.plus(amt);
+        if (l.subjectId) {
+          const key = `${a.year}:${l.subjectId}`;
+          pendingAnnualBySubject.set(key, (pendingAnnualBySubject.get(key) ?? ZERO).plus(amt));
+        }
+      }
+    } else {
+      for (const l of a.lines) {
+        if (!l.subjectId) continue;
+        const annual = fromStored(String(l.annualAdjustment));
+        if (!annual.eq(ZERO)) {
+          const key = `${a.year}:${l.subjectId}`;
+          pendingAnnualBySubject.set(key, (pendingAnnualBySubject.get(key) ?? ZERO).plus(annual));
+        }
+        const total = fromStored(String(l.totalAdjustment));
+        if (!total.eq(ZERO)) {
+          pendingTotalDeltaBySubject.set(
+            l.subjectId,
+            (pendingTotalDeltaBySubject.get(l.subjectId) ?? ZERO).plus(total),
+          );
+        }
+      }
+    }
+  }
+
+  // 项目层:目标年剩余计划(含本单与在途) ≤ 项目剩余额度 − 在途追加预订。
+  const remaining = inputs.totalBudget.minus(inputs.projectOccupied);
+  const headroom = remaining
+    .minus(pendingAllocateTotal)
+    .minus(inputs.yearPlan)
+    .plus(inputs.yearOccupied);
+  if (requestTotal.gt(headroom)) {
+    throw new HTTPError(
+      422,
+      `超出可下达额度:本次申请 ${requestTotal.toFixed(2)} 元,当前可下达 ${headroom.toFixed(2)} 元` +
+        `(项目剩余额度 ${remaining.toFixed(2)} = 总预算 ${inputs.totalBudget.toFixed(2)} − 全项目累计占用 ${inputs.projectOccupied.toFixed(2)}` +
+        (pendingAllocateTotal.gt(ZERO)
+          ? `;在途追加单已预订 ${pendingAllocateTotal.toFixed(2)}`
+          : '') +
+        `;目标年 ${year} 剩余计划 ${inputs.yearPlan.minus(inputs.yearOccupied).toFixed(2)} 元` +
+        ` = 年度计划 ${inputs.yearPlan.toFixed(2)} − 该年已占用 ${inputs.yearOccupied.toFixed(2)})`,
+    );
+  }
+
+  // GENERAL 科目层(镜像 STB):仅现有科目行;新增科目行首笔立账,跳过。
+  if (inputs.budgetMode !== 'GENERAL') return;
+  const subjectIds = [
+    ...new Set(
+      parsedLines
+        .filter((l) => l.subjectId && !l.annual.eq(ZERO))
+        .map((l) => l.subjectId as string),
+    ),
+  ];
+  if (subjectIds.length === 0) return;
+
+  const [stbs, yearSbs, subjectNames, cumBySubject, yearOccBySubject] = await Promise.all([
+    tx.subjectTotalBudget.findMany({
+      where: { projectId, subjectId: { in: subjectIds } },
+    }),
+    tx.subjectBudget.findMany({ where: { projectId, year, subjectId: { in: subjectIds } } }),
+    tx.budgetSubject.findMany({
+      where: { projectId, id: { in: subjectIds } },
+      select: { id: true, name: true },
+    }),
+    tx.businessRecord.groupBy({
+      by: ['subjectId'],
+      where: { projectId, subjectId: { in: subjectIds }, isVoid: false },
+      _sum: { amount: true },
+    }),
+    tx.businessRecord.groupBy({
+      by: ['subjectId'],
+      where: { projectId, budgetYear: year, subjectId: { in: subjectIds }, isVoid: false },
+      _sum: { amount: true },
+    }),
+  ]);
+  const stbBySubject = new Map(stbs.map((s) => [s.subjectId, s]));
+  const sbBySubject = new Map(yearSbs.map((s) => [s.subjectId, s]));
+  const nameBySubject = new Map(subjectNames.map((s) => [s.id, s.name]));
+  const cumOccMap = new Map(
+    cumBySubject.map((g) => [g.subjectId, fromStored(String(g._sum.amount ?? '0'))]),
+  );
+  const yearOccMap = new Map(
+    yearOccBySubject.map((g) => [g.subjectId, fromStored(String(g._sum.amount ?? '0'))]),
+  );
+
+  const requestBySubject = new Map<string, D>();
   for (const line of parsedLines) {
     if (!line.subjectId || line.annual.eq(ZERO)) continue;
-    const sid = line.subjectId;
-    allocatedBySubject.set(sid, (allocatedBySubject.get(sid) ?? ZERO).plus(line.annual));
+    requestBySubject.set(
+      line.subjectId,
+      (requestBySubject.get(line.subjectId) ?? ZERO).plus(line.annual),
+    );
   }
 
-  if (lumpSum) {
-    // §codex P1:新增科目行(subjectId 为空)同样占项目池——下达总额按**全部行**的
-    // annual 求和(ALLOCATE 语义下 annual 均 ≥ 0),否则纯新增科目单会绕过容量校验。
-    if (parsedLines.length === 0) return;
-    const requestTotal = sumAmounts(parsedLines.map((l) => l.annual));
-    const projectBudget = await tx.projectBudget.findUnique({ where: { projectId } });
-    if (!projectBudget) {
-      throw new HTTPError(422, '项目总预算不存在,请先完成初始预算编制并审批');
-    }
-    const annuals = await tx.annualBudget.aggregate({
-      where: { projectId },
-      _sum: { currentAmount: true },
-    });
-    const total = fromStored(projectBudget.currentAmount);
-    const allocated = fromStored(annuals._sum.currentAmount ?? '0');
-    const pool = total.minus(allocated);
-    if (requestTotal.gt(pool)) {
+  for (const [subjectId, request] of requestBySubject.entries()) {
+    const stb = stbBySubject.get(subjectId);
+    if (!stb) {
       throw new HTTPError(
         422,
-        `超出项目未分配额度:剩余 ${pool.toFixed(2)}(总预算 ${total.toFixed(2)} − 历年已分配年度预算 ${allocated.toFixed(2)}),本次申请 ${requestTotal.toFixed(2)}`,
+        `科目 ${nameBySubject.get(subjectId) ?? subjectId} 无总预算记录,请以新增科目行方式下达`,
       );
     }
-    return;
-  }
-
-  for (const [subjectId, amount] of allocatedBySubject.entries()) {
-    const stb = await tx.subjectTotalBudget.findUnique({
-      where: { projectId_subjectId: { projectId, subjectId } },
-      select: { currentAmount: true },
-    });
-    if (!stb) {
-      throw new HTTPError(422, `科目 ${subjectId} 无总预算记录,请以新增科目行方式下达`);
-    }
-    const yearlySums = await tx.subjectBudget.aggregate({
-      where: { projectId, subjectId },
-      _sum: { currentAmount: true },
-    });
-    const totalCurrent = fromStored(stb.currentAmount);
-    const alreadyAllocated = fromStored(yearlySums._sum.currentAmount ?? '0');
-    const remaining = totalCurrent.minus(alreadyAllocated);
-    if (amount.gt(remaining)) {
+    const stbCurrent = fromStored(stb.currentAmount).plus(
+      pendingTotalDeltaBySubject.get(subjectId) ?? ZERO,
+    );
+    const cumOcc = cumOccMap.get(subjectId) ?? ZERO;
+    const yearOcc = yearOccMap.get(subjectId) ?? ZERO;
+    const yearPlanS = sbBySubject.has(subjectId)
+      ? fromStored(sbBySubject.get(subjectId)!.currentAmount)
+      : ZERO;
+    const projectedYearRemainingPlan = yearPlanS
+      .plus(request)
+      .plus(pendingAnnualBySubject.get(`${year}:${subjectId}`) ?? ZERO)
+      .minus(yearOcc);
+    const stbRemaining = stbCurrent.minus(cumOcc);
+    if (projectedYearRemainingPlan.gt(stbRemaining)) {
+      const name = nameBySubject.get(subjectId) ?? subjectId;
       throw new HTTPError(
         422,
-        `超出剩余可分配额度:该科目剩余 ${remaining.toFixed(2)}(总预算 ${totalCurrent.toFixed(2)} − 历年已分配 ${alreadyAllocated.toFixed(2)}),本次申请 ${amount.toFixed(2)}`,
+        `科目"${name}"超出可下达额度:本次申请 ${request.toFixed(2)} 元后,本年剩余计划将达 ` +
+          `${projectedYearRemainingPlan.toFixed(2)} 元,超过科目总预算剩余 ${stbRemaining.toFixed(2)} 元` +
+          `(科目总预算 ${stbCurrent.toFixed(2)} − 该科目累计占用 ${cumOcc.toFixed(2)};` +
+          `本年计划 ${yearPlanS.toFixed(2)} − 该年已占用 ${yearOcc.toFixed(2)})`,
       );
     }
   }
@@ -692,6 +843,45 @@ export async function getAdjustment(
   }
   await requirePermission(user, 'project:view', adj.projectId);
   return adj;
+}
+
+/** 调整表单余额面板(ALLOCATE 容量口径的只读投影,金额为元字符串)。 */
+export interface AdjustmentBalance {
+  budgetMode: 'GENERAL' | 'LUMP_SUM';
+  /** 项目总预算(ProjectBudget.current)。 */
+  totalBudget: string;
+  /** 全项目累计占用(全部年度非作废记录)。 */
+  projectOccupied: string;
+  /** 剩余额度 = 总预算 − 累计占用。 */
+  remaining: string;
+  /** 目标年年度计划(AnnualBudget.current,未建账为 0)。 */
+  yearPlan: string;
+  /** 目标年已占用。 */
+  yearOccupied: string;
+  /** 可新增额度 = 剩余额度 − 目标年剩余计划;可为负(超额计划,风险色展示)。 */
+  allocatable: string;
+}
+
+/** 余额面板:调整表单顶部实时展示「还能往目标年下达多少」。 */
+export async function getAdjustmentBalance(
+  projectId: string,
+  year: number,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<AdjustmentBalance> {
+  await requirePermission(user, 'project:view', projectId);
+  assertValidYear(year, 'year');
+  const inputs = await readCapacityInputs(prisma, projectId, year);
+  const remaining = inputs.totalBudget.minus(inputs.projectOccupied);
+  const allocatable = remaining.minus(inputs.yearPlan).plus(inputs.yearOccupied);
+  return {
+    budgetMode: inputs.budgetMode,
+    totalBudget: inputs.totalBudget.toFixed(2),
+    projectOccupied: inputs.projectOccupied.toFixed(2),
+    remaining: remaining.toFixed(2),
+    yearPlan: inputs.yearPlan.toFixed(2),
+    yearOccupied: inputs.yearOccupied.toFixed(2),
+    allocatable: allocatable.toFixed(2),
+  };
 }
 
 // ------------------------------------------------------------
@@ -961,11 +1151,11 @@ export async function submitAdjustment(
     // 并发复核预期 = 提交前的状态(DRAFT 首次提交 / REJECTED 驳回后再提交)。
     const expectedStatus = adj.status;
     if (adj.kind === AdjustmentKind.ALLOCATE) {
-      // 追加下达:正向 + 非零合计;池内分配再做容量护栏(expandTotals 不设上限);无锁、无零和校验。
+      // 追加下达:正向 + 非零合计;容量护栏按余额锚定口径(expandTotals 不设上限);无锁、无零和校验。
       validateAllocate(parsedLines);
       await lockAndRecheckStatus(tx, adjId, expectedStatus);
       if (!adj.expandTotals) {
-        await assertAllocateCapacity(tx, adj.projectId, parsedLines);
+        await assertAllocateCapacity(tx, adj.projectId, adj.year, parsedLines, null);
       }
       const submitted = await tx.budgetAdjustment.update({
         where: { id: adjId },
@@ -1221,9 +1411,10 @@ export async function approveAdjustment(
       }
 
       const yearTotal = validateAllocate(parsedLines);
-      // expandTotals=false(池内分配)才做容量护栏;开启时科目总预算随行调增,无上限。
+      // expandTotals=false 才做容量护栏(余额锚定口径);开启时总预算随行调增,无上限。
+      // 审批时排除本单的在途投影(本单自身不能算成在途),并以事务内实时数据兜底并发。
       if (!adj.expandTotals) {
-        await assertAllocateCapacity(tx, adj.projectId, parsedLines);
+        await assertAllocateCapacity(tx, adj.projectId, adj.year, parsedLines, adj.id);
       }
 
       // 1) 新增科目行:建档(叶)+ 该年 SubjectBudget + SubjectTotalBudget(首笔分配额立账)。
@@ -1341,7 +1532,7 @@ export async function approveAdjustment(
       }
 
       // 2.5) expandTotals(新经费入账):现有科目的总预算随下达额同步调增。
-      //      (isNew 行第 1 步已按首笔分配额立账;池内模式则不动 STB。)
+      //      (isNew 行第 1 步已按首笔分配额立账;非 expandTotals 则不动 STB。)
       //      §包干制:整体跳过(无科目总预算层,经费只入项目总盘 + 年度盘子)。
       if (adj.expandTotals && !lumpSum) {
         for (const line of parsedLines) {
@@ -1415,7 +1606,7 @@ export async function approveAdjustment(
       }
 
       // 4) 项目总盘:仅 expandTotals(新经费入账)时 += X(人才类项目总额能涨);
-      //    池内分配不动总盘——钱本就在项目预算内,只是落地到年份。
+      //    余额内下达不动总盘——钱本就在项目预算内,只是编制到年份。
       if (adj.expandTotals) {
         const projectBudget = await tx.projectBudget.findUnique({
           where: { projectId: adj.projectId },

@@ -124,7 +124,7 @@ describe('businessRecord.service (integration, real PG)', () => {
   it('createRecord: 成功(100 < 600),overBudget=false;ledger 占用=100', async () => {
     const { project, leafA } = await seedApprovedProject('CREATE');
 
-    const { record, overBudget } = await createRecord(
+    const { record, overBudget, overTotalBudget, overSubjectTotal } = await createRecord(
       project.id,
       {
         budgetYear: 2026,
@@ -142,6 +142,9 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(record.amount.toFixed(2)).toBe('100.00');
     expect(record.isVoid).toBe(false);
     expect(record.createdById).toBe(adminId);
+    // 余额锚定双层预警:均在额度内 → 不亮。
+    expect(overTotalBudget).toBe(false);
+    expect(overSubjectTotal).toBe(false);
 
     // ledger 实时反映:leafA occupied = 100。
     const ledger = await getProjectLedger(project.id, 2026, adminUser());
@@ -180,6 +183,125 @@ describe('businessRecord.service (integration, real PG)', () => {
     const saved = await prisma.businessRecord.findUnique({ where: { id: record.id } });
     expect(saved).not.toBeNull();
     expect(saved!.amount.toFixed(2)).toBe('700.00');
+  });
+
+  it('createRecord: 余额锚定双层预警——超科目总预算(跨年累计)亮 overSubjectTotal,超项目总预算亮 overTotalBudget', async () => {
+    // 定制编制:total 1000;2026 年度只有 A 300(计划从紧);A 的 STB=600(天花板从宽)
+    // ——年度计划与科目天花板脱钩,分别验证两层预警。
+    const code = `T6-CAP-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 't6 cap' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    const payload: InitialBudgetPayload = {
+      ...validPayload(),
+      annualBudgets: [{ year: 2026, amount: '300.00' }],
+      subjectBudgets: [
+        {
+          year: 2026,
+          subjectCode: 'A',
+          amount: '300.00',
+          unit: '次',
+          quantity: '3.00',
+          unitPrice: '100.00',
+        },
+      ],
+    };
+    const { appId } = await createDraft(project.id, payload, adminUser());
+    await submitDraft(appId, adminUser());
+    await approveApplication(appId, adminUser());
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    const leafA = subjects.find((s) => s.code === 'A')!;
+
+    // 400 > 年度计划 300 → 年度预警;400 ≤ STB 600、≤ 项目 1000 → 两层总预算口径不亮。
+    const r1 = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '400.00',
+        businessDate: '2026-05-01',
+        handler: '经办人A',
+        summary: '超年度但在天花板内',
+        status: BusinessStatus.PLACEHOLDER,
+      },
+      adminUser(),
+    );
+    expect(r1.overBudget).toBe(true);
+    expect(r1.overSubjectTotal).toBe(false);
+    expect(r1.overTotalBudget).toBe(false);
+
+    // 2027 同科目再录 300:科目累计 700 > STB 600 → overSubjectTotal;
+    // 项目累计 700 ≤ 1000 → overTotalBudget 仍不亮(2027 无年度预算 → 年度预警亮)。
+    const r2 = await createRecord(
+      project.id,
+      {
+        budgetYear: 2027,
+        subjectId: leafA.id,
+        amount: '300.00',
+        businessDate: '2027-05-01',
+        handler: '经办人A',
+        summary: '跨年累计超科目总预算',
+        status: BusinessStatus.PLACEHOLDER,
+      },
+      adminUser(),
+    );
+    expect(r2.overBudget).toBe(true);
+    expect(r2.overSubjectTotal).toBe(true);
+    expect(r2.overTotalBudget).toBe(false);
+  });
+
+  it('createRecord: 全项目累计占用超过总预算 → overTotalBudget=true(余额红线,仍保存)', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('TOTAL');
+    const base = {
+      handler: '经办人A',
+      status: BusinessStatus.PLACEHOLDER,
+    };
+    // A 550(≤600)+ B 400(=400)→ 项目累计 950 ≤ 1000,全不亮。
+    const r1 = await createRecord(
+      project.id,
+      {
+        ...base,
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '550.00',
+        businessDate: '2026-06-01',
+        summary: '余额红线-1',
+      },
+      adminUser(),
+    );
+    expect(r1.overTotalBudget).toBe(false);
+    const r2 = await createRecord(
+      project.id,
+      {
+        ...base,
+        budgetYear: 2026,
+        subjectId: leafB.id,
+        amount: '400.00',
+        businessDate: '2026-06-02',
+        summary: '余额红线-2',
+      },
+      adminUser(),
+    );
+    expect(r2.overTotalBudget).toBe(false);
+
+    // 再录 B 100:项目累计 1050 > 1000 → overTotalBudget(年度/科目口径同超,一并亮灯)。
+    const r3 = await createRecord(
+      project.id,
+      {
+        ...base,
+        budgetYear: 2026,
+        subjectId: leafB.id,
+        amount: '100.00',
+        businessDate: '2026-06-03',
+        summary: '余额红线-3',
+      },
+      adminUser(),
+    );
+    expect(r3.overBudget).toBe(true);
+    expect(r3.overSubjectTotal).toBe(true);
+    expect(r3.overTotalBudget).toBe(true);
   });
 
   it('createRecord/updateRecord: docNo 硬重复 409、作废释放编号、指纹疑似 duplicateHints(ADR 0002)', async () => {

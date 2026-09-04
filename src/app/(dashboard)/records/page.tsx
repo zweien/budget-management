@@ -420,19 +420,22 @@ export default function UnifiedRecordsPage() {
   const onEntrySubmit = entryForm.handleSubmit(async (values) => {
     setSubmitting(true);
     try {
-      const res = await apiFetch<{ overBudget?: boolean }>(
-        `/api/projects/${entryProjectId}/records`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            ...values,
-            amount: Number(values.amount).toFixed(2),
-            businessDate: format(values.businessDate, 'yyyy-MM-dd'),
-            remark: values.remark || null,
-          }),
-        },
-      );
-      toast.success(res.overBudget ? '已录入(超出预算,请关注)' : '已录入');
+      const res = await apiFetch<{
+        overBudget?: boolean;
+        overTotalBudget?: boolean;
+        overSubjectTotal?: boolean;
+      }>(`/api/projects/${entryProjectId}/records`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...values,
+          amount: Number(values.amount).toFixed(2),
+          businessDate: format(values.businessDate, 'yyyy-MM-dd'),
+          remark: values.remark || null,
+        }),
+      });
+      // 预警合并为一条提示;口径细节在项目记录页的弹窗里列明。
+      const overAny = res.overBudget || res.overTotalBudget || res.overSubjectTotal;
+      toast.success(overAny ? '已录入(超出预算,请关注)' : '已录入');
       // 连续录入:清金额/摘要/备注,日期归零到当天,焦点留在表单。
       entryForm.reset({
         ...values,

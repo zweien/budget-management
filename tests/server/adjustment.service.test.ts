@@ -469,7 +469,7 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
   /**
    * ALLOCATE 专用种子:「总预算固定、年度分批做满」——年度只分配 40%:
    * projectTotal=1000;2026 年度=400(A 240 / B 160);科目总预算 A=600、B=400。
-   * 剩余可分配:A 360、B 240;项目未分配池 = 1000 − 400 = 600。
+   * 余额锚定口径:剩余额度 = 1000(无执行占用);A 科目天花板剩余 600、B 400。
    */
   function partialAllocPayload(): InitialBudgetPayload {
     return {
@@ -850,20 +850,110 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(sb!.currentAmount.toFixed(2)).toBe('100.00');
   });
 
-  it('ALLOCATE: 超出剩余可分配额 → submit 422(容量护栏)', async () => {
-    const { project, leafA } = await seedPartialProject('CAP');
-    // A 剩余 360,申请 400 → 拒绝。
-    const adj = await createAdjustment(
+  it('ALLOCATE: 余额锚定——计划与加法池脱钩(可超历年计划合计),超科目总预算剩余 422', async () => {
+    const { project, leafA, leafB } = await seedPartialProject('CAP');
+    // 编制:total 1000;2026 年度 400(A 240);A 的 STB=600。
+    // 旧模型:A 历年已分配 240,剩余可分配 360,下达 500 必拒;
+    // 新模型:计划与 Σ年度脱钩——A 无执行占用,2028 一次性下达 500(< STB 600)合法。
+    const ok = await createAdjustment(
       project.id,
       {
         year: 2028,
         kind: 'ALLOCATE',
-        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '400.00' }],
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '500.00' }],
       },
       adminUser(),
     );
-    const err = await expectHTTP(() => submitAdjustment(adj.id, adminUser()), 422);
-    expect(err.message).toContain('剩余可分配');
+    await submitAdjustment(ok.id, adminUser());
+    await approveAdjustment(ok.id, adminUser());
+    const sb = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2028, subjectId: leafA.id },
+      },
+    });
+    expect(sb!.currentAmount.toFixed(2)).toBe('500.00');
+
+    // A 的 STB=600、累计占用 0:2029 再下达 700 → 本年剩余计划 700 > 科目总预算剩余 600 → 422。
+    // (项目层 700 ≤ 剩余额度 1000 放行,由科目层拦截。)
+    const overSubject = await createAdjustment(
+      project.id,
+      {
+        year: 2029,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '700.00' }],
+      },
+      adminUser(),
+    );
+    const err = await submitAdjustment(overSubject.id, adminUser()).catch((e) => e);
+    expect(err).toMatchObject({ status: 422 });
+    expect(err.message).toContain('超出可下达额度');
+    expect(err.message).toContain('科目总预算剩余');
+
+    // 项目层红线:同单 1100 > 项目剩余额度 1000 → 422(先于科目层拦截)。
+    const overProject = await createAdjustment(
+      project.id,
+      {
+        year: 2029,
+        kind: 'ALLOCATE',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '400.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '700.00' },
+        ],
+      },
+      adminUser(),
+    );
+    const err2 = await submitAdjustment(overProject.id, adminUser()).catch((e) => e);
+    expect(err2).toMatchObject({ status: 422 });
+    expect(err2.message).toContain('项目剩余额度');
+  });
+
+  it('ALLOCATE: 在途 PENDING 追加单预订额度——第二张同额度单提交 422(在途投影)', async () => {
+    const { project, leafA, leafB } = await seedPartialProject('PENDING');
+    // 单 A:2027 下达 800(A 450 + B 350,均在各自 STB 内;合计 ≤ 剩余额度 1000)→ PENDING。
+    const first = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '450.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '350.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(first.id, adminUser());
+
+    // 单 B:同样 800。若不计在途,headroom = 1000 ≥ 800 会漏过;投影在途 800 后
+    // 可新增 = 200 < 800 → 422,报文含「在途追加单已预订」。
+    const second = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '450.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '350.00' },
+        ],
+      },
+      adminUser(),
+    );
+    const err = await submitAdjustment(second.id, adminUser()).catch((e) => e);
+    expect(err).toMatchObject({ status: 422 });
+    expect(err.message).toContain('在途追加单已预订');
+
+    // 审批第一张后,第三张 150(A)≤ 可新增 200,且 A 本年计划 450+150=600 ≤ STB → 可提交。
+    await approveAdjustment(first.id, adminUser());
+    const smaller = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '150.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(smaller.id, adminUser());
   });
 
   it('ALLOCATE: 负数行/非零 total 行/全零单 均 422', async () => {

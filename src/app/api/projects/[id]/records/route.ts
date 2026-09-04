@@ -80,7 +80,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 /**
  * POST /api/projects/:id/records — 新增业务记录(§8.1/8.4)。
- * 返回 { record, overBudget };overBudget=true 表示超预算预警(§8.4 仍保存)。
+ * 返回 { record, overBudget, overTotalBudget, overSubjectTotal };超预算仅预警仍保存
+ * (§8.4 年度科目口径 / §8.4b 项目总预算与 GENERAL 科目总预算口径)。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
