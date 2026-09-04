@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApprovalStatus, UserRole } from '@prisma/client';
+import { ApprovalStatus, BusinessStatus, Prisma, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
@@ -18,6 +18,7 @@ import {
   createAdjustment,
   deleteDraftAdjustment,
   getAdjustment,
+  getAdjustmentBalance,
   getAdjustmentDetail,
   listAdjustments,
   submitAdjustment,
@@ -954,6 +955,123 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       adminUser(),
     );
     await submitAdjustment(smaller.id, adminUser());
+  });
+
+  it('ALLOCATE: 在途预订只挡同目标年——2027 在途不消耗 2028 可下达额度(§codex P2)', async () => {
+    const { project, leafA, leafB } = await seedPartialProject('CROSSYEAR');
+    // 2027 在途 800(A 450 + B 350)保持 PENDING。
+    const pending2027 = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '450.00' },
+          { subjectId: leafB.id, totalAdjustment: '0', annualAdjustment: '350.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(pending2027.id, adminUser());
+
+    // 2028 下达 600:异年在途不投影 → 剩余额度 1000 全量可用,正常通过提交并审批。
+    // (修复前 pendingAllocateTotal 计入异年 800 → 600 > 200 被错挡,且审批 2027 后同单又能过,
+    //  结论随审批顺序漂移。)
+    const adj2028 = await createAdjustment(
+      project.id,
+      {
+        year: 2028,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '600.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj2028.id, adminUser());
+    await approveAdjustment(adj2028.id, adminUser());
+    const ab2028 = await prisma.annualBudget.findUnique({
+      where: { projectId_year: { projectId: project.id, year: 2028 } },
+    });
+    expect(ab2028!.currentAmount.toFixed(2)).toBe('600.00');
+  });
+
+  it('ALLOCATE: 遗留结转副本归一化——成对并存只计一腿,虚增占用不再错挡下达(§codex P1)', async () => {
+    const { project, leafA } = await seedPartialProject('LEGACY');
+    // 旧跨年结转产物:源记录(2026,A,300)+ 副本(2027,同额,remark「[结转自2026]」),
+    // carryover_out/carryover_in 留痕以 reason 互相引用(与旧 yearCarryover.service 写法一致)。
+    const srcId = uuidv7();
+    const copyId = uuidv7();
+    await prisma.businessRecord.createMany({
+      data: [
+        {
+          id: srcId,
+          projectId: project.id,
+          budgetYear: 2026,
+          subjectId: leafA.id,
+          amount: '300.00',
+          businessDate: new Date('2026-03-01T00:00:00Z'),
+          handler: '旧',
+          summary: '结转源',
+          status: BusinessStatus.FINANCE_APPROVAL,
+          createdById: adminId,
+        },
+        {
+          id: copyId,
+          projectId: project.id,
+          budgetYear: 2027,
+          subjectId: leafA.id,
+          amount: '300.00',
+          businessDate: new Date('2026-03-01T00:00:00Z'),
+          handler: '旧',
+          summary: '结转源',
+          status: BusinessStatus.FINANCE_APPROVAL,
+          remark: '[结转自2026]',
+          createdById: adminId,
+        },
+      ],
+    });
+    await prisma.businessRecordHistory.createMany({
+      data: [
+        {
+          id: uuidv7(),
+          businessRecordId: srcId,
+          action: 'carryover_out',
+          beforeData: Prisma.JsonNull,
+          afterData: Prisma.JsonNull,
+          operatorId: adminId,
+          reason: `结转至 2027 年记录 ${copyId}`,
+        },
+        {
+          id: uuidv7(),
+          businessRecordId: copyId,
+          action: 'carryover_in',
+          beforeData: Prisma.JsonNull,
+          afterData: Prisma.JsonNull,
+          operatorId: adminId,
+          reason: `结转自 2026 年记录 ${srcId}`,
+        },
+      ],
+    });
+
+    // 归一化后占用 = 300(只算源腿):余额面板 300、2027 可下达恰好放行;
+    // 若双计(600)则科目天花板剩余 0,科目层直接拒绝。
+    const balance = await getAdjustmentBalance(project.id, 2027, adminUser());
+    expect(balance.projectOccupied).toBe('300.00');
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0', annualAdjustment: '300.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    // 源作废后副本接管计数:占用仍 300(副本 300,源已废),不是 0 也不是 600。
+    await prisma.businessRecord.update({ where: { id: srcId }, data: { isVoid: true } });
+    const balance2 = await getAdjustmentBalance(project.id, 2028, adminUser());
+    expect(balance2.projectOccupied).toBe('300.00');
   });
 
   it('ALLOCATE: 负数行/非零 total 行/全零单 均 422', async () => {

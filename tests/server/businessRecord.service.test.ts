@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { BusinessStatus, UserRole } from '@prisma/client';
+import { BusinessStatus, Prisma, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
@@ -302,6 +302,99 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(r3.overBudget).toBe(true);
     expect(r3.overSubjectTotal).toBe(true);
     expect(r3.overTotalBudget).toBe(true);
+  });
+
+  it('createRecord: 遗留结转副本归一化——成对并存只计一腿,预警不虚发(§codex P1)', async () => {
+    const { project, leafA } = await seedApprovedProject('LEGACYWARN');
+    // 旧结转产物:源(2026 A 200)+ 副本(2027 A 200, remark 留痕互指),双双非作废。
+    const srcId = uuidv7();
+    const copyId = uuidv7();
+    await prisma.businessRecord.createMany({
+      data: [
+        {
+          id: srcId,
+          projectId: project.id,
+          budgetYear: 2026,
+          subjectId: leafA.id,
+          amount: '200.00',
+          businessDate: new Date('2026-04-01T00:00:00Z'),
+          handler: '旧',
+          summary: '结转源',
+          status: BusinessStatus.PLACEHOLDER,
+          createdById: adminId,
+        },
+        {
+          id: copyId,
+          projectId: project.id,
+          budgetYear: 2027,
+          subjectId: leafA.id,
+          amount: '200.00',
+          businessDate: new Date('2026-04-01T00:00:00Z'),
+          handler: '旧',
+          summary: '结转源',
+          status: BusinessStatus.PLACEHOLDER,
+          remark: '[结转自2026]',
+          createdById: adminId,
+        },
+      ],
+    });
+    await prisma.businessRecordHistory.createMany({
+      data: [
+        {
+          id: uuidv7(),
+          businessRecordId: srcId,
+          action: 'carryover_out',
+          beforeData: Prisma.JsonNull,
+          afterData: Prisma.JsonNull,
+          operatorId: adminId,
+          reason: `结转至 2027 年记录 ${copyId}`,
+        },
+        {
+          id: uuidv7(),
+          businessRecordId: copyId,
+          action: 'carryover_in',
+          beforeData: Prisma.JsonNull,
+          afterData: Prisma.JsonNull,
+          operatorId: adminId,
+          reason: `结转自 2026 年记录 ${srcId}`,
+        },
+      ],
+    });
+
+    // 再录 2026 A 300:归一化累计 = 200(源) + 300 = 500 ≤ STB 600 → 不亮;
+    // 若双计(200+200+300=700)会虚发 overSubjectTotal。
+    const r1 = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '300.00',
+        businessDate: '2026-07-01',
+        handler: '经办人A',
+        summary: '归一化后不超天花板',
+        status: BusinessStatus.PLACEHOLDER,
+      },
+      adminUser(),
+    );
+    expect(r1.overSubjectTotal).toBe(false);
+    expect(r1.overTotalBudget).toBe(false);
+
+    // 源作废后副本接管计数:200(副本)+ 300 + 200 = 700 > 600 → overSubjectTotal 亮起。
+    await prisma.businessRecord.update({ where: { id: srcId }, data: { isVoid: true } });
+    const r2 = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '200.00',
+        businessDate: '2026-08-01',
+        handler: '经办人A',
+        summary: '源作废后副本计数',
+        status: BusinessStatus.PLACEHOLDER,
+      },
+      adminUser(),
+    );
+    expect(r2.overSubjectTotal).toBe(true);
   });
 
   it('createRecord/updateRecord: docNo 硬重复 409、作废释放编号、指纹疑似 duplicateHints(ADR 0002)', async () => {

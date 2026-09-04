@@ -9,6 +9,10 @@ import { adjustableAmount, computeOccupancy } from '@/lib/budget';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
 import { buildBaselineAmounts } from '@/server/services/adjustmentBaseline.service';
+import {
+  carryoverExcludedRecordIds,
+  withoutCarryoverExcluded,
+} from '@/server/services/carryoverNormalization.service';
 
 /**
  * §7 预算调整(双维度模型 + 追加下达模式)。
@@ -379,17 +383,21 @@ async function readCapacityInputs(
   db: Prisma.TransactionClient | typeof prisma,
   projectId: string,
   year: number,
+  /** 调用方已算好结转副本排除集时传入,免得重复查询(科目层投影同要用)。 */
+  excluded?: string[],
 ): Promise<CapacityInputs> {
+  // 遗留结转副本(源+副本两条非作废同额记录)只计一腿,避免虚增占用错挡下达。
+  const excludedIds = excluded ?? (await carryoverExcludedRecordIds(projectId, db));
   const [project, projectBudget, projectAgg, annualBudget, yearAgg] = await Promise.all([
     db.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
     db.projectBudget.findUnique({ where: { projectId } }),
     db.businessRecord.aggregate({
-      where: { projectId, isVoid: false },
+      where: withoutCarryoverExcluded({ projectId, isVoid: false }, excludedIds),
       _sum: { amount: true },
     }),
     db.annualBudget.findUnique({ where: { projectId_year: { projectId, year } } }),
     db.businessRecord.aggregate({
-      where: { projectId, budgetYear: year, isVoid: false },
+      where: withoutCarryoverExcluded({ projectId, budgetYear: year, isVoid: false }, excludedIds),
       _sum: { amount: true },
     }),
   ]);
@@ -412,9 +420,12 @@ async function readCapacityInputs(
  * - GENERAL 科目层(镜像 STB):科目总预算剩余(科目总预算 − 累计占用)≥
  *   本年剩余计划(年度科目计划 + 本单 + 在途 − 该年该科目已占用)。
  *   新增科目行不做此校验(科目总预算以首笔分配额立账,天花板与计划同增)。
- * - PENDING 投影:其他在途追加单(非 expandTotals)的年度下达额预订项目额度;
- *   在途调剂单的年度 delta 挤占科目本年计划、总维度 delta 挪动科目天花板,均按科目计入。
- *   expandTotals 自带经费(总预算同步上调),不占他人额度,整体不计入。
+ * - PENDING 投影:与目标年**同年**的其他在途追加单(非 expandTotals)预订项目额度——
+ *   异年单审批后只占自己年份的「剩余计划」,不该挡本年(审批顺序不应改变结论);
+ *   在途调剂单的年度 delta 挤占科目本年计划、总维度 delta 挪动科目天花板(跨年),
+ *   均按科目计入。expandTotals 自带经费(总预算同步上调),不占他人额度,整体不计入。
+ * - 并发串行化:提交路径在本函数内锁项目总预算行 FOR UPDATE,两张并发提交的
+ *   在途投影必然读到对方已置的 PENDING(审批路径的调用方已持同把锁,重入无害)。
  * 提交与审批两处都调:提交时尽早反馈,审批时兜底并发(同 assertTotalDecreaseFloor 思路)。
  */
 async function assertAllocateCapacity(
@@ -428,7 +439,13 @@ async function assertAllocateCapacity(
   const requestTotal = sumAmounts(parsedLines.map((l) => l.annual));
   if (requestTotal.lte(ZERO)) return;
 
-  const inputs = await readCapacityInputs(tx, projectId, year);
+  // §codex P2:并发提交串行化——在途投影读 PENDING 前先锁项目总预算行,
+  // 后到的事务会等先到者提交后再读,看到对方刚置的 PENDING 而被正确拦截。
+  await tx.$queryRaw`SELECT project_id FROM project_budgets WHERE project_id = ${projectId}::uuid FOR UPDATE`;
+
+  // 遗留结转副本排除集:项目层与科目层投影共用同一份。
+  const excluded = await carryoverExcludedRecordIds(projectId, tx);
+  const inputs = await readCapacityInputs(tx, projectId, year, excluded);
   if (!inputs.hasProjectBudget) {
     throw new HTTPError(422, '项目总预算不存在,请先完成初始预算编制并审批');
   }
@@ -456,7 +473,11 @@ async function assertAllocateCapacity(
       for (const l of a.lines) {
         const amt = fromStored(String(l.annualAdjustment));
         if (amt.lte(ZERO)) continue;
-        pendingAllocateTotal = pendingAllocateTotal.plus(amt);
+        // §codex P2:仅同目标年在途单预订项目额度——异年单审批后只占自己年份的
+        // 「剩余计划」,不应挡本年(否则提交/审批顺序不同会得出不同结论)。
+        if (a.year === year) {
+          pendingAllocateTotal = pendingAllocateTotal.plus(amt);
+        }
         if (l.subjectId) {
           const key = `${a.year}:${l.subjectId}`;
           pendingAnnualBySubject.set(key, (pendingAnnualBySubject.get(key) ?? ZERO).plus(amt));
@@ -522,12 +543,18 @@ async function assertAllocateCapacity(
     }),
     tx.businessRecord.groupBy({
       by: ['subjectId'],
-      where: { projectId, subjectId: { in: subjectIds }, isVoid: false },
+      where: withoutCarryoverExcluded(
+        { projectId, subjectId: { in: subjectIds }, isVoid: false },
+        excluded,
+      ),
       _sum: { amount: true },
     }),
     tx.businessRecord.groupBy({
       by: ['subjectId'],
-      where: { projectId, budgetYear: year, subjectId: { in: subjectIds }, isVoid: false },
+      where: withoutCarryoverExcluded(
+        { projectId, budgetYear: year, subjectId: { in: subjectIds }, isVoid: false },
+        excluded,
+      ),
       _sum: { amount: true },
     }),
   ]);

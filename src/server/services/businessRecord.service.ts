@@ -9,6 +9,10 @@ import { computeOccupancy } from '@/lib/budget';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
 import { checkDuplicates, type DuplicateConflict } from '@/server/services/duplicateCheck.service';
+import {
+  carryoverExcludedRecordIds,
+  withoutCarryoverExcluded,
+} from '@/server/services/carryoverNormalization.service';
 
 /** §8 四态枚举(便于上层校验集合)。 */
 const BUSINESS_STATUSES: readonly BusinessStatus[] = [
@@ -216,15 +220,17 @@ async function computeCapacityWarnings(
   extraAmount: D,
   exclude: { project: D; subject: D } = { project: ZERO, subject: ZERO },
 ): Promise<{ overTotalBudget: boolean; overSubjectTotal: boolean }> {
+  // 遗留结转副本(源+副本两条非作废同额记录)只计一腿,与容量护栏同口径。
+  const excluded = await carryoverExcludedRecordIds(projectId);
   const [project, projectBudget, projectAgg, subjectAgg, stb] = await Promise.all([
     prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
     prisma.projectBudget.findUnique({ where: { projectId } }),
     prisma.businessRecord.aggregate({
-      where: { projectId, isVoid: false },
+      where: withoutCarryoverExcluded({ projectId, isVoid: false }, excluded),
       _sum: { amount: true },
     }),
     prisma.businessRecord.aggregate({
-      where: { projectId, subjectId, isVoid: false },
+      where: withoutCarryoverExcluded({ projectId, subjectId, isVoid: false }, excluded),
       _sum: { amount: true },
     }),
     prisma.subjectTotalBudget.findUnique({
