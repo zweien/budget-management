@@ -55,7 +55,8 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 | 月度统计           | `GET /statistics/monthly?projectId=$PID&year=2026`                                                                                                                           |
 | 余额统计           | `GET /statistics/balance?subject=&projectId=&year=&onlyNegative=1`                                                                                                           |
 | 审计日志           | `GET /audit-logs?projectId=&action=&dateFrom=&dateTo=&limit=`(无人值守被拒尝试 action=`unattended.denied`)                                                                   |
-| 上传解析(不改台账) | `POST -F file=@文件.xlsx /projects/$PID/imports` → `{batchId}`,格式自动识别(结算单/标准模板)                                                                                 |
+| 上传解析(不改台账) | `POST -F file=@文件.xlsx /projects/$PID/imports` → `{batchId}`,格式自动识别(结算单 v1 填制日期版 / v2 申请日期版 / 标准模板)                                                 |
+| 补全更新预览       | 结算单再次导入命中同单据编号且金额一致、带来新信息(补完成日期/状态推进到已支出)→ 行标「补全更新」,确认后**更新**既有记录(非新增);金额不一致或无新信息 = 硬重复,禁止          |
 | 暂存行修改         | `PATCH /projects/$PID/imports/:batchId`,body `{"updates":[{"rowId","subjectId"?,"budgetYear"?,"forcedImport"?}]}`                                                            |
 
 ### 指令授权

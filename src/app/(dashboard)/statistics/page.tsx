@@ -394,7 +394,7 @@ function CustomStatisticsTab() {
             </Select>
           </div>
           <div className="grid gap-1.5">
-            <Label>业务发生日期</Label>
+            <Label>申请日期</Label>
             <DateRangePicker
               value={filters.dateRange}
               onChange={(range) => setFilters((f) => ({ ...f, dateRange: range }))}
@@ -463,7 +463,7 @@ function CustomStatisticsTab() {
               <TableHead className="w-32">科目编码</TableHead>
               <TableHead>科目名称</TableHead>
               <TableHead className="w-20">年度</TableHead>
-              <TableHead className="w-32">业务发生日期</TableHead>
+              <TableHead className="w-32">申请日期</TableHead>
               <TableHead className="w-32 text-right">金额</TableHead>
               <TableHead className="w-32">状态</TableHead>
               <TableHead className="w-28">经办人</TableHead>
@@ -473,14 +473,14 @@ function CustomStatisticsTab() {
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
+                <TableRow key={i} className="">
                   <TableCell colSpan={8}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : (result?.records.length ?? 0) === 0 ? (
-              <TableRow className="hover:bg-transparent">
+              <TableRow className="">
                 <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                   {hasQueried ? '没有匹配的业务记录' : '点击"查询"加载明细'}
                 </TableCell>
@@ -609,9 +609,7 @@ function MonthlyHistoryTab() {
       </Card>
 
       <Alert variant="info">
-        <AlertDescription>
-          按业务发生日期归月,实时重算;仅统计有效(非作废)记录(§11.4)。
-        </AlertDescription>
+        <AlertDescription>按申请日期归月,实时重算;仅统计有效(非作废)记录(§11.4)。</AlertDescription>
       </Alert>
 
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
@@ -627,14 +625,14 @@ function MonthlyHistoryTab() {
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
+                <TableRow key={i} className="">
                   <TableCell colSpan={4}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : (result?.months.length ?? 0) === 0 ? (
-              <TableRow className="hover:bg-transparent">
+              <TableRow className="">
                 <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
                   {result ? '暂无数据' : '选择项目与年度后查询'}
                 </TableCell>
@@ -755,14 +753,14 @@ function CrossProjectTab() {
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
+                <TableRow key={i} className="">
                   <TableCell colSpan={6}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : (result?.projects.length ?? 0) === 0 ? (
-              <TableRow className="hover:bg-transparent">
+              <TableRow className="">
                 <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                   {hasQueried ? '暂无项目' : '点击"刷新"加载'}
                 </TableCell>
@@ -1160,14 +1158,14 @@ function BalanceTab() {
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
+                <TableRow key={i} className="">
                   <TableCell colSpan={hasYear ? 11 : 8}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : sortedRows.length === 0 ? (
-              <TableRow className="hover:bg-transparent">
+              <TableRow className="">
                 <TableCell
                   colSpan={hasYear ? 11 : 8}
                   className="h-32 text-center text-muted-foreground"

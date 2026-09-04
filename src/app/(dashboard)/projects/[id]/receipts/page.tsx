@@ -265,14 +265,14 @@ export default function ReceiptsPage() {
           <TableBody>
             {loadingRecords ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
+                <TableRow key={i} className="">
                   <TableCell colSpan={7}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : records.length === 0 ? (
-              <TableRow className="hover:bg-transparent">
+              <TableRow className="">
                 <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                   暂无到账记录
                 </TableCell>

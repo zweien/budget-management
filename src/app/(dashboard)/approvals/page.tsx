@@ -307,13 +307,13 @@ export default function ApprovalsPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow className="hover:bg-transparent">
+                  <TableRow className="">
                     <TableCell colSpan={4}>
                       <Skeleton className="h-8 w-full" />
                     </TableCell>
                   </TableRow>
                 ) : (data?.initialBudgets.length ?? 0) === 0 ? (
-                  <TableRow className="hover:bg-transparent">
+                  <TableRow className="">
                     <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
                       暂无待审批编制单
                     </TableCell>
@@ -349,13 +349,13 @@ export default function ApprovalsPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow className="hover:bg-transparent">
+                  <TableRow className="">
                     <TableCell colSpan={7}>
                       <Skeleton className="h-8 w-full" />
                     </TableCell>
                   </TableRow>
                 ) : (data?.adjustments.length ?? 0) === 0 ? (
-                  <TableRow className="hover:bg-transparent">
+                  <TableRow className="">
                     <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                       暂无待审批调整单
                     </TableCell>
@@ -408,13 +408,13 @@ export default function ApprovalsPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow className="hover:bg-transparent">
+                  <TableRow className="">
                     <TableCell colSpan={4}>
                       <Skeleton className="h-8 w-full" />
                     </TableCell>
                   </TableRow>
                 ) : (data?.subjectChanges.length ?? 0) === 0 ? (
-                  <TableRow className="hover:bg-transparent">
+                  <TableRow className="">
                     <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
                       暂无待审批科目变更单
                     </TableCell>

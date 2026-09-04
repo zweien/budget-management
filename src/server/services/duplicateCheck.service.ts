@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { normalizeWhitespace } from '@/lib/text';
+import { STATUS_ENUM_TO_CN } from '@/lib/excel/template';
 
 /**
  * 统一查重判定器(ADR 0002):所有业务记录写入口(标准模板导入 / 结算单导入 /
@@ -11,6 +12,9 @@ import { normalizeWhitespace } from '@/lib/text';
  *   partial unique index (project_id, docNo) WHERE … AND is_void = false 兜底。
  * - **疑似重复**:无编号行按指纹(年度+金额+业务日期+摘要归一化)命中既有记录或本批内重复
  *   ——仅提示,由人工判断,可强制导入。
+ * - **补全更新(refresh,仅结算单导入开启)**:同单据编号命中已有记录,且新行带来新信息
+ *   (新行有完成日期而已有记录缺,或状态推进到已支出)且金额一致 → 不判硬重复,
+ *   确认后只更新既有记录的 完成日期/状态(状态只前进不回退);金额不一致或无新信息仍硬重复。
  *
  * 作废记录不参与判定(不占编号、不算指纹);跨项目不查(唯一性以项目为界)。
  */
@@ -26,6 +30,10 @@ export interface DuplicateCheckRow {
   /** yyyy-mm-dd;null 则跳过指纹。 */
   businessDate: string | null;
   summary: string | null;
+  /** 映射后的业务状态(结算单导入传入;用于补全更新的状态推进判定)。 */
+  status?: string | null;
+  /** 完成日期 yyyy-mm-dd(新格式结算单;可空)。 */
+  completedDate?: string | null;
 }
 
 export interface DuplicateConflict {
@@ -35,6 +43,10 @@ export interface DuplicateConflict {
   amount: string;
   businessDate: string;
   summary: string;
+  /** 既有记录当前状态(补全更新判定与硬重复理由用)。 */
+  status?: string;
+  /** 既有记录完成日期 yyyy-mm-dd(可空)。 */
+  completedDate?: string | null;
 }
 
 export interface DuplicateRowVerdict {
@@ -45,6 +57,8 @@ export interface DuplicateRowVerdict {
   suspected: boolean;
   /** 命中的既有记录(硬重复必有;疑似重复通常有)。 */
   conflicts: DuplicateConflict[];
+  /** 补全更新:同号命中但带来新信息,确认后更新既有记录(而非新增)。 */
+  refresh?: boolean;
   /** 硬重复来源:db=项目内已有同号记录;inFile=本批内同号出现 2+ 次。 */
   hardSource?: 'db' | 'inFile';
   /** hardSource=inFile 时,本批内首次出现该编号的行引用。 */
@@ -54,11 +68,31 @@ export interface DuplicateRowVerdict {
 export interface CheckDuplicatesOptions {
   /** 编辑场景排除自身(避免与自己的旧值判重)。 */
   excludeRecordId?: string;
+  /** 允许补全更新(仅结算单导入):同号命中且金额一致且带来新信息 → refresh 而非 hard。 */
+  allowRefresh?: boolean;
 }
 
 function normDocNo(docNo: string | null | undefined): string | null {
   const t = docNo?.trim();
   return t ? t : null;
+}
+
+/**
+ * 硬重复的人类可读理由(预览悬浮提示):db 来源给出既有记录摘要,
+ * inFile 来源指出本批内首次出现的行号。
+ */
+export function hardDupReason(v: DuplicateRowVerdict): string | null {
+  if (!v.hard) return null;
+  if (v.hardSource === 'inFile') {
+    return `文件内第 ${v.inFileDupOf ?? '?'} 行已出现相同单据编号`;
+  }
+  const c = v.conflicts[0];
+  if (!c) return '单据编号与项目内未作废记录重复';
+  const statusCn = c.status ? (STATUS_ENUM_TO_CN[c.status] ?? c.status) : null;
+  return (
+    `与项目内已有记录冲突:${c.businessDate} 申请 ${c.amount} 元「${c.summary}」` +
+    (statusCn ? `(当前状态 ${statusCn})` : '')
+  );
 }
 
 function fingerprintOf(year: number, amount: string, date: string, summary: string): string {
@@ -124,6 +158,8 @@ export async function checkDuplicates(
         amount: true,
         businessDate: true,
         summary: true,
+        status: true,
+        completedDate: true,
       },
     });
     const byDocNo = new Map(docNoHits.map((h) => [h.docNo as string, h]));
@@ -133,6 +169,24 @@ export async function checkDuplicates(
       const hit = byDocNo.get(docNo);
       if (hit) {
         const v = verdicts.get(r.rowKey)!;
+        // §补全更新:金额一致 + 带来新信息(补完成日期缺口 / 状态推进到已支出)。
+        const amountEqual = r.amount !== null && r.amount === hit.amount.toFixed(2);
+        const statusAdvances = r.status === 'PAID' && hit.status !== 'PAID';
+        const fillsCompletion = !!r.completedDate && hit.completedDate === null;
+        if (opts.allowRefresh === true && amountEqual && (statusAdvances || fillsCompletion)) {
+          v.refresh = true;
+          if (!v.conflicts.some((c) => c.recordId === hit.id)) {
+            v.conflicts.push({
+              recordId: hit.id,
+              docNo: hit.docNo,
+              budgetYear: hit.budgetYear,
+              amount: hit.amount.toFixed(2),
+              businessDate: hit.businessDate.toISOString().slice(0, 10),
+              summary: hit.summary,
+            });
+          }
+          continue;
+        }
         if (!v.hard) v.hardSource = 'db';
         v.hard = true;
         if (!v.conflicts.some((c) => c.recordId === hit.id)) {
@@ -143,6 +197,8 @@ export async function checkDuplicates(
             amount: hit.amount.toFixed(2),
             businessDate: hit.businessDate.toISOString().slice(0, 10),
             summary: hit.summary,
+            status: hit.status,
+            completedDate: hit.completedDate?.toISOString().slice(0, 10) ?? null,
           });
         }
       }

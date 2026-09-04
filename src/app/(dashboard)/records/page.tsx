@@ -137,7 +137,7 @@ const recordSchema = z.object({
     .string()
     .min(1, '请输入金额')
     .refine((v) => Number(v) > 0, '金额必须大于 0'),
-  businessDate: z.date({ message: '请选择业务发生日期' }),
+  businessDate: z.date({ message: '请选择申请日期' }),
   status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
   handler: z.string().trim().min(1, '请输入经办人'),
   summary: z.string().trim().min(1, '请输入摘要'),
@@ -605,7 +605,7 @@ export default function UnifiedRecordsPage() {
                     name="businessDate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>业务发生日期</FormLabel>
+                        <FormLabel>申请日期</FormLabel>
                         <DatePicker value={field.value} onChange={field.onChange} />
                         <FormMessage />
                       </FormItem>
@@ -842,7 +842,7 @@ export default function UnifiedRecordsPage() {
                     name="businessDate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>业务发生日期</FormLabel>
+                        <FormLabel>申请日期</FormLabel>
                         <DatePicker value={field.value} onChange={field.onChange} />
                         <FormMessage />
                       </FormItem>

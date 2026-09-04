@@ -134,6 +134,8 @@ interface BusinessRecordRow {
   subjectId: string;
   amount: string;
   businessDate: string;
+  /** 完成日期(选填;报销完成,财务系统后续导出回填)。 */
+  completedDate: string | null;
   enteredAt: string;
   handler: string;
   summary: string;
@@ -201,21 +203,33 @@ function formatDateTime(s: string | null): string {
   return Number.isNaN(d.getTime()) ? '—' : format(d, 'yyyy-MM-dd HH:mm');
 }
 
-const recordSchema = z.object({
-  budgetYear: z.coerce
-    .number({ message: '请输入年度' })
-    .int('年度须为整数')
-    .min(1900, '年度不合法')
-    .max(9999, '年度不合法'),
-  subjectId: z.string().min(1, '请选择科目'),
-  amount: z.string({ message: '请输入金额' }).min(1, '请输入金额'),
-  businessDate: z.date({ message: '请选择日期' }),
-  handler: z.string().trim().min(1, '请输入经办人').max(64),
-  summary: z.string().trim().min(1, '请输入摘要').max(200),
-  status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
-  docNo: z.string().trim().max(64, '单据编号过长'),
-  remark: z.string().trim().max(500),
-});
+const recordSchema = z
+  .object({
+    budgetYear: z.coerce
+      .number({ message: '请输入年度' })
+      .int('年度须为整数')
+      .min(1900, '年度不合法')
+      .max(9999, '年度不合法'),
+    subjectId: z.string().min(1, '请选择科目'),
+    amount: z.string({ message: '请输入金额' }).min(1, '请输入金额'),
+    businessDate: z.date({ message: '请选择日期' }),
+    /** 完成日期(选填);与申请日期都填时不得早于申请日期(Q6a)。 */
+    completedDate: z.date().optional(),
+    handler: z.string().trim().min(1, '请输入经办人').max(64),
+    summary: z.string().trim().min(1, '请输入摘要').max(200),
+    status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
+    docNo: z.string().trim().max(64, '单据编号过长'),
+    remark: z.string().trim().max(500),
+  })
+  .superRefine((v, ctx) => {
+    if (v.completedDate && v.businessDate && v.completedDate < v.businessDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['completedDate'],
+        message: '完成日期不能早于申请日期',
+      });
+    }
+  });
 
 type RecordFormValues = z.infer<typeof recordSchema>;
 
@@ -235,7 +249,7 @@ function BusinessRecordsPageInner() {
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
   // Excel 式表头筛选(TanStack columnFilters)。
   // 初始值:状态默认排除已作废 + URL 深链(台账叶科目跳转:?subjectId=xx&year=yyyy)。
-  // 单列排序(§Q4:后点覆盖;不持久化;取消=回到服务端默认序:业务发生日期降序)。
+  // 单列排序(§Q4:后点覆盖;不持久化;取消=回到服务端默认序:申请日期降序)。
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(() => {
     const init: ColumnFiltersState = [
@@ -356,6 +370,7 @@ function BusinessRecordsPageInner() {
       subjectId: undefined,
       amount: undefined,
       businessDate: new Date(),
+      completedDate: undefined,
       handler: '',
       summary: '',
       status: 'PLACEHOLDER',
@@ -374,6 +389,7 @@ function BusinessRecordsPageInner() {
       subjectId: row.subjectId,
       amount: row.amount,
       businessDate: new Date(row.businessDate),
+      completedDate: row.completedDate ? new Date(row.completedDate) : undefined,
       handler: row.handler,
       summary: row.summary,
       status: row.status,
@@ -395,6 +411,7 @@ function BusinessRecordsPageInner() {
         subjectId: values.subjectId,
         amount: values.amount,
         businessDate: format(values.businessDate, 'yyyy-MM-dd'),
+        completedDate: values.completedDate ? format(values.completedDate, 'yyyy-MM-dd') : null,
         handler: values.handler,
         summary: values.summary,
         status: values.status,
@@ -446,6 +463,7 @@ function BusinessRecordsPageInner() {
               subjectId: values.subjectId,
               amount: undefined,
               businessDate: values.businessDate,
+              completedDate: undefined,
               handler: values.handler,
               summary: '',
               status: values.status,
@@ -777,10 +795,21 @@ function BusinessRecordsPageInner() {
         id: 'businessDate',
         accessorKey: 'businessDate',
         header: ({ column }) => (
-          <HeaderFilter column={column} title="业务发生日期" type="dateRange" sortable />
+          <HeaderFilter column={column} title="申请日期" type="dateRange" sortable />
         ),
         cell: ({ row }) => (
           <span className="tabular-nums">{formatDate(row.original.businessDate)}</span>
+        ),
+        filterFn: dateRange<BusinessRecordRow>(),
+      },
+      {
+        id: 'completedDate',
+        accessorKey: 'completedDate',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="完成日期" type="dateRange" sortable />
+        ),
+        cell: ({ row }) => (
+          <span className="tabular-nums">{formatDate(row.original.completedDate)}</span>
         ),
         filterFn: dateRange<BusinessRecordRow>(),
       },
@@ -1067,15 +1096,18 @@ function BusinessRecordsPageInner() {
             ) : null}
             {loadingRecords ? (
               Array.from({ length: 4 }).map((_, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
-                  <TableCell colSpan={10}>
+                <TableRow key={i} className="">
+                  <TableCell colSpan={table.getAllLeafColumns().length}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : table.getRowModel().rows.length === 0 ? (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+              <TableRow className="">
+                <TableCell
+                  colSpan={table.getAllLeafColumns().length}
+                  className="h-32 text-center text-muted-foreground"
+                >
                   暂无业务记录
                 </TableCell>
               </TableRow>
@@ -1186,13 +1218,33 @@ function BusinessRecordsPageInner() {
                   name="businessDate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>业务发生日期</FormLabel>
+                      <FormLabel>申请日期</FormLabel>
                       <DatePicker value={field.value} onChange={field.onChange} />
                       <FormMessage />
                     </FormItem>
                   )}
                 />
               </div>
+              <FormField
+                control={form.control}
+                name="completedDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      完成日期
+                      <span className="ml-1 text-xs font-normal text-mute">(选填)</span>
+                    </FormLabel>
+                    <FormControl>
+                      <DatePicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="报销完成后由财务导出回填"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="handler"
@@ -1426,7 +1478,7 @@ function BusinessRecordsPageInner() {
             <div className="space-y-4">
               <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border">
                 <div className="bg-card p-3">
-                  <dt className="text-xs text-mute">业务发生日期</dt>
+                  <dt className="text-xs text-mute">申请日期</dt>
                   <dd className="mt-1 text-sm tabular-nums">
                     {formatDate(historyTarget.businessDate)}
                   </dd>
