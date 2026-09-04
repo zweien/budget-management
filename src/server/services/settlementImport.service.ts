@@ -322,6 +322,13 @@ export async function parseSettlement(
       completedDate = normalizeDate(completedDateRaw);
       if (completedDate === null) {
         errors.push({ field: 'completedDate', message: '完成日期格式无效(应为 YYYY-MM-DD)' });
+      } else if (date && completedDate < date) {
+        // §codex P1:与手动/接口录入同规则——完成日期不得早于申请日期(否则导入会绕过
+        // parseCompletedDate 校验,产出记录页不允许的日期对)。
+        errors.push({
+          field: 'completedDate',
+          message: `完成日期(${completedDate})不能早于申请日期(${date})`,
+        });
       }
     }
 
@@ -937,7 +944,8 @@ export async function listImportBatches(
 /**
  * 删除未导入批次(仅 pending;已确认批次是入账历史,不可删)。
  * - 权限:record:import + 项目范围。
- * - 事务内删行 + 删批次,审计 action='delete'。
+ * - 事务内带 status='pending' 谓词条件删除批次(与并发确认原子互斥),再级联删行;
+ *   抢不到即 409。审计 action='delete'。
  */
 export async function deleteImportBatch(
   batchId: string,
@@ -953,8 +961,16 @@ export async function deleteImportBatch(
   }
 
   await prisma.$transaction(async (tx) => {
+    // §codex P1:条件删除原子兜底——解析后到删除前,并发确认可能已把批次置为
+    // confirming/confirmed;带 status 谓词的 deleteMany 与确认的 updateMany 互斥,
+    // 抢不到(pending)即 409 回滚,绝不误删已导入批次。先删行(外键),后条件删批次。
     await tx.importRow.deleteMany({ where: { batchId } });
-    await tx.importBatch.delete({ where: { id: batchId } });
+    const deleted = await tx.importBatch.deleteMany({
+      where: { id: batchId, status: 'pending' },
+    });
+    if (deleted.count === 0) {
+      throw new HTTPError(409, '该批次已确认导入,不可删除');
+    }
     await recordAudit(tx, {
       projectId: batch.projectId,
       objectType: 'import_batches',

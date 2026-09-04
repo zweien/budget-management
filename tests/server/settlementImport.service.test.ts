@@ -779,11 +779,28 @@ describe('settlementImport.service (integration, real PG)', () => {
         handler: '辛',
         remark: '退单',
       },
+      {
+        docNo: 'V2-ORDER',
+        docStatus: '完成记账',
+        applyDate: '2026-08-10',
+        completeDate: '2026-08-01',
+        amount: '30',
+        handler: '壬',
+        remark: '日期倒挂',
+      },
     ]);
     const wb = await loadSettlementWorkbookIfMatch(buf);
     expect(wb).not.toBeNull();
     const batchId = await parseSettlement(wb!, projectId, adminUser());
     const preview = await getSettlementBatch(batchId, adminUser());
+
+    // §codex P1:日期倒挂行 → 错误行,不可导入(与手动/接口录入同规则)。
+    const order = preview.errors.find((r) => r.parsedData.docNo === 'V2-ORDER')!;
+    expect(
+      order.errors.some(
+        (e) => e.field === 'completedDate' && e.message.includes('不能早于申请日期'),
+      ),
+    ).toBe(true);
 
     const paid = preview.pending.find((r) => r.parsedData.docNo === 'V2-PAID')!;
     expect(paid.parsedData.status).toBe(BusinessStatus.PAID);
@@ -808,7 +825,7 @@ describe('settlementImport.service (integration, real PG)', () => {
       adminUser(),
     );
     const res = await confirmSettlementImport(batchId, [paid.rowId, audit.rowId], adminUser());
-    expect(res.created).toBe(2);
+    expect(res.created).toBe(2); // 倒挂行在错误分组,不参与确认。
     expect(res.updated).toBe(0);
     const saved = await prisma.businessRecord.findFirst({ where: { docNo: 'V2-PAID' } });
     expect(saved!.completedDate?.toISOString().slice(0, 10)).toBe('2026-07-13');
