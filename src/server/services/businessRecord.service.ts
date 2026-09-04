@@ -126,16 +126,23 @@ function parsePositiveAmount(amount: string): D {
   return d;
 }
 
-/** 校验日期字符串(yyyy-mm-dd)可解析为合法日期,标签用于报错文案。 */
+/** 校验日期字符串(yyyy-mm-dd)可解析为合法日历日期,标签用于报错文案。 */
 function parseRecordDate(s: string, label: string): Date {
   // 仅接受 yyyy-mm-dd,避免时区漂移。
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) {
     throw new HTTPError(422, `${label}格式无效(应为 yyyy-mm-dd):${s}`);
   }
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const dt = new Date(`${s}T00:00:00Z`);
-  if (Number.isNaN(dt.getTime())) {
-    throw new HTTPError(422, `${label}无效:${s}`);
+  // §codex P2:JS 会把 2026-02-30 归一化为 03-02,须回验分量一致才算合法日历日期。
+  if (
+    Number.isNaN(dt.getTime()) ||
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== mo - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    throw new HTTPError(422, `${label}无效(不是合法日历日期):${s}`);
   }
   return dt;
 }

@@ -891,9 +891,22 @@ describe('settlementImport.service (integration, real PG)', () => {
           docNo: 'REF-AMT',
           createdById: adminId,
         },
+        {
+          id: uuidv7(),
+          projectId,
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: toStored(new Prisma.Decimal('90')),
+          businessDate: new Date('2026-06-10T00:00:00Z'),
+          handler: '旧',
+          summary: '倒挂源',
+          status: BusinessStatus.FINANCE_APPROVAL,
+          docNo: 'REF-ORDER',
+          createdById: adminId,
+        },
       ],
     });
-    expect(seeded.count).toBe(4);
+    expect(seeded.count).toBe(5);
 
     const buf = await buildSettlementV2Xlsx([
       // 状态推进 + 回填完成日期 → refresh。
@@ -987,12 +1000,43 @@ describe('settlementImport.service (integration, real PG)', () => {
     const recFill = await prisma.businessRecord.findFirst({ where: { docNo: 'REF-FILL' } });
     expect(recFill!.status).toBe(BusinessStatus.PAID);
     expect(recFill!.completedDate?.toISOString().slice(0, 10)).toBe('2026-07-06');
+    // §codex P2:补全更新写业务记录历史。
+    const hist = await prisma.businessRecordHistory.findFirst({
+      where: { businessRecordId: recFill!.id, action: 'import_refresh' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect(hist).not.toBeNull();
+    expect(hist!.reason).toContain('补全更新');
+    const after = hist!.afterData as Record<string, unknown>;
+    expect(after['completedDate']).toBe('2026-07-06');
     // 更新写审计。
     const audit = await prisma.auditLog.findFirst({
       where: { objectType: 'business_records', action: 'import_refresh' },
       orderBy: { operatedAt: 'desc' },
     });
     expect(audit).not.toBeNull();
+
+    // §codex P1:回填完成日期早于**既有记录**的申请日期(行自身日期已过解析)→ 确认时 422。
+    const buf3 = await buildSettlementV2Xlsx([
+      {
+        docNo: 'REF-ORDER',
+        docStatus: '完成记账',
+        applyDate: '2026-05-01',
+        completeDate: '2026-05-20',
+        amount: '90',
+        handler: '新',
+        remark: '倒挂源',
+      },
+    ]);
+    const wb3 = await loadSettlementWorkbookIfMatch(buf3);
+    const batchId3 = await parseSettlement(wb3!, projectId, adminUser());
+    const preview3 = await getSettlementBatch(batchId3, adminUser());
+    const r3 = preview3.duplicates.find((x) => x.parsedData.docNo === 'REF-ORDER')!;
+    expect(r3.duplicateLevel).toBe('refresh');
+    await expect(confirmSettlementImport(batchId3, [r3.rowId], adminUser())).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('早于该记录的申请日期'),
+    });
 
     // v1 状态推进单确认:既有 REF-ADV 已是 PAID → 状态无法再推进 → 复核 422(无新信息)。
     const preview1b = await getSettlementBatch(batchId1, adminUser());

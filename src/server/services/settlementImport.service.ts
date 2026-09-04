@@ -777,14 +777,6 @@ export async function confirmSettlementImport(
         // 行锁既有记录,与并发导入/编辑串行化。
         const existing = await tx.businessRecord.findFirst({
           where: { projectId: batch.projectId, isVoid: false, docNo },
-          select: {
-            id: true,
-            status: true,
-            amount: true,
-            completedDate: true,
-            businessDate: true,
-            summary: true,
-          },
         });
         const rowAmount = normalizeAmount(data.amount);
         if (!existing || !rowAmount || rowAmount !== existing.amount.toFixed(2)) {
@@ -801,11 +793,28 @@ export async function confirmSettlementImport(
             `第 ${row.rowNo} 行的单据编号 ${docNo} 无可更新内容(完成日期已填或状态无需推进),该行已是硬重复;请刷新预览后重试`,
           );
         }
-        const before = snapshotRow({
-          id: existing.id,
-          status: existing.status,
-          completedDate: existing.completedDate ? formatYmd(existing.completedDate) : null,
-        });
+        // §codex P1:回填基准是**既有记录的申请日期**(行上的申请日期不回写)——
+        // 完成日期早于既有申请日期时拒绝,与记录页录入规则一致。
+        if (
+          data.completedDate &&
+          existing.businessDate &&
+          new Date(`${data.completedDate}T00:00:00Z`) < existing.businessDate
+        ) {
+          throw new HTTPError(
+            422,
+            `第 ${row.rowNo} 行完成日期(${data.completedDate})早于该记录的申请日期(${formatYmd(
+              existing.businessDate,
+            )}),不可回填`,
+          );
+        }
+        const snap = (rec: typeof existing) =>
+          snapshotRow({
+            ...rec,
+            amount: rec.amount.toFixed(2),
+            businessDate: formatYmd(rec.businessDate),
+            completedDate: rec.completedDate ? formatYmd(rec.completedDate) : null,
+          });
+        const before = snap(existing);
         const updatedRecord = await tx.businessRecord.update({
           where: { id: existing.id },
           data: {
@@ -813,6 +822,18 @@ export async function confirmSettlementImport(
             ...(data.completedDate
               ? { completedDate: new Date(`${data.completedDate}T00:00:00Z`) }
               : {}),
+          },
+        });
+        // §codex P2:补全更新同步写业务记录历史(记录页「历史」只读 business_record_history)。
+        await tx.businessRecordHistory.create({
+          data: {
+            id: uuidv7(),
+            businessRecordId: existing.id,
+            action: 'import_refresh',
+            beforeData: before as unknown as Prisma.InputJsonValue,
+            afterData: snap(updatedRecord) as unknown as Prisma.InputJsonValue,
+            operatorId: user.id,
+            reason: `结算单导入补全更新(批次 ${batchId} 第 ${row.rowNo} 行)`,
           },
         });
         await recordAudit(tx, {
