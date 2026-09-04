@@ -9,7 +9,7 @@ const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
 /**
  * PATCH /api/projects/:id/records/:recordId — 修改业务记录(§8.5)。
  * body = UpdateRecordInput(全部字段可选):budgetYear/subjectId/amount/businessDate/
- * handler/summary/status/remark。返回 { record, overBudget }。
+ * handler/summary/status/remark。返回 { record, overBudget, overTotalBudget, overSubjectTotal }。
  */
 export async function PATCH(
   req: NextRequest,

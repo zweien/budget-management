@@ -272,7 +272,12 @@ function BusinessRecordsPageInner() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<BusinessRecordRow | null>(null);
   // §8.4 超预算预警(已保存)。
-  const [overBudgetOpen, setOverBudgetOpen] = useState(false);
+  // §8.4 超预算预警(记录已保存):三个口径各自亮灯。
+  const [overBudgetScopes, setOverBudgetScopes] = useState<{
+    year: boolean;
+    subject: boolean;
+    total: boolean;
+  } | null>(null);
   // 作废 Dialog。
   const [voidTarget, setVoidTarget] = useState<BusinessRecordRow | null>(null);
   const [voidReason, setVoidReason] = useState('');
@@ -431,30 +436,50 @@ function BusinessRecordsPageInner() {
               `疑似重复:与 ${c.businessDate} 的 ${c.amount} 元「${c.summary}」相似,请确认是否两笔`,
             );
         };
+        /** §8.4 超预算预警:任一口径超限则弹窗列明(年度/科目总预算/项目总预算)。 */
+        const warnOverBudget = (res: {
+          overBudget: boolean;
+          overTotalBudget?: boolean;
+          overSubjectTotal?: boolean;
+        }) => {
+          if (res.overBudget || res.overTotalBudget || res.overSubjectTotal) {
+            setOverBudgetScopes({
+              year: res.overBudget,
+              subject: !!res.overSubjectTotal,
+              total: !!res.overTotalBudget,
+            });
+          } else {
+            setOverBudgetScopes(null);
+          }
+        };
         if (editing) {
           const res = await apiFetch<{
             record: BusinessRecordRow;
             overBudget: boolean;
+            overTotalBudget?: boolean;
+            overSubjectTotal?: boolean;
             duplicateHints?: Array<{ businessDate: string; amount: string; summary: string }>;
           }>(`/api/projects/${projectId}/records/${editing.id}`, {
             method: 'PATCH',
             body: JSON.stringify(payload),
           });
           toast.success('已保存修改');
-          if (res.overBudget) setOverBudgetOpen(true);
+          warnOverBudget(res);
           if (res.duplicateHints?.length) hintDup(res.duplicateHints);
           setFormOpen(false);
         } else {
           const res = await apiFetch<{
             record: BusinessRecordRow;
             overBudget: boolean;
+            overTotalBudget?: boolean;
+            overSubjectTotal?: boolean;
             duplicateHints?: Array<{ businessDate: string; amount: string; summary: string }>;
           }>(`/api/projects/${projectId}/records`, {
             method: 'POST',
             body: JSON.stringify(payload),
           });
           toast.success('已新增业务记录');
-          if (res.overBudget) setOverBudgetOpen(true);
+          warnOverBudget(res);
           if (res.duplicateHints?.length) hintDup(res.duplicateHints);
           savedRecordId = res.record.id;
           if (keepOpen) {
@@ -1375,13 +1400,21 @@ function BusinessRecordsPageInner() {
         </DialogContent>
       </Dialog>
 
-      {/* §8.4 超预算预警(记录已保存) */}
-      <AlertDialog open={overBudgetOpen} onOpenChange={setOverBudgetOpen}>
+      {/* §8.4/8.4b 超预算预警(记录已保存):按口径列明 */}
+      <AlertDialog
+        open={overBudgetScopes !== null}
+        onOpenChange={(open) => (open ? undefined : setOverBudgetScopes(null))}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>该记录导致超预算,但已保存</AlertDialogTitle>
             <AlertDialogDescription>
-              本次登记使该科目在该年度的占用超过当前预算。记录已保存,请及时跟进预算调整。
+              <span>记录已保存,以下预算口径被超出,请及时跟进预算调整:</span>
+              <ul className="mt-2 list-disc pl-4">
+                {overBudgetScopes?.year ? <li>该科目在本年度的占用超过年度科目预算;</li> : null}
+                {overBudgetScopes?.subject ? <li>该科目的跨年度累计占用超过科目总预算;</li> : null}
+                {overBudgetScopes?.total ? <li>全项目累计占用超过项目总预算(余额不足)。</li> : null}
+              </ul>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

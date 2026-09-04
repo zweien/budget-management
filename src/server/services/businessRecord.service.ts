@@ -9,6 +9,10 @@ import { computeOccupancy } from '@/lib/budget';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
 import { checkDuplicates, type DuplicateConflict } from '@/server/services/duplicateCheck.service';
+import {
+  carryoverExcludedRecordIds,
+  withoutCarryoverExcluded,
+} from '@/server/services/carryoverNormalization.service';
 
 /** §8 四态枚举(便于上层校验集合)。 */
 const BUSINESS_STATUSES: readonly BusinessStatus[] = [
@@ -68,7 +72,12 @@ export interface ListRecordsFilters {
 /** §8.4 超预算预警的返回结构:createRecord 与 updateRecord 均带 overBudget 标志。 */
 export interface RecordWithWarning {
   record: BusinessRecord;
+  /** 年度科目预算口径:本年该科目占用(含本条)超过 SubjectBudget.current。 */
   overBudget: boolean;
+  /** 项目总预算口径:全项目累计占用(含本条)超过 ProjectBudget.current(余额锚定红线)。 */
+  overTotalBudget?: boolean;
+  /** 科目总预算口径(GENERAL):该科目跨年度累计占用(含本条)超过 SubjectTotalBudget.current。 */
+  overSubjectTotal?: boolean;
   /** 疑似重复提示(ADR 0002):指纹命中既有记录;仅警示不阻断。 */
   duplicateHints?: DuplicateConflict[];
 }
@@ -199,6 +208,49 @@ async function computeOverBudget(
 }
 
 /**
+ * §8.4b 执行侧容量预警(余额锚定模型,软标志不阻断):
+ * - 项目层:全项目累计占用(含本次)超过 ProjectBudget.current → overTotalBudget;
+ * - GENERAL 科目层:该科目跨年度累计占用(含本次)超过 SubjectTotalBudget.current → overSubjectTotal
+ *   (包干制无 STB 层,恒 false)。
+ * excludeProject/excludeSubject:update 场景排除本条自身旧占用(科目维度仅在同科目时排除)。
+ */
+async function computeCapacityWarnings(
+  projectId: string,
+  subjectId: string,
+  extraAmount: D,
+  exclude: { project: D; subject: D } = { project: ZERO, subject: ZERO },
+): Promise<{ overTotalBudget: boolean; overSubjectTotal: boolean }> {
+  // 遗留结转副本(源+副本两条非作废同额记录)只计一腿,与容量护栏同口径。
+  const excluded = await carryoverExcludedRecordIds(projectId);
+  const [project, projectBudget, projectAgg, subjectAgg, stb] = await Promise.all([
+    prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
+    prisma.projectBudget.findUnique({ where: { projectId } }),
+    prisma.businessRecord.aggregate({
+      where: withoutCarryoverExcluded({ projectId, isVoid: false }, excluded),
+      _sum: { amount: true },
+    }),
+    prisma.businessRecord.aggregate({
+      where: withoutCarryoverExcluded({ projectId, subjectId, isVoid: false }, excluded),
+      _sum: { amount: true },
+    }),
+    prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId, subjectId } },
+    }),
+  ]);
+  const totalBudget = projectBudget ? fromStored(projectBudget.currentAmount) : ZERO;
+  const projectOccupied = fromStored(projectAgg._sum.amount ?? '0').minus(exclude.project);
+  const overTotalBudget = projectOccupied.plus(extraAmount).gt(totalBudget);
+
+  let overSubjectTotal = false;
+  if (project?.budgetMode !== 'LUMP_SUM') {
+    const stbCurrent = stb ? fromStored(stb.currentAmount) : ZERO;
+    const subjectOccupied = fromStored(subjectAgg._sum.amount ?? '0').minus(exclude.subject);
+    overSubjectTotal = subjectOccupied.plus(extraAmount).gt(stbCurrent);
+  }
+  return { overTotalBudget, overSubjectTotal };
+}
+
+/**
  * §8 校验 subjectId 属于该项目且为叶节点(否则 422)。
  * 返回 BudgetSubject 行。
  */
@@ -276,13 +328,11 @@ export async function createRecord(
   }
   const duplicateHints = verdict.suspected ? verdict.conflicts : undefined;
 
-  // §8.4 超预算预警(在事务外读,不影响保存)。
-  const { overBudget } = await computeOverBudget(
-    projectId,
-    input.budgetYear,
-    input.subjectId,
-    amount,
-  );
+  // §8.4 超预算预警(在事务外读,不影响保存)。年度口径 + 项目/科目总预算口径(§8.4b)。
+  const [{ overBudget }, capacity] = await Promise.all([
+    computeOverBudget(projectId, input.budgetYear, input.subjectId, amount),
+    computeCapacityWarnings(projectId, input.subjectId, amount),
+  ]);
 
   const id = uuidv7();
   const record = await prisma
@@ -329,7 +379,7 @@ export async function createRecord(
       throw e;
     });
 
-  return { record, overBudget, duplicateHints };
+  return { record, overBudget, ...capacity, duplicateHints };
 }
 
 /**
@@ -438,13 +488,15 @@ export async function updateRecord(
   await requireLeafSubject(prisma, before.projectId, newSubjectId);
 
   // §8.4 超预算预警(按"生效后值"计算;排除本条自身占用,因为本条会被改写)。
-  const { overBudget } = await computeOverBudgetExcluding(
-    before.projectId,
-    newYear,
-    newSubjectId,
-    amount,
-    recordId,
-  );
+  // 容量预警同理:项目维度排除本条旧额;科目维度仅当未换科目时排除(换了科目,旧占用不在新科目)。
+  const [{ overBudget }, capacity] = await Promise.all([
+    computeOverBudgetExcluding(before.projectId, newYear, newSubjectId, amount, recordId),
+    computeCapacityWarnings(before.projectId, newSubjectId, amount, {
+      project: before.isVoid ? ZERO : fromStored(before.amount),
+      subject:
+        before.isVoid || before.subjectId !== newSubjectId ? ZERO : fromStored(before.amount),
+    }),
+  ]);
 
   // 重复防护(ADR 0002):按"生效后值"判定;排除自身。docNo 同号 → 409;指纹 → 提示。
   const newDocNo = input.docNo !== undefined ? normalizeDocNo(input.docNo) : before.docNo;
@@ -524,7 +576,7 @@ export async function updateRecord(
       throw e;
     });
 
-  return { record: after, overBudget, duplicateHints };
+  return { record: after, overBudget, ...capacity, duplicateHints };
 }
 
 /** 计算超预算预警,但排除指定的某条记录(用于 update:本条将被改写,不再算旧占用)。 */

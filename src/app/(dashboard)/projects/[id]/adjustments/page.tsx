@@ -79,14 +79,14 @@ interface InitialBudgetState {
   status?: string;
 }
 
-/** 科目预算基线(原总预算 + 原年度预算 + 剩余可分配额)。 */
+/** 科目预算基线(原总预算 + 原年度预算 + 本年剩余额度)。 */
 interface SubjectBaseline {
   subjectId: string;
   code: string;
   name: string;
   totalCurrent: string;
   annualCurrent: string;
-  /** 追加下达模式每行上限 = 总预算 − 历年已分配年度合计。 */
+  /** 追加下达模式每行参考上限(余额锚定)= 科目总预算剩余(总预算 − 累计占用)− 本年剩余计划。 */
   remaining: string;
 }
 
@@ -122,6 +122,17 @@ interface AdjustmentRow {
 
 interface ListResponse {
   adjustments: AdjustmentRow[];
+}
+
+/** 余额面板(余额锚定口径,GET adjustments/balance 返回)。 */
+interface BalanceInfo {
+  budgetMode: 'GENERAL' | 'LUMP_SUM';
+  totalBudget: string;
+  projectOccupied: string;
+  remaining: string;
+  yearPlan: string;
+  yearOccupied: string;
+  allocatable: string;
 }
 
 /** 表单内的明细编辑行。 */
@@ -198,7 +209,7 @@ export default function AdjustmentsPage() {
   const [formYear, setFormYear] = useState<number>(() => new Date().getFullYear());
   // 调整单类型:ADJUST=调剂(零和);ALLOCATE=追加下达(净增,可新建年度账)。
   const [formKind, setFormKind] = useState<'ADJUST' | 'ALLOCATE'>('ADJUST');
-  // 仅追加下达:追加的同时调增科目总预算与项目总预算(新经费入账);缺省=池内分配。
+  // 仅追加下达:追加的同时调增项目总预算(新经费入账);缺省=余额内下达(总额不变)。
   const [formExpandTotals, setFormExpandTotals] = useState(false);
   const [baseline, setBaseline] = useState<SubjectBaseline[]>([]);
   const [formLines, setFormLines] = useState<EditLine[]>([]);
@@ -224,8 +235,11 @@ export default function AdjustmentsPage() {
   const isEffective = budgetStatus === 'APPROVED';
 
   // §包干制(LUMP_SUM):无科目总预算层——总维度调整额恒 0(输入隐藏),
-  // 池内分配的容量护栏由服务端按「项目总预算 − 历年已分配年度预算」项目级校验。
+  // 追加下达的容量护栏由服务端按「项目剩余额度」口径校验(科目层仅 GENERAL)。
   const isLumpSum = project?.budgetMode === 'LUMP_SUM';
+
+  // 余额面板(仅追加下达模式展示):随目标年重拉。
+  const [balance, setBalance] = useState<BalanceInfo | null>(null);
 
   const baselineMap = useMemo(() => new Map(baseline.map((b) => [b.subjectId, b])), [baseline]);
 
@@ -306,6 +320,17 @@ export default function AdjustmentsPage() {
     }
   };
 
+  // 拉取余额面板(总预算 / 累计占用 / 剩余额度 / 目标年计划 / 可新增额度)。
+  const loadBalance = async (year: number) => {
+    try {
+      setBalance(
+        await apiFetch<BalanceInfo>(`/api/projects/${projectId}/adjustments/balance?year=${year}`),
+      );
+    } catch {
+      setBalance(null);
+    }
+  };
+
   // 拉取科目全树(用于新增科目的父节点下拉)。
   const loadSubjectTree = async () => {
     try {
@@ -354,6 +379,7 @@ export default function AdjustmentsPage() {
     setFormYear(y);
     setTotalReason('');
     setAnnualReason('');
+    setBalance(null);
     await Promise.all([loadBaseline(y), loadSubjectTree()]);
     setFormLines([emptyLine()]);
     setMode('form');
@@ -366,7 +392,11 @@ export default function AdjustmentsPage() {
     setFormYear(row.year);
     setTotalReason(row.totalReason ?? '');
     setAnnualReason(row.annualReason ?? '');
-    await Promise.all([loadBaseline(row.year), loadSubjectTree()]);
+    await Promise.all([
+      loadBaseline(row.year),
+      loadSubjectTree(),
+      row.kind === 'ALLOCATE' ? loadBalance(row.year) : Promise.resolve(),
+    ]);
     setFormLines(
       row.lines.map((l) => ({
         key: genKey(),
@@ -400,14 +430,14 @@ export default function AdjustmentsPage() {
 
   const handleYearChange = async (y: number) => {
     setFormYear(y);
-    await loadBaseline(y);
+    await Promise.all([loadBaseline(y), loadBalance(y)]);
   };
 
   /**
    * 构建并校验 payload。
    * @param requireBalance 是否强制提交级校验(草稿=false)。
    *   ADJUST:双维度收支平衡(Σ=0),草稿允许留空按 0 处理。
-   *   ALLOCATE:每行 annual ≥ 0 且需填写、Σ > 0、每行 ≤ 剩余可分配额;total 恒为 0。
+   *   ALLOCATE:每行 annual ≥ 0 且需填写、Σ > 0、每行 ≤ 本年剩余额度;total 恒为 0。
    */
   const buildPayload = (
     requireBalance: boolean,
@@ -422,7 +452,7 @@ export default function AdjustmentsPage() {
     }
 
     if (formKind === 'ALLOCATE') {
-      // 提交级校验(requireBalance=true):行值 ≥ 0、合计 > 0、同科目合计 ≤ 剩余可分配额、
+      // 提交级校验(requireBalance=true):行值 ≥ 0、合计 > 0、同科目合计 ≤ 本年剩余额度、
       // 新增科目行 > 0。草稿(=false)允许留空按 0 落库的中间态,校验推迟到提交。
       if (requireBalance) {
         for (const [i, l] of valid.entries()) {
@@ -442,8 +472,8 @@ export default function AdjustmentsPage() {
             };
           }
         }
-        // 同科目多行合并后再比剩余额度(与后端聚合口径一致)。
-        // §包干制:无科目总预算池,服务端按项目级未分配额度校验,前端跳过逐科目护栏。
+        // 同科目多行合并后再比剩余额度(与后端聚合口径一致;余额锚定:科目总预算剩余 − 本年剩余计划)。
+        // §包干制:无科目总预算层,服务端按项目级剩余额度校验,前端跳过逐科目护栏。
         if (!formExpandTotals && !isLumpSum) {
           const sumBySubject = new Map<string, number>();
           for (const l of valid) {
@@ -458,7 +488,7 @@ export default function AdjustmentsPage() {
             if (sum > remaining + 1e-9) {
               return {
                 ok: false,
-                error: `${baselineMap.get(sid)?.name ?? '科目'} 合计下达 ${sum.toFixed(2)} 超出剩余可分配额度 ${remaining.toFixed(2)}(总预算 − 历年已分配)`,
+                error: `${baselineMap.get(sid)?.name ?? '科目'} 合计下达 ${sum.toFixed(2)} 超出本年剩余额度 ${remaining.toFixed(2)}(科目总预算剩余 − 本年剩余计划;服务端将按累计占用精确复核)`,
               };
             }
           }
@@ -719,7 +749,7 @@ export default function AdjustmentsPage() {
     };
   }, [formLines]);
 
-  /** 追加下达就绪:有正数行,且(池内模式)每科目合计下达不超剩余可分配额。
+  /** 追加下达就绪:有正数行,且(非新经费)每科目合计下达不超本年剩余额度。
    *  §包干制:无科目总预算池,逐科目护栏不适用(服务端按项目级额度校验)。 */
   const allocateReady = useMemo(() => {
     const lines = formLines.filter(
@@ -796,7 +826,7 @@ export default function AdjustmentsPage() {
             {editingId
               ? '编辑调整单'
               : formKind === 'ALLOCATE'
-                ? '发起预算追加下达'
+                ? '发起预算追加下达(年度编制)'
                 : '发起预算调整'}
           </h2>
           <Button variant="outline" onClick={cancelForm}>
@@ -820,8 +850,9 @@ export default function AdjustmentsPage() {
               value={formKind}
               onValueChange={(v) => {
                 setFormKind(v === 'ALLOCATE' ? 'ALLOCATE' : 'ADJUST');
-                // 切到追加时把历史负数清掉,避免提交被拒(追加不可为负)。
+                // 切到追加时把历史负数清掉,避免提交被拒(追加不可为负);余额面板随切重拉。
                 if (v === 'ALLOCATE') {
+                  void loadBalance(formYear);
                   setFormLines((prev) =>
                     prev.map((l) => ({
                       ...l,
@@ -841,7 +872,7 @@ export default function AdjustmentsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ADJUST">调剂(零和挪钱)</SelectItem>
-                <SelectItem value="ALLOCATE">追加下达(净增)</SelectItem>
+                <SelectItem value="ALLOCATE">年度编制 / 追加下达(净增)</SelectItem>
               </SelectContent>
             </Select>
             {formKind === 'ALLOCATE' && (
@@ -855,13 +886,13 @@ export default function AdjustmentsPage() {
                   />
                   <span>
                     <span className="font-medium text-foreground">新经费入账</span>
-                    (同步调增科目总预算与项目总预算)
+                    (同步调增项目总预算{isLumpSum ? '' : '与科目总预算'})
                     <br />
-                    勾选后不受「剩余可分配额」限制;不勾选则只把科目既有总预算分批落地到年份,各层总额不变。
+                    勾选后总额随下达同步上调,不受剩余额度限制;不勾选则在剩余额度内向目标年下达计划。
                   </span>
                 </label>
                 <p className="text-xs leading-relaxed text-mute">
-                  为选定年度下达此前未分配的预算;该年未建账会在审批通过时自动创建。调减请改用「调剂」。
+                  为选定年度编制/追加年度预算;该年未建账会在审批通过时自动创建。年度总量调减暂不支持,科目间挪钱请用「调剂」。
                 </p>
               </div>
             )}
@@ -935,6 +966,45 @@ export default function AdjustmentsPage() {
           </div>
         </div>
 
+        {/* 余额面板(仅追加下达且非新经费入账时展示):可新增额度 = 剩余额度 − 目标年剩余计划 */}
+        {formKind === 'ALLOCATE' && !formExpandTotals && balance ? (
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border shadow-l2 sm:grid-cols-3 lg:grid-cols-6">
+            {(
+              [
+                { label: '项目总预算', value: balance.totalBudget, risk: false },
+                { label: '全项目累计占用', value: balance.projectOccupied, risk: false },
+                {
+                  label: '剩余额度',
+                  value: balance.remaining,
+                  risk: Number(balance.remaining) < 0,
+                },
+                { label: `${formYear} 年计划`, value: balance.yearPlan, risk: false },
+                { label: `${formYear} 年已占用`, value: balance.yearOccupied, risk: false },
+                {
+                  label: '可新增额度',
+                  value: balance.allocatable,
+                  risk: Number(balance.allocatable) < 0,
+                },
+              ] as const
+            ).map((c) => (
+              <div key={c.label} className="bg-card p-3">
+                <p className="text-xs text-mute">{c.label}</p>
+                <p
+                  className={cn(
+                    'mt-1 text-sm font-medium tabular-nums',
+                    c.risk && 'text-destructive',
+                  )}
+                >
+                  {Number(c.value).toLocaleString('zh-CN', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         {/* 调整明细 */}
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">调整明细</h3>
@@ -949,7 +1019,12 @@ export default function AdjustmentsPage() {
               {formKind === 'ALLOCATE' ? (
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="min-w-52">科目</TableHead>
-                  <TableHead className="w-32 text-right">剩余可分配额</TableHead>
+                  <TableHead
+                    className="w-32 text-right"
+                    title="科目总预算剩余(总预算 − 累计占用)− 本年剩余计划;服务端按累计占用精确复核"
+                  >
+                    本年剩余额度
+                  </TableHead>
                   <TableHead className="w-36">本年度下达额</TableHead>
                   <TableHead className="w-32 text-right">下达后年度预算</TableHead>
                   <TableHead className="w-14" />
@@ -1167,10 +1242,10 @@ export default function AdjustmentsPage() {
               ;审批通过后自动创建未建账科目的年度预算。
               {formExpandTotals
                 ? '已选「新经费入账」:科目总预算与项目总预算将同步调增。'
-                : '池内分配:各层总额不变,仅把科目既有总预算落地到年份。'}
+                : '余额内下达:各层总额不变,向目标年追加年度计划。'}
               {allocateReady
                 ? ' ✓ 可提交'
-                : ' · 至少一行正数金额,且(池内)同科目合计不超剩余可分配额'}
+                : ' · 至少一行正数金额,且(非新经费)同科目合计不超本年剩余额度'}
             </AlertDescription>
           </Alert>
         ) : (

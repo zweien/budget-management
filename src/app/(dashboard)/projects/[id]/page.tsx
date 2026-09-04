@@ -11,22 +11,12 @@ import { apiFetch } from '@/lib/api/client';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { EmptyState } from '@/components/layout/empty-state';
 import { MembersCard } from '@/components/projects/members-card';
 import {
   ProjectFormDialog,
   type ProjectFormTarget,
 } from '@/components/projects/project-form-dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface ProjectDetail {
@@ -61,19 +51,6 @@ interface CurrentUser {
 interface InitialBudgetState {
   id?: string;
   status?: string;
-}
-
-/** §8.7 跨年结转预警条目。 */
-interface CarryoverWarning {
-  originalRecordId: string;
-  subjectCode: string;
-  reason: string;
-}
-
-/** §8.7 carryOver 返回。 */
-interface CarryOverResult {
-  carriedCount: number;
-  warnings: CarryoverWarning[];
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -127,14 +104,6 @@ export default function ProjectDetailPage() {
   // 编辑项目信息弹窗(§项目管理);保存后 bump 版本触发详情重拉。
   const [editOpen, setEditOpen] = useState(false);
   const [detailVersion, setDetailVersion] = useState(0);
-
-  // §8.7 跨年结转 Dialog。
-  const [carryoverOpen, setCarryoverOpen] = useState(false);
-  const [carryoverSubmitting, setCarryoverSubmitting] = useState(false);
-  const [carryoverResult, setCarryoverResult] = useState<CarryOverResult | null>(null);
-  const [fromYear, setFromYear] = useState(String(new Date().getFullYear()));
-  const [toYear, setToYear] = useState(String(new Date().getFullYear() + 1));
-  const [carryoverError, setCarryoverError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,41 +164,6 @@ export default function ProjectDetailPage() {
 
   const isEffective = budget?.status === 'APPROVED';
 
-  /** §8.7 跨年结转。 */
-  const handleCarryover = async () => {
-    const from = Number(fromYear);
-    const to = Number(toYear);
-    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1900 || to > 9999) {
-      setCarryoverError('请输入有效年度(1900-9999)');
-      return;
-    }
-    if (to <= from) {
-      setCarryoverError('目标年度必须大于源年度');
-      return;
-    }
-    setCarryoverError(null);
-    setCarryoverSubmitting(true);
-    try {
-      const result = await apiFetch<CarryOverResult>(`/api/projects/${projectId}/carryover`, {
-        method: 'POST',
-        body: JSON.stringify({ fromYear: from, toYear: to }),
-      });
-      setCarryoverResult(result);
-      toast.success(`已结转 ${result.carriedCount} 条记录`);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setCarryoverSubmitting(false);
-    }
-  };
-
-  /** 关闭结转 Dialog,清空结果与错误。 */
-  const closeCarryover = () => {
-    setCarryoverOpen(false);
-    setCarryoverResult(null);
-    setCarryoverError(null);
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -240,16 +174,6 @@ export default function ProjectDetailPage() {
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil className="size-4" />
               编辑项目信息
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setCarryoverResult(null);
-                setCarryoverError(null);
-                setCarryoverOpen(true);
-              }}
-            >
-              跨年结转
             </Button>
           </div>
         ) : null}
@@ -309,79 +233,6 @@ export default function ProjectDetailPage() {
           <AlertDescription>可前往「执行台账」查看各科目当前预算与占用情况。</AlertDescription>
         </Alert>
       ) : null}
-
-      {/* §8.7 跨年结转 */}
-      <Dialog open={carryoverOpen} onOpenChange={(open) => (open ? null : closeCarryover())}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>跨年结转</DialogTitle>
-            <DialogDescription>
-              将源年度中尚未支出(非 PAID)的业务记录结转到目标年度,生成可追溯记录。
-            </DialogDescription>
-          </DialogHeader>
-
-          {carryoverResult ? (
-            <div className="space-y-3">
-              <Alert variant="success">
-                <AlertTitle>已结转 {carryoverResult.carriedCount} 条业务记录</AlertTitle>
-              </Alert>
-              {carryoverResult.warnings.length > 0 && (
-                <Alert variant="warning">
-                  <AlertTitle>以下记录需人工确认(§8.7)</AlertTitle>
-                  <AlertDescription>
-                    <ul className="list-disc pl-4">
-                      {carryoverResult.warnings.map((w) => (
-                        <li key={w.originalRecordId}>
-                          {w.subjectCode}:{w.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </AlertDescription>
-                </Alert>
-              )}
-              <DialogFooter>
-                <Button onClick={closeCarryover}>关闭</Button>
-              </DialogFooter>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="from-year">源年度</Label>
-                  <Input
-                    id="from-year"
-                    type="number"
-                    min={1900}
-                    max={9999}
-                    value={fromYear}
-                    onChange={(e) => setFromYear(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="to-year">目标年度</Label>
-                  <Input
-                    id="to-year"
-                    type="number"
-                    min={1900}
-                    max={9999}
-                    value={toYear}
-                    onChange={(e) => setToYear(e.target.value)}
-                  />
-                </div>
-              </div>
-              {carryoverError ? <p className="text-xs text-destructive">{carryoverError}</p> : null}
-              <DialogFooter>
-                <Button variant="outline" onClick={closeCarryover} disabled={carryoverSubmitting}>
-                  取消
-                </Button>
-                <Button onClick={handleCarryover} disabled={carryoverSubmitting}>
-                  {carryoverSubmitting ? '结转中…' : '执行结转'}
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* 编辑项目信息弹窗(§项目管理):与列表页共用同一组件 */}
       {project ? (

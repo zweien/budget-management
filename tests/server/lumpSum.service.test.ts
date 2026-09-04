@@ -20,7 +20,7 @@ import { getProjectLedger, getProjectTotalLedger } from '@/server/services/ledge
 import { fromStored, sumAmounts } from '@/lib/decimal';
 
 // §包干制(LUMP_SUM)集成测试:总预算不编科目总预算层,年度预算仍分解到科目。
-// 覆盖:项目类型字段与切换锁定、编制(无 STB)、调整(总维度拒绝/项目级池)、
+// 覆盖:项目类型字段与切换锁定、编制(无 STB)、调整(总维度拒绝/余额锚定容量)、
 // 结余统计与台账的总口径回退。
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
@@ -344,47 +344,27 @@ describe('lumpSum 预算类型(§包干制, integration, real PG)', () => {
     expect(ta.totalOccupied).toBe('300.00');
     expect(ta.balance).toBe('500.00');
     expect(ta.executionRate ?? 0).toBeCloseTo(0.375);
+    // 页头汇总条:分母恒为项目总预算(1000 + expandTotals 300 = 1300,不受科目历年计划合计影响)。
+    expect(totalLedger.budgetMode).toBe('LUMP_SUM');
+    expect(totalLedger.projectTotal).toBe('1300.00');
+    expect(totalLedger.totalOccupied).toBe('300.00');
+    expect(totalLedger.totalExecutionRate ?? 0).toBeCloseTo(300 / 1300, 4);
   });
 
-  it('ALLOCATE 池内分配:容量护栏改为项目级(总预算 − Σ历年年度预算),超项目池 422', async () => {
-    const project = await createLumpProject('包干项目池');
-    // 编制留余额:总预算 1000,2026 年度只做 700(A 400 / B 300)→ 未分配池 = 300。
-    const payload = lumpPayload();
-    payload.annualBudgets = [{ year: 2026, amount: '700.00' }];
-    payload.subjectBudgets = [
-      payload.subjectBudgets[0], // A 600 → 改为 400
-      payload.subjectBudgets[1],
-    ];
-    payload.subjectBudgets[0] = {
-      year: 2026,
-      subjectCode: 'A',
-      amount: '400.00',
-      unit: '次',
-      quantity: '4.00',
-      unitPrice: '100.00',
-    };
-    payload.subjectBudgets[1] = {
-      year: 2026,
-      subjectCode: 'B',
-      amount: '300.00',
-      unit: '次',
-      quantity: '3.00',
-      unitPrice: '100.00',
-    };
-    const { appId } = await createDraft(project.id, payload, adminUser());
-    await submitDraft(appId, adminUser());
-    await approveApplication(appId, adminUser());
-    const leafA = (await prisma.budgetSubject.findFirst({
-      where: { projectId: project.id, code: 'A' },
-    }))!.id;
+  it('ALLOCATE 余额锚定:年度编满仍可编下一年;可新增额度 = 剩余额度 − 目标年剩余计划,超出 422', async () => {
+    const project = await createLumpProject('包干余额锚定');
+    // 默认 payload:总预算 1000,2026 年度编满 1000(A 600 / B 400)。
+    const subjects = await approveLumpBudget(project.id);
+    const leafA = subjects.get('A')!;
 
-    // 池内分配 200(≤ 300)→ 可提交可审批;池剩 100。
+    // 旧加法模型:Σ年度 = 1000 = 总预算,2027 池为 0,下达必拒;
+    // 余额锚定:2026 尚无执行占用,剩余额度 1000,2027 照常编制 300(年度计划与总预算脱钩)。
     const ok = await createAdjustment(
       project.id,
       {
         year: 2027,
         kind: 'ALLOCATE',
-        lines: [{ subjectId: leafA, totalAdjustment: '0', annualAdjustment: '200.00' }],
+        lines: [{ subjectId: leafA, totalAdjustment: '0', annualAdjustment: '300.00' }],
       },
       adminUser(),
     );
@@ -393,24 +373,24 @@ describe('lumpSum 预算类型(§包干制, integration, real PG)', () => {
     const ab2027 = await prisma.annualBudget.findUnique({
       where: { projectId_year: { projectId: project.id, year: 2027 } },
     });
-    expect(ab2027!.currentAmount.toFixed(2)).toBe('200.00');
+    expect(ab2027!.currentAmount.toFixed(2)).toBe('300.00');
 
-    // 再分配 200(> 池 100)→ 提交即拒绝(项目级护栏)。
+    // 2027 已有计划 300(未执行):可新增额度 = 1000 − 0(占用) − 300 = 700,下达 800 → 422。
     const over = await createAdjustment(
       project.id,
       {
         year: 2027,
         kind: 'ALLOCATE',
-        lines: [{ subjectId: leafA, totalAdjustment: '0', annualAdjustment: '200.00' }],
+        lines: [{ subjectId: leafA, totalAdjustment: '0', annualAdjustment: '800.00' }],
       },
       adminUser(),
     );
     await expect(submitAdjustment(over.id, adminUser())).rejects.toMatchObject({
       status: 422,
-      message: expect.stringContaining('超出项目未分配额度'),
+      message: expect.stringContaining('超出可下达额度'),
     });
 
-    // §codex P1:纯新增科目行同样占项目池——池只剩 100,新增科目 200 → 422。
+    // §codex P1 语义保持:纯新增科目行同样占项目剩余额度——可新增 700,新增科目 800 → 422。
     const allNew = await createAdjustment(
       project.id,
       {
@@ -421,7 +401,7 @@ describe('lumpSum 预算类型(§包干制, integration, real PG)', () => {
             newSubjectName: `池外新增${uuidv7().slice(-4)}`,
             newSubjectParentId: null,
             totalAdjustment: '0',
-            annualAdjustment: '200.00',
+            annualAdjustment: '800.00',
           },
         ],
       },
@@ -429,7 +409,61 @@ describe('lumpSum 预算类型(§包干制, integration, real PG)', () => {
     );
     await expect(submitAdjustment(allNew.id, adminUser())).rejects.toMatchObject({
       status: 422,
-      message: expect.stringContaining('超出项目未分配额度'),
+      message: expect.stringContaining('超出可下达额度'),
     });
+  });
+
+  it('ALLOCATE 余额锚定:执行占用消耗剩余额度——占用越多可下达越少,红线看累计占用', async () => {
+    const project = await createLumpProject('包干执行占用');
+    const subjects = await approveLumpBudget(project.id);
+    const leafA = subjects.get('A')!;
+
+    // 2026 执行占用 400(A 名下)→ 全项目累计占用 400,剩余额度 600。
+    await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        budgetYear: 2026,
+        subjectId: leafA,
+        amount: '400.00',
+        businessDate: new Date('2026-06-01'),
+        handler: '测试',
+        summary: '占用消耗余额',
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      },
+    });
+
+    // 向 2028 下达 700 > 剩余 600 → 422,报文含占用数字。
+    const over = await createAdjustment(
+      project.id,
+      {
+        year: 2028,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA, totalAdjustment: '0', annualAdjustment: '700.00' }],
+      },
+      adminUser(),
+    );
+    const err = await submitAdjustment(over.id, adminUser()).catch((e) => e);
+    expect(err).toMatchObject({ status: 422 });
+    expect(err.message).toContain('超出可下达额度');
+    expect(err.message).toContain('600.00');
+
+    // 下达 600(= 剩余额度)→ 通过并审批生效。
+    const ok = await createAdjustment(
+      project.id,
+      {
+        year: 2028,
+        kind: 'ALLOCATE',
+        lines: [{ subjectId: leafA, totalAdjustment: '0', annualAdjustment: '600.00' }],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(ok.id, adminUser());
+    await approveAdjustment(ok.id, adminUser());
+    const ab2028 = await prisma.annualBudget.findUnique({
+      where: { projectId_year: { projectId: project.id, year: 2028 } },
+    });
+    expect(ab2028!.currentAmount.toFixed(2)).toBe('600.00');
   });
 });

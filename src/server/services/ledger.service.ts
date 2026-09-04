@@ -39,13 +39,23 @@ export interface ProjectLedger {
 
 export interface ProjectTotalLedger {
   nodes: LedgerNode[];
+  /** 项目预算模式:GENERAL 科目行分母 = STB;LUMP_SUM 回退 Σ 各年科目预算(语义=累计计划)。 */
+  budgetMode: 'GENERAL' | 'LUMP_SUM';
+  /** 页头汇总条:项目总预算(ProjectBudget.current)。 */
+  projectTotal: string;
+  /** 页头汇总条:全项目累计占用(全部年度非作废记录 = paid + payable)。 */
+  totalOccupied: string;
+  /** 页头汇总条:总预算执行率 = 累计占用 ÷ 项目总预算(0 → null)。 */
+  totalExecutionRate: number | null;
 }
 
 /**
  * §总预算台账(跨年度口径):预算 = 科目总预算(SubjectTotalBudget;包干制回退为
- * 该科目各年度 SubjectBudget 之和),占用 = 全部年度非作废业务记录;
+ * 该科目各年度 SubjectBudget 之和,语义为「累计计划」——余额锚定模型下历年计划合计
+ * 与项目总预算无加法关系),占用 = 全部年度非作废业务记录;
  * 结余 = 总预算·当前 − 总占用;执行率 = 总占用 ÷ 总预算·当前(0 → null)。
  * 年度维度列(initial/adjustment/current)恒 0——总口径下无年度维度,前端整组隐藏。
+ * 页头汇总条(两种模式):分母恒为 ProjectBudget.current,不受科目计划合计影响。
  */
 export async function getProjectTotalLedger(
   projectId: string,
@@ -53,17 +63,25 @@ export async function getProjectTotalLedger(
 ): Promise<ProjectTotalLedger> {
   await requirePermission(user, 'project:view', projectId);
 
-  const [project, subjects, subjectTotalBudgets, subjectBudgets, records] = await Promise.all([
-    prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
-    prisma.budgetSubject.findMany({
-      where: { projectId },
-      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-    }),
-    prisma.subjectTotalBudget.findMany({ where: { projectId } }),
-    // 全年度科目预算:包干制的科目总口径 = Σ 各年度(Q6a,与结余统计同口径)。
-    prisma.subjectBudget.findMany({ where: { projectId } }),
-    prisma.businessRecord.findMany({ where: { projectId, isVoid: false } }),
-  ]);
+  const [project, projectBudget, subjects, subjectTotalBudgets, subjectBudgets, records] =
+    await Promise.all([
+      prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
+      prisma.projectBudget.findUnique({ where: { projectId } }),
+      prisma.budgetSubject.findMany({
+        where: { projectId },
+        orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+      }),
+      prisma.subjectTotalBudget.findMany({ where: { projectId } }),
+      // 全年度科目预算:包干制的科目总口径 = Σ 各年度(Q6a,与结余统计同口径)。
+      prisma.subjectBudget.findMany({ where: { projectId } }),
+      prisma.businessRecord.findMany({ where: { projectId, isVoid: false } }),
+    ]);
+
+  // 页头汇总条:分母 = 项目总预算(真正的批复口径),与科目计划合计无关。
+  const projectTotal = projectBudget ? fromStored(projectBudget.currentAmount) : ZERO;
+  const allOccupied = computeOccupancy({
+    records: records.map((r) => ({ amount: r.amount, status: r.status, isVoid: r.isVoid })),
+  });
 
   const lumpSum = project?.budgetMode === 'LUMP_SUM';
   const totalBudgetBySubject = new Map(subjectTotalBudgets.map((stb) => [stb.subjectId, stb]));
@@ -216,7 +234,13 @@ export async function getProjectTotalLedger(
     };
   });
 
-  return { nodes };
+  return {
+    nodes,
+    budgetMode: project?.budgetMode === 'LUMP_SUM' ? 'LUMP_SUM' : 'GENERAL',
+    projectTotal: projectTotal.toFixed(2),
+    totalOccupied: allOccupied.totalOccupied.toFixed(2),
+    totalExecutionRate: executionRate(allOccupied.totalOccupied, projectTotal),
+  };
 }
 
 /**
