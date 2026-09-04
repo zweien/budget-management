@@ -41,6 +41,10 @@ export interface SettlementRow {
     statusLabel: string;
     status: string;
     businessDate: string;
+    /** 完成日期(仅 v2 申请日期版;可空)。 */
+    completedDate?: string | null;
+    /** 硬重复理由(悬浮展示;非硬重复行为空)。 */
+    dupReason?: string | null;
     budgetYear: number;
     summary: string;
     amount: string;
@@ -51,8 +55,9 @@ export interface SettlementRow {
   validationStatus: 'valid' | 'error' | 'skipped';
   errors: { field: string; message: string }[];
   duplicateFlag: boolean;
-  /** 重复档位(ADR 0002):hard=单据编号硬重复,禁止导入;旧数据无档位按 suspected。 */
-  duplicateLevel: 'none' | 'hard' | 'suspected';
+  /** 重复档位(ADR 0002):hard=单据编号硬重复禁止导入;refresh=补全更新(确认后更新既有记录);
+   *  旧数据无档位按 suspected。 */
+  duplicateLevel: 'none' | 'hard' | 'suspected' | 'refresh';
   forcedImport: boolean;
   normalizedAmount: string | null;
 }
@@ -109,7 +114,9 @@ export function SettlementImportPreview({
     // 恢复批次:已持久化 forcedImport 的疑似重复行视为已勾选(勾选态与强制标志始终同相);
     // 硬重复行不可导入,永不勾选。
     initialData.duplicates.forEach((r) => {
-      if (r.forcedImport && r.duplicateLevel !== 'hard') s.add(r.rowId);
+      if (r.duplicateLevel === 'refresh')
+        s.add(r.rowId); // 补全更新行默认勾选。
+      else if (r.forcedImport && r.duplicateLevel !== 'hard') s.add(r.rowId);
     });
     return s;
   });
@@ -198,6 +205,16 @@ export function SettlementImportPreview({
       toast.error('硬重复行不可导入:单据编号与未作废记录重复,请先作废旧记录');
       return;
     }
+    if (r.duplicateLevel === 'refresh') {
+      // 补全更新行:勾选只影响是否执行更新,无强制导入标志。
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(r.rowId)) next.delete(r.rowId);
+        else next.add(r.rowId);
+        return next;
+      });
+      return;
+    }
     // 重复行:勾选状态即「强制导入」标志,两者同相切换(恢复批次时也不会错位)。
     const nowSelected = !selected.has(r.rowId);
     setSelected((prev) => {
@@ -237,7 +254,10 @@ export function SettlementImportPreview({
   };
 
   const selectedRows = importable.filter((r) => selected.has(r.rowId));
-  const unassignedCount = selectedRows.filter((r) => !r.parsedData.subjectId).length;
+  // refresh(补全更新)行不新增记录,不需要科目,不计入未指定数。
+  const unassignedCount = selectedRows.filter(
+    (r) => r.duplicateLevel !== 'refresh' && !r.parsedData.subjectId,
+  ).length;
   const assignedCount =
     data.pending.filter((r) => r.parsedData.subjectId).length +
     data.duplicates.filter((r) => r.parsedData.subjectId).length;
@@ -247,11 +267,15 @@ export function SettlementImportPreview({
     try {
       // 确认前等待排队中的暂存请求落库,避免服务端还是旧科目。
       await patchQueue.current;
-      const res = await apiFetch<{ created: number }>(
+      const res = await apiFetch<{ created: number; updated: number }>(
         `/api/projects/${projectId}/imports/${data.batchId}/confirm`,
         { method: 'POST', body: JSON.stringify({ selectedRowIds: [...selected] }) },
       );
-      toast.success(`已导入 ${res.created} 条业务记录`);
+      toast.success(
+        res.updated > 0
+          ? `已导入 ${res.created} 条,补全更新 ${res.updated} 条`
+          : `已导入 ${res.created} 条业务记录`,
+      );
       router.push(`/projects/${projectId}/records`);
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
@@ -278,7 +302,7 @@ export function SettlementImportPreview({
             {hard ? (
               <span
                 className="inline-block size-4 rounded border border-input bg-muted"
-                title="硬重复:单据编号与未作废记录重复,禁止导入"
+                title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
                 aria-label={`第 ${r.rowNo} 行硬重复,不可导入`}
               />
             ) : (
@@ -294,6 +318,9 @@ export function SettlementImportPreview({
         <TableCell className="font-mono text-xs">{r.parsedData.docNo ?? '—'}</TableCell>
         <TableCell>{STATUS_ENUM_TO_CN[r.parsedData.status] ?? r.parsedData.statusLabel}</TableCell>
         <TableCell className="tabular-nums">{r.parsedData.businessDate}</TableCell>
+        <TableCell className="tabular-nums">
+          {r.parsedData.completedDate || <span className="text-mute">—</span>}
+        </TableCell>
         <TableCell className="w-20">
           {readOnly ? (
             <span className="tabular-nums">{r.parsedData.budgetYear}</span>
@@ -321,7 +348,9 @@ export function SettlementImportPreview({
         </TableCell>
         <TableCell>{r.parsedData.handler}</TableCell>
         <TableCell className="w-44">
-          {readOnly ? (
+          {r.duplicateLevel === 'refresh' ? (
+            <span className="text-mute">无需科目</span>
+          ) : readOnly ? (
             (r.parsedData.subjectName ?? <span className="text-mute">未指定</span>)
           ) : (
             <Combobox
@@ -336,7 +365,19 @@ export function SettlementImportPreview({
         </TableCell>
         <TableCell>
           {hard ? (
-            <Badge variant="error">硬重复</Badge>
+            <Badge
+              variant="error"
+              title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
+            >
+              硬重复
+            </Badge>
+          ) : r.duplicateLevel === 'refresh' ? (
+            <Badge
+              variant="default"
+              title="同单据编号已有记录且带来新信息(补完成日期缺口/状态推进到已支出),确认后更新既有记录而非新增"
+            >
+              补全更新
+            </Badge>
           ) : r.duplicateFlag ? (
             r.forcedImport ? (
               <Badge variant="warning">强制导入</Badge>
@@ -358,7 +399,8 @@ export function SettlementImportPreview({
         <TableHead className="w-14">行号</TableHead>
         <TableHead>单据编号</TableHead>
         <TableHead className="w-24">状态</TableHead>
-        <TableHead className="w-24">填制日期</TableHead>
+        <TableHead className="w-28">申请/填制日期</TableHead>
+        <TableHead className="w-24">完成日期</TableHead>
         <TableHead className="w-20">年度</TableHead>
         <TableHead>事项(摘要)</TableHead>
         <TableHead className="w-24 text-right">金额</TableHead>
@@ -413,7 +455,7 @@ export function SettlementImportPreview({
         <AlertDescription>
           财务系统导出的结算单没有科目信息:请为每行指定叶科目(支持勾选多行后批量设置)。
           所有修改即时暂存,可稍后回来继续;点「确认导入」才写入业务记录。
-          预算年度默认取填制日期年份,可按行修改。
+          预算年度默认取申请/填制日期年份,可按行修改;完成日期列仅 v2(申请日期版)导出有值。
         </AlertDescription>
       </Alert>
 

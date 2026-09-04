@@ -14,6 +14,7 @@ import {
   SETTLEMENT_SKIPPED_STATUS,
   SETTLEMENT_STATUS_TO_ENUM,
   SETTLEMENT_TEMPLATE_VERSION,
+  SETTLEMENT_V2_APPLY_DATE,
 } from '@/lib/excel/settlement';
 import {
   cellToString,
@@ -22,17 +23,20 @@ import {
   normalizeDate,
   type DuplicateLevel,
 } from '@/server/services/excelImport.service';
-import { checkDuplicates } from '@/server/services/duplicateCheck.service';
+import { checkDuplicates, hardDupReason } from '@/server/services/duplicateCheck.service';
 
 /**
  * 个人结算单查询 Excel 导入(财务系统导出格式,与标准模板 §10 并存)。
  *
  * 差异点(相对 excelImport.service):
- * - 表头位于第 4 行,按表头名匹配列(单据编号/单据状态/填制日期/事项/金额/经办人)。
+ * - 表头不在首行,按表头名匹配列;**两种版式并存**(见 src/lib/excel/settlement.ts):
+ *   v1 填制日期版(填制日期/事项)与 v2 申请日期版(申请日期/完成日期/备注,其余新列忽略)。
  * - 无科目列:科目在预览页由用户逐条指定(updateSettlementRows 暂存),确认时写入。
- * - 单据状态映射:完成记账→PAID,制单保存→FINANCE_APPROVAL,业务退单→跳过不导入。
- * - 预算年度按填制日期年份推导,预览页可改。
- * - 单据编号写入 BusinessRecord.docNo(非必填);docNo 命中项目内既有记录 → 疑似重复。
+ * - 单据状态映射:完成记账→PAID,制单保存/完成审核→FINANCE_APPROVAL,业务退单→跳过。
+ * - 预算年度按日期(填制/申请)年份推导,预览页可改。
+ * - **补全更新(refresh)**:docNo 命中项目内既有未作废记录且金额一致且带来新信息
+ *   (新行有完成日期而已有记录缺 / 状态推进到已支出)→ 不判硬重复,确认后更新既有记录
+ *   的 完成日期/状态(状态只前进);金额不一致或无新信息仍为硬重复(ADR 0002)。
  *
  * 复用 ImportBatch / ImportRow 两阶段流程:parse(status='pending') → 预览/暂存 → confirm。
  */
@@ -46,9 +50,11 @@ export interface SettlementParsedRow {
   statusLabel: string;
   /** 映射后的业务状态。 */
   status: BusinessStatus;
-  /** 填制日期 YYYY-MM-DD(解析失败时为原始文本,行会被标记 error)。 */
+  /** 申请日期(v2)/填制日期(v1),YYYY-MM-DD(解析失败时为原始文本,行会被标记 error)。 */
   businessDate: string;
-  /** 预算年度(默认=填制日期年份;预览页可改)。 */
+  /** 完成日期 YYYY-MM-DD(仅 v2;可空/未记账为空)。 */
+  completedDate?: string | null;
+  /** 预算年度(默认=申请/填制日期年份;预览页可改)。 */
   budgetYear: number;
   /** 事项(J 列,富文本已拍平)。 */
   summary: string;
@@ -58,6 +64,8 @@ export interface SettlementParsedRow {
   /** 用户在预览页指定的科目(暂存持久化;确认时校验叶节点)。 */
   subjectId: string | null;
   subjectName: string | null;
+  /** 硬重复理由(预览标记悬浮展示;非硬重复行为空)。 */
+  dupReason?: string | null;
 }
 
 /** 单行字段级错误(与标准模板 RowFieldError 同形)。 */
@@ -109,7 +117,12 @@ export interface ImportBatchListItem {
   status: string;
   createdAt: string;
   confirmedAt: string | null;
+  /** 文件包含的数据行数(含错误/重复/跳过行)。 */
   rowCount: number;
+  /** 实际导入行数(确认时落定;未确认为 null)。 */
+  createdCount: number | null;
+  /** 补全更新行数(仅结算单 v2 场景;未确认为 null)。 */
+  updatedCount: number | null;
 }
 
 /** 行更新入参(暂存:科目/年度/强制导入)。 */
@@ -199,13 +212,36 @@ export async function parseSettlement(
   if (headerRowNo === 0 || !headerSheet) {
     throw new HTTPError(422, '未找到个人结算单表头(需包含 单据编号/单据状态)');
   }
+
+  // 版式判定:表头含「申请日期」→ v2(申请日期版);否则为 v1(填制日期版)。两者长期并存。
+  const isV2 = colIndex.has(SETTLEMENT_V2_APPLY_DATE);
+  const requiredKeys = isV2
+    ? [
+        SETTLEMENT_HEADERS.docNo,
+        SETTLEMENT_HEADERS.docStatus,
+        SETTLEMENT_V2_APPLY_DATE,
+        SETTLEMENT_HEADERS.amount,
+        SETTLEMENT_HEADERS.handler,
+        SETTLEMENT_HEADERS.remark,
+      ]
+    : [
+        SETTLEMENT_HEADERS.docNo,
+        SETTLEMENT_HEADERS.docStatus,
+        SETTLEMENT_HEADERS.fillDate,
+        SETTLEMENT_HEADERS.subject,
+        SETTLEMENT_HEADERS.amount,
+        SETTLEMENT_HEADERS.handler,
+      ];
   // 必要列必须全部按表头名命中;缺列直接拒绝(静默回退到 A 列会把单据编号当成金额/经办人)。
   {
-    const missing = Object.values(SETTLEMENT_HEADERS).filter((k) => !colIndex.has(k));
+    const missing = requiredKeys.filter((k) => !colIndex.has(k));
     if (missing.length > 0) {
       throw new HTTPError(422, `结算单缺少必要列:${missing.join('、')},请核对导出文件`);
     }
   }
+  const dateKey = isV2 ? SETTLEMENT_V2_APPLY_DATE : SETTLEMENT_HEADERS.fillDate;
+  const summaryKey = isV2 ? SETTLEMENT_HEADERS.remark : SETTLEMENT_HEADERS.subject;
+  const dateLabel = isV2 ? '申请日期' : '填制日期';
 
   const parsedRows: Array<{
     rowNo: number;
@@ -224,12 +260,17 @@ export async function parseSettlement(
 
     const docNo = get(SETTLEMENT_HEADERS.docNo);
     const statusLabel = get(SETTLEMENT_HEADERS.docStatus);
-    const dateRaw = get(SETTLEMENT_HEADERS.fillDate);
-    const summary = get(SETTLEMENT_HEADERS.subject);
+    const dateRaw = get(dateKey);
+    const summary = get(summaryKey);
     const amountRaw = get(SETTLEMENT_HEADERS.amount);
     const handler = get(SETTLEMENT_HEADERS.handler);
+    // v2:完成日期(可空列;v1 无此列)。
+    const completedDateRaw =
+      isV2 && colIndex.has(SETTLEMENT_HEADERS.completeDate)
+        ? get(SETTLEMENT_HEADERS.completeDate)
+        : null;
 
-    // 空行(六列全空)跳过。
+    // 空行(关键列全空)跳过。
     if (!docNo && !statusLabel && !dateRaw && !summary && !amountRaw && !handler) return;
 
     // 业务退单:不导入,留痕跳过。
@@ -242,6 +283,7 @@ export async function parseSettlement(
           statusLabel,
           status: 'PAID',
           businessDate: dateRaw ?? '',
+          completedDate: null,
           budgetYear: 0,
           summary: summary ?? '',
           amount: amountRaw ?? '',
@@ -264,14 +306,23 @@ export async function parseSettlement(
       errors.push({
         field: 'docStatus',
         message: statusLabel
-          ? `单据状态无法识别:${statusLabel}(仅支持 完成记账/制单保存,业务退单不导入)`
+          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核,业务退单不导入)`
           : '单据状态不能为空',
       });
     }
 
     const date = normalizeDate(dateRaw);
     if (date === null) {
-      errors.push({ field: 'fillDate', message: '填制日期格式无效(应为 YYYY-MM-DD)' });
+      errors.push({ field: 'fillDate', message: `${dateLabel}格式无效(应为 YYYY-MM-DD)` });
+    }
+
+    // v2 完成日期:可空;填了就必须是合法日期(与状态是否匹配不校验,Q7a 以状态为真相源)。
+    let completedDate: string | null = null;
+    if (completedDateRaw) {
+      completedDate = normalizeDate(completedDateRaw);
+      if (completedDate === null) {
+        errors.push({ field: 'completedDate', message: '完成日期格式无效(应为 YYYY-MM-DD)' });
+      }
     }
 
     const amount = normalizeAmount(amountRaw);
@@ -283,7 +334,10 @@ export async function parseSettlement(
       errors.push({ field: 'handler', message: '经办人不能为空' });
     }
     if (!summary) {
-      errors.push({ field: 'subject', message: '事项(摘要)不能为空' });
+      errors.push({
+        field: 'subject',
+        message: isV2 ? '备注(摘要)不能为空' : '事项(摘要)不能为空',
+      });
     }
 
     parsedRows.push({
@@ -294,6 +348,7 @@ export async function parseSettlement(
         statusLabel: statusLabel ?? '',
         status: (mapped ?? 'PAID') as BusinessStatus,
         businessDate: date ?? dateRaw ?? '',
+        completedDate,
         budgetYear: date ? Number(date.slice(0, 4)) : 0,
         summary: summary ?? '',
         amount: amountRaw ?? '',
@@ -326,7 +381,10 @@ export async function parseSettlement(
       amount: normalizeAmount(r.data.amount),
       businessDate: normalizeDate(r.data.businessDate),
       summary: r.data.summary || null,
+      status: r.data.status,
+      completedDate: r.data.completedDate ?? null,
     })),
+    { allowRefresh: true },
   );
   const verdictByRowNo = new Map(verdicts.map((v) => [v.rowKey, v]));
   for (const r of validRows) {
@@ -335,6 +393,11 @@ export async function parseSettlement(
     if (v.hard) {
       r.duplicate = true;
       r.duplicateLevel = 'hard';
+      r.data.dupReason = hardDupReason(v);
+    } else if (v.refresh) {
+      // §补全更新:同号命中但带来新信息,确认后更新既有记录(非新增)。
+      r.duplicate = true;
+      r.duplicateLevel = 'refresh';
     } else if (v.suspected) {
       r.duplicate = true;
       r.duplicateLevel = 'suspected';
@@ -409,7 +472,12 @@ export async function getSettlementBatch(
       errors: errs ?? [],
       duplicateFlag: r.duplicateFlag,
       // 旧行(0.10.x 前)只有 duplicateFlag:一律按疑似对待(保持可强制导入的历史行为)。
-      duplicateLevel: r.duplicateLevel === 'hard' ? 'hard' : r.duplicateFlag ? 'suspected' : 'none',
+      duplicateLevel:
+        r.duplicateLevel === 'hard' || r.duplicateLevel === 'refresh'
+          ? r.duplicateLevel
+          : r.duplicateFlag
+            ? 'suspected'
+            : 'none',
       forcedImport: r.forcedImport,
       normalizedAmount: normalizeAmount(data.amount),
     };
@@ -539,8 +607,13 @@ export async function updateSettlementRows(
       }
 
       // 硬重复(单据编号与未作废记录同号/批内同号)不可强制导入(codex 复审 P1 语义,ADR 0002)。
+      // refresh 行不参与强制导入语义(确认即更新既有记录,非新增)。
       const level: DuplicateLevel =
-        row.duplicateLevel === 'hard' ? 'hard' : row.duplicateFlag ? 'suspected' : 'none';
+        row.duplicateLevel === 'hard' || row.duplicateLevel === 'refresh'
+          ? row.duplicateLevel
+          : row.duplicateFlag
+            ? 'suspected'
+            : 'none';
       if (level === 'hard' && u.forcedImport === true) {
         throw new HTTPError(
           422,
@@ -562,15 +635,18 @@ export async function updateSettlementRows(
 /**
  * 阶段二:确认入库(个人结算单)。
  * - 权限:record:import + 项目范围;仅 pending 批次。
- * - 选中行必须已指定叶科目;docNo 重复行必须 forcedImport=true。
- * - 事务内复查 docNo 冲突(解析后到确认前,他人可能已导入同单号)→ 422。
- * - 逐行写 business_record(含 docNo),审计 action='import';batch → confirmed。
+ * - 新增行必须已指定叶科目;docNo 硬重复行必须 forcedImport=true;refresh 行不需要科目。
+ * - 事务内复查:新增行的 docNo 冲突(解析后到确认前,他人可能已导入同单号)→ 422;
+ *   refresh 行复核既有记录仍在且仍满足「金额一致 + 带来新信息」,否则 422。
+ * - 新增行逐行写 business_record(含 docNo),审计 action='import';
+ *   refresh 行更新既有记录的 完成日期/状态(状态只前进),审计 action='import_refresh'。
+ *   batch → confirmed。
  */
 export async function confirmSettlementImport(
   batchId: string,
   selectedRowIds: string[],
   user: Pick<User, 'id' | 'role'>,
-): Promise<{ created: number; batchId: string }> {
+): Promise<{ created: number; updated: number; batchId: string }> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
     include: { rows: true },
@@ -596,13 +672,24 @@ export async function confirmSettlementImport(
 
   const subjectIds = new Set<string>();
   const levelOf = (r: (typeof batch.rows)[number]): DuplicateLevel =>
-    r.duplicateLevel === 'hard' ? 'hard' : r.duplicateFlag ? 'suspected' : 'none';
+    r.duplicateLevel === 'hard' || r.duplicateLevel === 'refresh'
+      ? r.duplicateLevel
+      : r.duplicateFlag
+        ? 'suspected'
+        : 'none';
+  const createRows: typeof eligibleRows = [];
+  const refreshRows: typeof eligibleRows = [];
   for (const row of eligibleRows) {
     const data = row.parsedData as unknown as SettlementParsedRow;
-    if (!data.subjectId) {
-      throw new HTTPError(422, `第 ${row.rowNo} 行尚未指定科目,不能导入`);
+    // 先判档位再查科目:硬重复/refresh 行与科目无关。
+    if (levelOf(row) === 'refresh') {
+      // §补全更新行:更新既有记录,不需要科目。
+      if (!data.docNo) {
+        throw new HTTPError(422, `第 ${row.rowNo} 行为补全更新行但缺少单据编号`);
+      }
+      refreshRows.push(row);
+      continue;
     }
-    subjectIds.add(data.subjectId);
     if (levelOf(row) === 'hard') {
       throw new HTTPError(
         422,
@@ -612,13 +699,18 @@ export async function confirmSettlementImport(
     if (levelOf(row) === 'suspected' && !row.forcedImport) {
       throw new HTTPError(422, `第 ${row.rowNo} 行疑似重复,需勾选强制导入`);
     }
+    if (!data.subjectId) {
+      throw new HTTPError(422, `第 ${row.rowNo} 行尚未指定科目,不能导入`);
+    }
+    subjectIds.add(data.subjectId);
+    createRows.push(row);
   }
   const subjects = await prisma.budgetSubject.findMany({
     where: { projectId: batch.projectId, id: { in: [...subjectIds] } },
     select: { id: true, isLeaf: true },
   });
   const leafIds = new Set(subjects.filter((s) => s.isLeaf).map((s) => s.id));
-  for (const row of eligibleRows) {
+  for (const row of createRows) {
     const data = row.parsedData as unknown as SettlementParsedRow;
     if (!leafIds.has(data.subjectId!)) {
       throw new HTTPError(422, `第 ${row.rowNo} 行科目无效或不是叶节点`);
@@ -627,6 +719,7 @@ export async function confirmSettlementImport(
 
   const now = new Date();
   const createdIds: string[] = [];
+  let updatedCount = 0;
 
   await prisma
     .$transaction(async (tx) => {
@@ -639,10 +732,10 @@ export async function confirmSettlementImport(
         throw new HTTPError(409, '该批次正在被确认或已确认,不可重复操作');
       }
 
-      // docNo 兜底复查(解析到确认之间可能已有同单号入库)。
+      // docNo 兜底复查(解析到确认之间可能已有同单号入库)——仅新增行;refresh 行走下方复核。
       const checkDocNos = [
         ...new Set(
-          eligibleRows
+          createRows
             .map((r) => (r.parsedData as unknown as SettlementParsedRow).docNo)
             .filter((d): d is string => !!d),
         ),
@@ -655,7 +748,7 @@ export async function confirmSettlementImport(
         if (conflicts.length > 0) {
           // 硬重复无强制通道(ADR 0002):同号已入库一律拒绝,无 forcedImport 豁免。
           const conflictSet = new Set(conflicts.map((c) => c.docNo));
-          const badRows = eligibleRows
+          const badRows = createRows
             .filter((r) => {
               const d = (r.parsedData as unknown as SettlementParsedRow).docNo;
               return d && conflictSet.has(d);
@@ -670,7 +763,70 @@ export async function confirmSettlementImport(
         }
       }
 
-      for (const row of eligibleRows) {
+      // §补全更新:复核 + 更新既有记录(状态只前进不回退;完成日期以新行为准补缺)。
+      for (const row of refreshRows) {
+        const data = row.parsedData as unknown as SettlementParsedRow;
+        const docNo = data.docNo!;
+        // 行锁既有记录,与并发导入/编辑串行化。
+        const existing = await tx.businessRecord.findFirst({
+          where: { projectId: batch.projectId, isVoid: false, docNo },
+          select: {
+            id: true,
+            status: true,
+            amount: true,
+            completedDate: true,
+            businessDate: true,
+            summary: true,
+          },
+        });
+        const rowAmount = normalizeAmount(data.amount);
+        if (!existing || !rowAmount || rowAmount !== existing.amount.toFixed(2)) {
+          throw new HTTPError(
+            422,
+            `第 ${row.rowNo} 行的单据编号 ${docNo} 已不再满足补全更新条件(记录不存在、金额不一致或已作废),请刷新预览后重试`,
+          );
+        }
+        const statusAdvances = data.status === 'PAID' && existing.status !== 'PAID';
+        const fillsCompletion = !!data.completedDate && existing.completedDate === null;
+        if (!statusAdvances && !fillsCompletion) {
+          throw new HTTPError(
+            422,
+            `第 ${row.rowNo} 行的单据编号 ${docNo} 无可更新内容(完成日期已填或状态无需推进),该行已是硬重复;请刷新预览后重试`,
+          );
+        }
+        const before = snapshotRow({
+          id: existing.id,
+          status: existing.status,
+          completedDate: existing.completedDate ? formatYmd(existing.completedDate) : null,
+        });
+        const updatedRecord = await tx.businessRecord.update({
+          where: { id: existing.id },
+          data: {
+            ...(statusAdvances ? { status: 'PAID' as const } : {}),
+            ...(data.completedDate
+              ? { completedDate: new Date(`${data.completedDate}T00:00:00Z`) }
+              : {}),
+          },
+        });
+        await recordAudit(tx, {
+          projectId: batch.projectId,
+          objectType: 'business_records',
+          objectId: existing.id,
+          action: 'import_refresh',
+          operatorId: user.id,
+          before,
+          after: snapshotRow({
+            ...updatedRecord,
+            completedDate: updatedRecord.completedDate
+              ? formatYmd(updatedRecord.completedDate)
+              : null,
+            importBatchId: batchId,
+            importRowNo: row.rowNo,
+          }),
+        });
+      }
+
+      for (const row of createRows) {
         const data = row.parsedData as unknown as SettlementParsedRow;
         const amount = normalizeAmount(data.amount);
         if (!amount) {
@@ -690,6 +846,7 @@ export async function confirmSettlementImport(
             subjectId: data.subjectId!,
             amount: toStored(fromStored(amount)),
             businessDate: new Date(`${date}T00:00:00Z`),
+            completedDate: data.completedDate ? new Date(`${data.completedDate}T00:00:00Z`) : null,
             handler: data.handler,
             summary: data.summary,
             status: data.status,
@@ -727,9 +884,15 @@ export async function confirmSettlementImport(
         createdIds.push(recordId);
       }
 
+      updatedCount = refreshRows.length;
       await tx.importBatch.update({
         where: { id: batchId },
-        data: { status: 'confirmed', confirmedAt: now },
+        data: {
+          status: 'confirmed',
+          confirmedAt: now,
+          createdCount: createdIds.length,
+          updatedCount: refreshRows.length,
+        },
       });
     })
     .catch((e) => {
@@ -740,7 +903,7 @@ export async function confirmSettlementImport(
       throw e;
     });
 
-  return { created: createdIds.length, batchId };
+  return { created: createdIds.length, updated: updatedCount, batchId };
 }
 
 /**
@@ -766,5 +929,39 @@ export async function listImportBatches(
     createdAt: b.createdAt.toISOString(),
     confirmedAt: b.confirmedAt ? b.confirmedAt.toISOString() : null,
     rowCount: b._count.rows,
+    createdCount: b.createdCount,
+    updatedCount: b.updatedCount,
   }));
+}
+
+/**
+ * 删除未导入批次(仅 pending;已确认批次是入账历史,不可删)。
+ * - 权限:record:import + 项目范围。
+ * - 事务内删行 + 删批次,审计 action='delete'。
+ */
+export async function deleteImportBatch(
+  batchId: string,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<void> {
+  const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
+  if (!batch) {
+    throw new HTTPError(404, '导入批次不存在');
+  }
+  await requirePermission(user, 'record:import', batch.projectId);
+  if (batch.status !== 'pending') {
+    throw new HTTPError(409, '该批次已确认导入,不可删除');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.importRow.deleteMany({ where: { batchId } });
+    await tx.importBatch.delete({ where: { id: batchId } });
+    await recordAudit(tx, {
+      projectId: batch.projectId,
+      objectType: 'import_batches',
+      objectId: batchId,
+      action: 'delete',
+      operatorId: user.id,
+      before: { fileName: batch.fileName, status: batch.status },
+    });
+  });
 }

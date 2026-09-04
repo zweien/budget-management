@@ -364,6 +364,7 @@ components:
     bodyTypography: '{typography.body-sm}'
     cellPadding: '{spacing.xs} {spacing.sm}'
     rowBorder: '{colors.hairline}'
+    rowHover: '{colors.accent}' background + 2px inset ink bar on the leading edge
   ex-auth-form-card:
     description: 'Sign-in / sign-up card. Mirrors card-marketing-large chrome with form-input primitives inside.'
     backgroundColor: '{colors.canvas-soft}'

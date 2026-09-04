@@ -56,7 +56,9 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
     <tr
       data-slot="table-row"
       className={cn(
-        'border-b border-border transition-colors hover:bg-accent/60 data-[state=selected]:bg-muted',
+        'border-b border-border transition-colors hover:bg-accent data-[state=selected]:bg-muted',
+        // 悬停信号以左侧 2px ink 竖条为主(色随明暗主题翻转),底色为辅。
+        'hover:shadow-[inset_2px_0_0_0_var(--foreground)]',
         className,
       )}
       {...props}

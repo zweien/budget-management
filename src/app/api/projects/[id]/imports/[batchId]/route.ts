@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { HTTPError, requireUser } from '@/lib/auth/session';
 import { getImportBatch } from '@/server/services/excelImport.service';
 import {
+  deleteImportBatch,
   getSettlementBatch,
   updateSettlementRows,
 } from '@/server/services/settlementImport.service';
@@ -68,6 +69,27 @@ export async function PATCH(
     }
 
     await updateSettlementRows(batchId, updates, user);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    if (e instanceof HTTPError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
+}
+
+/**
+ * DELETE /api/projects/:id/imports/:batchId — 删除未导入批次(仅 pending)。
+ * 已确认批次是入账历史,不可删除(409)。
+ */
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string; batchId: string }> },
+) {
+  try {
+    const user = await requireUser();
+    const { batchId } = await params;
+    await deleteImportBatch(batchId, user);
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof HTTPError) {

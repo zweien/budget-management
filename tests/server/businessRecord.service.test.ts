@@ -595,6 +595,62 @@ describe('businessRecord.service (integration, real PG)', () => {
     );
     expect(combo.length).toBe(0);
   });
+  it('完成日期:创建写入;早于申请日期 → 422;更新可设置/清空,只改申请日期时合并校验', async () => {
+    const { project, leafA } = await seedApprovedProject('CMPL');
+
+    // 创建带完成日期。
+    const { record } = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '10.00',
+        businessDate: '2026-06-01',
+        completedDate: '2026-06-15',
+        handler: '经手',
+        summary: '带完成日期',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    expect(record.completedDate?.toISOString().slice(0, 10)).toBe('2026-06-15');
+
+    // 完成日期早于申请日期 → 422。
+    await expect(
+      createRecord(
+        project.id,
+        {
+          budgetYear: 2026,
+          subjectId: leafA.id,
+          amount: '10.00',
+          businessDate: '2026-06-01',
+          completedDate: '2026-05-31',
+          handler: '经手',
+          summary: '倒挂',
+          status: BusinessStatus.PAID,
+        },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('完成日期'),
+    });
+
+    // 更新:改完成日期合法值 / 清空(null)。
+    const upd = await updateRecord(record.id, { completedDate: '2026-06-20' }, adminUser());
+    expect(upd.record.completedDate?.toISOString().slice(0, 10)).toBe('2026-06-20');
+    const cleared = await updateRecord(record.id, { completedDate: null }, adminUser());
+    expect(cleared.record.completedDate).toBeNull();
+
+    // 只改申请日期推迟到完成日期之后 → 合并校验 422。
+    await updateRecord(record.id, { completedDate: '2026-06-20' }, adminUser());
+    await expect(
+      updateRecord(record.id, { businessDate: '2026-07-01' }, adminUser()),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('不能早于申请日期'),
+    });
+  });
 });
 
 /**

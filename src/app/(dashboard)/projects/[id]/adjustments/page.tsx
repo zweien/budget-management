@@ -969,7 +969,7 @@ export default function AdjustmentsPage() {
             </TableHeader>
             <TableBody>
               {formLines.map((r) => (
-                <TableRow key={r.key} className="hover:bg-transparent">
+                <TableRow key={r.key} className="">
                   <TableCell>
                     {r.isNew ? (
                       <div className="grid min-w-48 gap-1.5">
@@ -1108,7 +1108,7 @@ export default function AdjustmentsPage() {
             </TableBody>
             <TableFooter>
               {formKind === 'ALLOCATE' ? (
-                <TableRow className="hover:bg-transparent">
+                <TableRow className="">
                   <TableCell className="font-semibold">合计下达</TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">—</TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">
@@ -1118,7 +1118,7 @@ export default function AdjustmentsPage() {
                   <TableCell />
                 </TableRow>
               ) : (
-                <TableRow className="hover:bg-transparent">
+                <TableRow className="">
                   <TableCell className="font-semibold">合计</TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">
                     {sumOrigTotal.toFixed(2)}

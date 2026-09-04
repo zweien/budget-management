@@ -8,7 +8,7 @@ import { uuidv7 } from '@/lib/id';
 import { D, ZERO, fromStored, toStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
-import { checkDuplicates } from '@/server/services/duplicateCheck.service';
+import { checkDuplicates, hardDupReason } from '@/server/services/duplicateCheck.service';
 import {
   EXCEL_COLUMNS,
   STATUS_CN_TO_ENUM,
@@ -43,10 +43,13 @@ export interface ParsedRowData {
   remark: string | null;
   /** 财务系统单据编号(v0.11 可选列;老文件无此列 → null,查重退回指纹)。 */
   docNo: string | null;
+  /** 硬重复理由(预览标记悬浮展示;非硬重复行为空)。 */
+  dupReason?: string | null;
 }
 
 /** 重复档位(ADR 0002):none / hard(单据编号硬重复,禁止确认)/ suspected(指纹疑似,可强制)。 */
-export type DuplicateLevel = 'none' | 'hard' | 'suspected';
+/** 重复/更新档位:refresh = 同单据编号命中已有记录且带来新信息,确认后更新而非新增(仅结算单导入)。 */
+export type DuplicateLevel = 'none' | 'hard' | 'suspected' | 'refresh';
 
 /** 单行字段级错误(§10.2 错误定位到 row+field)。 */
 export interface RowFieldError {
@@ -239,7 +242,10 @@ export async function parseAndValidate(
   });
   const colIndexByKey = new Map<string, number>();
   for (const col of EXCEL_COLUMNS) {
-    const idx = headerMap.get(col.header);
+    // 申请日期(0.12 改名后的模板列头)优先;兼容老文件仍用「业务发生日期」表头。
+    const headerCandidates =
+      col.key === 'businessDate' ? ['申请日期', '业务发生日期'] : [col.header];
+    const idx = headerCandidates.map((h) => headerMap.get(h)).find((v) => v !== undefined);
     if (idx) colIndexByKey.set(col.key, idx);
   }
   // 表头缺失时退回顺序(第 1..N 列)。
@@ -341,7 +347,7 @@ export async function parseAndValidate(
     if (date === null) {
       errors.push({
         field: 'businessDate',
-        message: '业务发生日期格式无效(应为 YYYY-MM-DD)',
+        message: '申请日期格式无效(应为 YYYY-MM-DD)',
       });
     }
 
@@ -414,6 +420,7 @@ export async function parseAndValidate(
     if (v.hard) {
       r.duplicate = true;
       r.duplicateLevel = 'hard';
+      r.data.dupReason = hardDupReason(v);
     } else if (v.suspected) {
       r.duplicate = true;
       r.duplicateLevel = 'suspected';
@@ -705,7 +712,11 @@ export async function confirmImport(
 
       await tx.importBatch.update({
         where: { id: batchId },
-        data: { status: 'confirmed', confirmedAt: now },
+        data: {
+          status: 'confirmed',
+          confirmedAt: now,
+          createdCount: createdIds.length,
+        },
       });
     })
     .catch((e) => {

@@ -14,6 +14,7 @@ import {
   getSettlementBatch,
   updateSettlementRows,
   confirmSettlementImport,
+  deleteImportBatch,
   listImportBatches,
 } from '@/server/services/settlementImport.service';
 import { parseAndValidate } from '@/server/services/excelImport.service';
@@ -610,6 +611,10 @@ describe('settlementImport.service (integration, real PG)', () => {
     const susRow = preview.duplicates.find((r) => !r.parsedData.docNo)!;
     const okRow = preview.pending.find((r) => r.parsedData.docNo === 'RACE-1')!;
     expect(hardRow.duplicateLevel).toBe('hard');
+    // §悬浮理由:硬重复行带既有记录摘要(金额 1 ≠ 本行 20,不走补全更新)。
+    expect(hardRow.parsedData.dupReason).toContain('与项目内已有记录冲突');
+    expect(hardRow.parsedData.dupReason).toContain('已有单据');
+    expect(hardRow.parsedData.dupReason).toContain('当前状态 已支出');
     expect(susRow.duplicateLevel).toBe('suspected');
 
     await updateSettlementRows(
@@ -692,5 +697,393 @@ describe('settlementImport.service (integration, real PG)', () => {
     });
     // 结算单预览接口对标准模板批次拒绝(路由层已分流;此处防御性校验)。
     expect(preview).toBeNull();
+  });
+
+  // ---------- v2(申请日期版)----------
+  interface V2RowData {
+    docNo?: string;
+    docStatus?: string;
+    applyDate?: string;
+    completeDate?: string;
+    amount?: number | string;
+    handler?: string;
+    remark?: string;
+  }
+
+  /** 构造 v2(申请日期版)结算单 xlsx:表头第 1 行 + 数据行(含被忽略的新列)。 */
+  async function buildSettlementV2Xlsx(rows: V2RowData[]): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('2026');
+    ws.addRow([
+      '单据编号',
+      '单据状态',
+      '单位',
+      '部门',
+      '单据类型',
+      '业务类型',
+      '申请日期',
+      '完成日期',
+      '制单人',
+      '经办人',
+      '金额',
+      '合同编号',
+      '备注',
+      '补录标识',
+    ]);
+    for (const r of rows) {
+      ws.addRow([
+        r.docNo ?? '',
+        r.docStatus ?? '',
+        '计算机学院',
+        '研发中心',
+        '通用报销',
+        '零星采购经费',
+        r.applyDate ?? '',
+        r.completeDate ?? '',
+        '研发中心',
+        r.handler ?? '',
+        r.amount ?? '',
+        '',
+        r.remark ?? '',
+        '',
+      ]);
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  }
+
+  it('v2 申请日期版:识别/列映射/完成审核→财务审批/完成日期入库;单位等部门等新列忽略', async () => {
+    const buf = await buildSettlementV2Xlsx([
+      {
+        docNo: 'V2-PAID',
+        docStatus: '完成记账',
+        applyDate: '2026-07-07',
+        completeDate: '2026-07-13',
+        amount: '79.24',
+        handler: '许超',
+        remark: '研发中心许超报（其他支出）取项目光盘的市内交通费',
+      },
+      {
+        docNo: 'V2-AUDIT',
+        docStatus: '完成审核',
+        applyDate: '2026-08-31',
+        amount: '122.16',
+        handler: '陈柏瑞',
+        remark: '研发中心陈柏瑞报（其他支出）外出参会市内交通费',
+      },
+      {
+        docNo: 'V2-VOID',
+        docStatus: '业务退单',
+        applyDate: '2026-08-01',
+        amount: '10',
+        handler: '辛',
+        remark: '退单',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    expect(wb).not.toBeNull();
+    const batchId = await parseSettlement(wb!, projectId, adminUser());
+    const preview = await getSettlementBatch(batchId, adminUser());
+
+    const paid = preview.pending.find((r) => r.parsedData.docNo === 'V2-PAID')!;
+    expect(paid.parsedData.status).toBe(BusinessStatus.PAID);
+    expect(paid.parsedData.businessDate).toBe('2026-07-07');
+    expect(paid.parsedData.completedDate).toBe('2026-07-13');
+    expect(paid.parsedData.summary).toContain('取项目光盘');
+    expect(paid.parsedData.budgetYear).toBe(2026);
+
+    const audit = preview.pending.find((r) => r.parsedData.docNo === 'V2-AUDIT')!;
+    expect(audit.parsedData.status).toBe(BusinessStatus.FINANCE_APPROVAL);
+    expect(audit.parsedData.completedDate ?? null).toBeNull();
+
+    expect(preview.skippedCount).toBe(1);
+
+    // 指定科目 → 确认:created=2,完成日期写入已支出行。
+    await updateSettlementRows(
+      batchId,
+      [
+        { rowId: paid.rowId, subjectId: leafId },
+        { rowId: audit.rowId, subjectId: leafId2 },
+      ],
+      adminUser(),
+    );
+    const res = await confirmSettlementImport(batchId, [paid.rowId, audit.rowId], adminUser());
+    expect(res.created).toBe(2);
+    expect(res.updated).toBe(0);
+    const saved = await prisma.businessRecord.findFirst({ where: { docNo: 'V2-PAID' } });
+    expect(saved!.completedDate?.toISOString().slice(0, 10)).toBe('2026-07-13');
+    const savedAudit = await prisma.businessRecord.findFirst({ where: { docNo: 'V2-AUDIT' } });
+    expect(savedAudit!.completedDate).toBeNull();
+    expect(savedAudit!.status).toBe(BusinessStatus.FINANCE_APPROVAL);
+  });
+
+  it('§补全更新:状态推进(v1)与完成日期回填(v2)走 refresh;金额不一致/无新信息仍硬重复;确认复核竞态 422', async () => {
+    // 既有记录:REF-ADV(财务审批,无完成日期)、REF-FILL(已支出,完成日期空)、REF-SAME(已支出+完成日期)、REF-AMT(金额不同)。
+    const seeded = await prisma.businessRecord.createMany({
+      data: [
+        {
+          id: uuidv7(),
+          projectId,
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: toStored(new Prisma.Decimal('50')),
+          businessDate: new Date('2026-06-01T00:00:00Z'),
+          handler: '旧',
+          summary: '推进源',
+          status: BusinessStatus.FINANCE_APPROVAL,
+          docNo: 'REF-ADV',
+          createdById: adminId,
+        },
+        {
+          id: uuidv7(),
+          projectId,
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: toStored(new Prisma.Decimal('60')),
+          businessDate: new Date('2026-06-02T00:00:00Z'),
+          handler: '旧',
+          summary: '回填源',
+          status: BusinessStatus.PAID,
+          docNo: 'REF-FILL',
+          createdById: adminId,
+        },
+        {
+          id: uuidv7(),
+          projectId,
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: toStored(new Prisma.Decimal('70')),
+          businessDate: new Date('2026-06-03T00:00:00Z'),
+          handler: '旧',
+          summary: '无新信息',
+          status: BusinessStatus.PAID,
+          docNo: 'REF-SAME',
+          completedDate: new Date('2026-07-01T00:00:00Z'),
+          createdById: adminId,
+        },
+        {
+          id: uuidv7(),
+          projectId,
+          budgetYear: 2026,
+          subjectId: leafId,
+          amount: toStored(new Prisma.Decimal('80')),
+          businessDate: new Date('2026-06-04T00:00:00Z'),
+          handler: '旧',
+          summary: '金额不同',
+          status: BusinessStatus.FINANCE_APPROVAL,
+          docNo: 'REF-AMT',
+          createdById: adminId,
+        },
+      ],
+    });
+    expect(seeded.count).toBe(4);
+
+    const buf = await buildSettlementV2Xlsx([
+      // 状态推进 + 回填完成日期 → refresh。
+      {
+        docNo: 'REF-ADV',
+        docStatus: '完成记账',
+        applyDate: '2026-06-01',
+        completeDate: '2026-07-05',
+        amount: '50',
+        handler: '新',
+        remark: '推进源',
+      },
+      // 已支出、完成日期为空 → 仅回填完成日期 → refresh。
+      {
+        docNo: 'REF-FILL',
+        docStatus: '完成记账',
+        applyDate: '2026-06-02',
+        completeDate: '2026-07-06',
+        amount: '60',
+        handler: '新',
+        remark: '回填源',
+      },
+      // 无新信息(已支出且完成日期已有)→ 硬重复。
+      {
+        docNo: 'REF-SAME',
+        docStatus: '完成记账',
+        applyDate: '2026-06-03',
+        completeDate: '2026-07-01',
+        amount: '70',
+        handler: '新',
+        remark: '无新信息',
+      },
+      // 金额不一致 → 硬重复。
+      {
+        docNo: 'REF-AMT',
+        docStatus: '完成记账',
+        applyDate: '2026-06-04',
+        completeDate: '2026-07-08',
+        amount: '999',
+        handler: '新',
+        remark: '金额不同',
+      },
+      // v1 状态推进:同号 完成记账 → refresh(v1 亦启用)。
+    ]);
+    const v1buf = await buildSettlementXlsx([
+      {
+        docNo: 'REF-ADV',
+        docStatus: '完成记账',
+        fillDate: '2026-06-01',
+        subject: '推进源',
+        amount: '50',
+        handler: '新',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    const batchId = await parseSettlement(wb!, projectId, adminUser());
+    const preview = await getSettlementBatch(batchId, adminUser());
+    const d = (no: string) => preview.duplicates.find((r) => r.parsedData.docNo === no)!;
+    expect(d('REF-ADV').duplicateLevel).toBe('refresh');
+    expect(d('REF-FILL').duplicateLevel).toBe('refresh');
+    expect(d('REF-SAME').duplicateLevel).toBe('hard');
+    // 无新信息 → 硬重复理由指明冲突详情(非"文件内")。
+    expect(d('REF-SAME').parsedData.dupReason).toContain('无新信息');
+    expect(d('REF-AMT').duplicateLevel).toBe('hard');
+    // refresh 行无需科目即可确认。
+
+    // v1 状态推进:同号 完成记账 → refresh(v1 亦启用)。
+    const wb1 = await loadSettlementWorkbookIfMatch(v1buf);
+    const batchId1 = await parseSettlement(wb1!, projectId, adminUser());
+    const preview1 = await getSettlementBatch(batchId1, adminUser());
+    expect(preview1.duplicates[0].duplicateLevel).toBe('refresh');
+
+    // 确认:两条 refresh 更新既有记录,不新增;硬重复行确认被拒。
+    const adv = d('REF-ADV');
+    const fill = d('REF-FILL');
+    const same = d('REF-SAME');
+    await expect(
+      confirmSettlementImport(batchId, [adv.rowId, fill.rowId, same.rowId], adminUser()),
+    ).rejects.toMatchObject({ status: 422, message: expect.stringContaining('硬重复') });
+    const res = await confirmSettlementImport(batchId, [adv.rowId, fill.rowId], adminUser());
+    expect(res.created).toBe(0);
+    expect(res.updated).toBe(2);
+    // 批次计数落定:文件 4 行,导入 0 + 更新 2。
+    const confirmedBatch = await prisma.importBatch.findUnique({ where: { id: batchId } });
+    expect(confirmedBatch!.createdCount).toBe(0);
+    expect(confirmedBatch!.updatedCount).toBe(2);
+
+    const recAdv = await prisma.businessRecord.findFirst({ where: { docNo: 'REF-ADV' } });
+    expect(recAdv!.status).toBe(BusinessStatus.PAID);
+    expect(recAdv!.completedDate?.toISOString().slice(0, 10)).toBe('2026-07-05');
+    const recFill = await prisma.businessRecord.findFirst({ where: { docNo: 'REF-FILL' } });
+    expect(recFill!.status).toBe(BusinessStatus.PAID);
+    expect(recFill!.completedDate?.toISOString().slice(0, 10)).toBe('2026-07-06');
+    // 更新写审计。
+    const audit = await prisma.auditLog.findFirst({
+      where: { objectType: 'business_records', action: 'import_refresh' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect(audit).not.toBeNull();
+
+    // v1 状态推进单确认:既有 REF-ADV 已是 PAID → 状态无法再推进 → 复核 422(无新信息)。
+    const preview1b = await getSettlementBatch(batchId1, adminUser());
+    const r1 = preview1b.duplicates[0];
+    await expect(confirmSettlementImport(batchId1, [r1.rowId], adminUser())).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('无可更新内容'),
+    });
+
+    // 竞态:refresh 行确认前既有记录被作废 → 复核 422。
+    const buf2 = await buildSettlementV2Xlsx([
+      {
+        docNo: 'REF-FILL',
+        docStatus: '完成记账',
+        applyDate: '2026-06-02',
+        completeDate: '2026-08-08',
+        amount: '60',
+        handler: '新',
+        remark: '回填源',
+      },
+    ]);
+    const wb2 = await loadSettlementWorkbookIfMatch(buf2);
+    const batchId2 = await parseSettlement(wb2!, projectId, adminUser());
+    const preview2 = await getSettlementBatch(batchId2, adminUser());
+    const r2 = preview2.duplicates.find((x) => x.parsedData.docNo === 'REF-FILL')!;
+    await prisma.businessRecord.updateMany({
+      where: { docNo: 'REF-FILL', projectId },
+      data: { isVoid: true, voidedAt: new Date(), voidReason: '测试作废' },
+    });
+    await expect(confirmSettlementImport(batchId2, [r2.rowId], adminUser())).rejects.toMatchObject({
+      status: 422,
+    });
+  });
+
+  it('批次列表带 文件行数/实际导入 计数;删除:pending 可删(级联行),confirmed 409', async () => {
+    // 批次 A:确认 → createdCount 落定;批次 B:pending → 删除后行与批次消失。
+    const bufA = await buildSettlementV2Xlsx([
+      {
+        docNo: 'DEL-1',
+        docStatus: '完成记账',
+        applyDate: '2026-05-01',
+        completeDate: '2026-05-02',
+        amount: '11',
+        handler: '甲',
+        remark: '已导入行',
+      },
+      {
+        docNo: 'DEL-2',
+        docStatus: '完成审核',
+        applyDate: '2026-05-03',
+        amount: '12',
+        handler: '甲',
+        remark: '已导入行2',
+      },
+    ]);
+    const wbA = await loadSettlementWorkbookIfMatch(bufA);
+    const batchA = await parseSettlement(wbA!, projectId, adminUser());
+    const prevA = await getSettlementBatch(batchA, adminUser());
+    await updateSettlementRows(
+      batchA,
+      prevA.pending.map((r) => ({ rowId: r.rowId, subjectId: leafId })),
+      adminUser(),
+    );
+    const resA = await confirmSettlementImport(
+      batchA,
+      prevA.pending.map((r) => r.rowId),
+      adminUser(),
+    );
+    expect(resA.created).toBe(2);
+
+    const bufB = await buildSettlementV2Xlsx([
+      {
+        docNo: 'DEL-3',
+        docStatus: '完成记账',
+        applyDate: '2026-05-05',
+        amount: '13',
+        handler: '乙',
+        remark: '待删行',
+      },
+      {
+        docNo: 'DEL-4',
+        docStatus: '完成记账',
+        applyDate: '2026-05-06',
+        amount: '14',
+        handler: '乙',
+        remark: '待删行2',
+      },
+    ]);
+    const wbB = await loadSettlementWorkbookIfMatch(bufB);
+    const batchB = await parseSettlement(wbB!, projectId, adminUser());
+
+    const listed = await listImportBatches(projectId, adminUser());
+    const a = listed.find((b) => b.batchId === batchA)!;
+    const b = listed.find((x) => x.batchId === batchB)!;
+    expect(a.rowCount).toBe(2);
+    expect(a.createdCount).toBe(2);
+    expect(a.confirmedAt).not.toBeNull();
+    expect(b.status).toBe('pending');
+    expect(b.createdCount).toBeNull();
+
+    // 已确认批次删除 → 409。
+    await expect(deleteImportBatch(batchA, adminUser())).rejects.toMatchObject({ status: 409 });
+
+    // pending 批次删除 → 批次与行级联消失。
+    await deleteImportBatch(batchB, adminUser());
+    expect(await prisma.importBatch.findUnique({ where: { id: batchB } })).toBeNull();
+    expect(await prisma.importRow.count({ where: { batchId: batchB } })).toBe(0);
+    const listedAfter = await listImportBatches(projectId, adminUser());
+    expect(listedAfter.map((x) => x.batchId)).not.toContain(batchB);
   });
 });

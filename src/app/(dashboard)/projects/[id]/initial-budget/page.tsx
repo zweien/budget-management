@@ -1374,7 +1374,7 @@ export default function InitialBudgetPage() {
             </TableHeader>
             <TableBody>
               {annualRows.length === 0 ? (
-                <TableRow className="hover:bg-transparent">
+                <TableRow className="">
                   <TableCell
                     colSpan={editable ? 4 : 3}
                     className="h-24 text-center text-muted-foreground"
@@ -1388,7 +1388,7 @@ export default function InitialBudgetPage() {
                   const annual = toDisplayNumber(row.amount);
                   const over = sum > annual + 1e-9;
                   return (
-                    <TableRow key={row.key} className="hover:bg-transparent">
+                    <TableRow key={row.key} className="">
                       <TableCell>
                         {editable ? (
                           <Input
@@ -1562,7 +1562,7 @@ export default function InitialBudgetPage() {
                   {editable ? <TableCell /> : null}
                 </TableRow>
                 {subjectTable.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id} className="hover:bg-transparent">
+                  <TableRow key={row.id} className="">
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id} className="py-1.5">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}

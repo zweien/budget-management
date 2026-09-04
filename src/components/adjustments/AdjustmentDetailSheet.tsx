@@ -350,7 +350,7 @@ export function AdjustmentDetailSheet({
                     ))}
                   </TableBody>
                   <TableFooter>
-                    <TableRow className="hover:bg-transparent">
+                    <TableRow className="">
                       <TableCell>合计</TableCell>
                       <TableCell className="text-right tabular-nums">
                         <MoneyText value={detail.sums.originTotal} riskOnNegative={false} />

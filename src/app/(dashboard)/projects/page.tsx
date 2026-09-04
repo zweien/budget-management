@@ -283,7 +283,7 @@ export default function ProjectsPage() {
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
-                <TableRow className="hover:bg-transparent">
+                <TableRow className="">
                   <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                     无匹配「{keyword}」的项目
                   </TableCell>

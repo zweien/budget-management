@@ -7,7 +7,7 @@ import ExcelJS from 'exceljs';
  * 不打包进客户端 bundle。
  *
  * §10.4 模板表头(列顺序即解析顺序):
- *   项目编号、预算年度、科目编码、金额、业务发生日期、经办人、摘要、业务状态、备注
+ *   项目编号、预算年度、科目编码、金额、申请日期、经办人、摘要、业务状态、备注
  */
 
 /** §10.2/10.4 列定义:中文表头 + 对应字段键。 */
@@ -26,7 +26,7 @@ export const EXCEL_COLUMNS: readonly ExcelColumn[] = [
   { header: '预算年度', key: 'budgetYear', width: 12 },
   { header: '科目编码', key: 'subjectCode', width: 16 },
   { header: '金额', key: 'amount', width: 14 },
-  { header: '业务发生日期', key: 'businessDate', width: 16 },
+  { header: '申请日期', key: 'businessDate', width: 16 },
   { header: '经办人', key: 'handler', width: 14 },
   { header: '摘要', key: 'summary', width: 30 },
   { header: '业务状态', key: 'businessStatus', width: 16 },
@@ -144,7 +144,7 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
     };
   }
 
-  // 「业务发生日期」列(第 5 列)格式提示(文本日期 yyyy-mm-dd)。
+  // 「申请日期」列(第 5 列,原「业务发生日期」)格式提示(文本日期 yyyy-mm-dd)。
   const dateColIdx = EXCEL_COLUMNS.findIndex((c) => c.key === 'businessDate') + 1;
   sheet.getCell(1, dateColIdx).note = {
     texts: [{ text: '日期格式:YYYY-MM-DD(例如 2026-07-30)' }],
@@ -169,7 +169,7 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
     ['预算年度', '正整数,例如 2026。'],
     ['科目编码', '必须是该项目下已存在的【叶节点】科目编码(非叶节点会报错)。'],
     ['金额', '大于 0 的数字,例如 1000.00。'],
-    ['业务发生日期', 'YYYY-MM-DD 文本日期。'],
+    ['申请日期', 'YYYY-MM-DD 文本日期。'],
     ['经办人', '非空。'],
     ['摘要', '非空。'],
     ['业务状态', `四选一:${STATUS_CN_VALUES.join(' / ')}。`],

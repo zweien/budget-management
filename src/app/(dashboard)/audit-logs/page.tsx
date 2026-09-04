@@ -357,14 +357,14 @@ export default function AuditLogsPage() {
           <TableBody>
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i} className="hover:bg-transparent">
+                <TableRow key={i} className="">
                   <TableCell colSpan={6}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : logs.length === 0 ? (
-              <TableRow className="hover:bg-transparent">
+              <TableRow className="">
                 <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                   暂无操作日志
                 </TableCell>
@@ -406,7 +406,7 @@ export default function AuditLogsPage() {
                     <TableCell className="tabular-nums">{formatDateTime(r.operatedAt)}</TableCell>
                   </TableRow>,
                   isOpen ? (
-                    <TableRow key={`${r.id}-detail`} className="hover:bg-transparent">
+                    <TableRow key={`${r.id}-detail`} className="">
                       <TableCell colSpan={6} className="bg-muted/40 p-4">
                         <div className="grid gap-3 lg:grid-cols-2">
                           <div>

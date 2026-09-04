@@ -8,6 +8,16 @@ import { toast } from 'sonner';
 import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
 import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
 import { cn } from '@/lib/utils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -45,6 +55,8 @@ interface PreviewRow {
     businessStatus: string | null;
     remark: string | null;
     docNo: string | null;
+    /** 硬重复理由(悬浮展示;非硬重复行为空)。 */
+    dupReason?: string | null;
   };
   validationStatus: 'valid' | 'error';
   errors: { field: string; message: string }[];
@@ -77,7 +89,12 @@ interface BatchListItem {
   status: string;
   createdAt: string;
   confirmedAt: string | null;
+  /** 文件包含的数据行数(含错误/重复/跳过行)。 */
   rowCount: number;
+  /** 实际导入行数(确认时落定;未确认为 null)。 */
+  createdCount: number | null;
+  /** 补全更新行数(未确认为 null)。 */
+  updatedCount: number | null;
 }
 
 /** 上传文件(走原生 fetch + mock header,不用 apiFetch 的 JSON Content-Type)。 */
@@ -170,7 +187,7 @@ function PreviewTable({
                   {hard ? (
                     <span
                       className="inline-block size-4 rounded border border-input bg-muted"
-                      title="硬重复:单据编号与未作废记录重复,禁止导入"
+                      title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
                       aria-label={`第 ${r.rowNo} 行硬重复,不可导入`}
                     />
                   ) : (
@@ -204,7 +221,12 @@ function PreviewTable({
               </TableCell>
               <TableCell className="font-mono text-xs">
                 {hard ? (
-                  <Badge variant="error">硬重复</Badge>
+                  <Badge
+                    variant="error"
+                    title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
+                  >
+                    硬重复
+                  </Badge>
                 ) : (
                   (r.parsedData.docNo ?? <span className="text-mute">—</span>)
                 )}
@@ -252,6 +274,9 @@ function ImportPageInner() {
   const [dragOver, setDragOver] = useState(false);
   // 进行中/历史批次(暂存再入口)。
   const [batches, setBatches] = useState<BatchListItem[] | null>(null);
+  // 待删除批次(pending;已确认批次不可删)。
+  const [deleteTarget, setDeleteTarget] = useState<BatchListItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // 编辑权门控:undefined=未加载;false=只读(隐藏上传/确认入口)。
   const [canEdit, setCanEdit] = useState<boolean | undefined>(undefined);
 
@@ -360,6 +385,26 @@ function ImportPageInner() {
       if (e instanceof Error) toast.error(e.message);
     } finally {
       setConfirming(false);
+    }
+  };
+
+  /** 删除未导入批次(pending);成功后刷新批次列表。 */
+  const handleDeleteBatch = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/imports/${deleteTarget.batchId}`, {
+        method: 'DELETE',
+      });
+      toast.success(`已删除批次「${deleteTarget.fileName}」`);
+      setDeleteTarget(null);
+      apiFetch<{ batches: BatchListItem[] }>(`/api/projects/${projectId}/imports`)
+        .then((d) => setBatches(d.batches))
+        .catch(() => undefined);
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -577,11 +622,13 @@ function ImportPageInner() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>文件</TableHead>
-                  <TableHead className="w-32">类型</TableHead>
+                  <TableHead className="w-28">类型</TableHead>
                   <TableHead className="w-24">状态</TableHead>
-                  <TableHead className="w-20 tabular-nums">行数</TableHead>
+                  <TableHead className="w-24 tabular-nums">文件行数</TableHead>
+                  <TableHead className="w-28 tabular-nums">实际导入</TableHead>
                   <TableHead className="w-40">上传时间</TableHead>
-                  <TableHead className="w-20" />
+                  <TableHead className="w-40">导入日期</TableHead>
+                  <TableHead className="w-32" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -605,19 +652,46 @@ function ImportPageInner() {
                       )}
                     </TableCell>
                     <TableCell className="tabular-nums">{b.rowCount}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {b.createdCount === null ? (
+                        <span className="text-mute">—</span>
+                      ) : (
+                        <>
+                          {b.createdCount}
+                          {b.updatedCount ? (
+                            <span className="ml-1 text-xs text-mute">+更新{b.updatedCount}</span>
+                          ) : null}
+                        </>
+                      )}
+                    </TableCell>
                     <TableCell className="tabular-nums text-xs">
                       {b.createdAt.slice(0, 16).replace('T', ' ')}
                     </TableCell>
+                    <TableCell className="tabular-nums text-xs">
+                      {b.confirmedAt ? b.confirmedAt.slice(0, 16).replace('T', ' ') : '—'}
+                    </TableCell>
                     <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          router.push(`/projects/${projectId}/imports?batch=${b.batchId}`)
-                        }
-                      >
-                        {b.status === 'confirmed' ? '查看' : '继续'}
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            router.push(`/projects/${projectId}/imports?batch=${b.batchId}`)
+                          }
+                        >
+                          {b.status === 'confirmed' ? '查看' : '继续'}
+                        </Button>
+                        {b.status !== 'confirmed' ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-error-deep hover:bg-error-soft"
+                            onClick={() => setDeleteTarget(b)}
+                          >
+                            删除
+                          </Button>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -661,6 +735,29 @@ function ImportPageInner() {
           }}
         />
       </label>
+      {/* 删除未导入批次确认 */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除该导入批次?</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除「{deleteTarget?.fileName}」(文件 {deleteTarget?.rowCount} 行)及其全部预览/
+              暂存数据;该批次尚未导入,不影响任何业务记录。已导入的批次不可删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={() => {
+                void handleDeleteBatch();
+              }}
+            >
+              {deleting ? '删除中…' : '确认删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

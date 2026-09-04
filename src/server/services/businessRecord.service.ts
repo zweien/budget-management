@@ -23,7 +23,10 @@ export interface CreateRecordInput {
   budgetYear: number;
   subjectId: string;
   amount: string;
-  businessDate: string; // ISO yyyy-mm-dd
+  /** 申请日期(0.12 前称业务发生日期),ISO yyyy-mm-dd。 */
+  businessDate: string;
+  /** 完成日期(选填;报销完成,通常由财务系统后续导出回填)。 */
+  completedDate?: string | null;
   handler: string;
   summary: string;
   status: BusinessStatus;
@@ -38,6 +41,8 @@ export interface UpdateRecordInput {
   subjectId?: string;
   amount?: string;
   businessDate?: string;
+  /** 完成日期(选填;传 null 清空)。 */
+  completedDate?: string | null;
   handler?: string;
   summary?: string;
   status?: BusinessStatus;
@@ -87,6 +92,7 @@ function snapshotRecord(row: BusinessRecord): Record<string, unknown> {
     subjectId: row.subjectId,
     amount: row.amount,
     businessDate: row.businessDate,
+    completedDate: row.completedDate,
     handler: row.handler,
     summary: row.summary,
     status: row.status,
@@ -120,16 +126,30 @@ function parsePositiveAmount(amount: string): D {
   return d;
 }
 
-/** 校验 businessDate 字符串可解析为合法日期。 */
-function parseBusinessDate(s: string): Date {
+/** 校验日期字符串(yyyy-mm-dd)可解析为合法日期,标签用于报错文案。 */
+function parseRecordDate(s: string, label: string): Date {
   // 仅接受 yyyy-mm-dd,避免时区漂移。
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) {
-    throw new HTTPError(422, `业务日期格式无效(应为 yyyy-mm-dd):${s}`);
+    throw new HTTPError(422, `${label}格式无效(应为 yyyy-mm-dd):${s}`);
   }
   const dt = new Date(`${s}T00:00:00Z`);
   if (Number.isNaN(dt.getTime())) {
-    throw new HTTPError(422, `业务日期无效:${s}`);
+    throw new HTTPError(422, `${label}无效:${s}`);
+  }
+  return dt;
+}
+
+function parseBusinessDate(s: string): Date {
+  return parseRecordDate(s, '申请日期');
+}
+
+/** 完成日期:选填;与申请日期都存在时不得早于申请日期(Q6a)。 */
+function parseCompletedDate(s: string | null | undefined, businessDate: Date): Date | null {
+  if (s === undefined || s === null || s === '') return null;
+  const dt = parseRecordDate(s, '完成日期');
+  if (dt.getTime() < businessDate.getTime()) {
+    throw new HTTPError(422, `完成日期(${s})不能早于申请日期`);
   }
   return dt;
 }
@@ -222,6 +242,7 @@ export async function createRecord(
     throw new HTTPError(422, '摘要不能为空');
   }
   const businessDate = parseBusinessDate(input.businessDate);
+  const completedDate = parseCompletedDate(input.completedDate, businessDate);
 
   // 校验科目属于该项目且为叶节点。
   await requireLeafSubject(prisma, projectId, input.subjectId);
@@ -267,6 +288,7 @@ export async function createRecord(
           subjectId: input.subjectId,
           amount: toStored(amount),
           businessDate,
+          completedDate,
           handler: input.handler.trim(),
           summary: input.summary.trim(),
           status: input.status,
@@ -392,6 +414,19 @@ export async function updateRecord(
   if (input.businessDate !== undefined) {
     newBusinessDate = parseBusinessDate(input.businessDate);
   }
+  // 完成日期:undefined=不改;null=清空;有值=覆盖(与申请日期合并后校验顺序)。
+  let newCompletedDate = before.completedDate;
+  if (input.completedDate !== undefined) {
+    newCompletedDate = parseCompletedDate(input.completedDate, newBusinessDate);
+  } else if (input.businessDate !== undefined && newCompletedDate !== null) {
+    // 只改了申请日期而完成日期保持不变:合并后的有效对仍须满足 完成 ≥ 申请。
+    if (newCompletedDate.getTime() < newBusinessDate.getTime()) {
+      throw new HTTPError(
+        422,
+        `完成日期(${newCompletedDate.toISOString().slice(0, 10)})不能早于申请日期`,
+      );
+    }
+  }
   // 校验新科目属于该项目且为叶节点(若未改 subjectId,等价于校验原科目仍是叶节点)。
   await requireLeafSubject(prisma, before.projectId, newSubjectId);
 
@@ -437,6 +472,7 @@ export async function updateRecord(
     status: newStatus,
     modifiedBy: { connect: { id: user.id } },
   };
+  if (input.completedDate !== undefined) data.completedDate = newCompletedDate;
   if (input.handler !== undefined) data.handler = input.handler.trim();
   if (input.summary !== undefined) data.summary = input.summary.trim();
   if (input.docNo !== undefined) data.docNo = newDocNo;
