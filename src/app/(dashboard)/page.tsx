@@ -47,22 +47,21 @@ interface CrossProjectResult {
   projects: CrossProjectRow[];
 }
 
-// ---- ledger(非管理员聚合 + 风险预警:逐项目查当年科目)----
-interface LedgerNode {
+// ---- 风险预警(单次取回跨项目负结余科目,服务端单条 SQL 聚合)----
+interface RiskSummaryRow {
+  projectId: string;
+  projectName: string;
   subjectId: string;
-  code: string;
-  name: string;
-  isLeaf: boolean;
-  current: string;
-  totalOccupied: string;
+  subjectCode: string;
+  subjectName: string;
+  budget: string;
+  occupied: string;
   balance: string;
   executionRate: number | null;
 }
-interface LedgerResponse {
-  year: number;
-  nodes: LedgerNode[];
+interface RiskSummaryResult {
+  rows: RiskSummaryRow[];
 }
-
 // ---- 待审批事项(admin)----
 interface PendingResponse {
   initialBudgets: unknown[];
@@ -341,36 +340,18 @@ function RiskWarnings() {
     let cancelled = false;
 
     const compute = async (): Promise<RiskRow[]> => {
-      // 全局只读:/api/projects 对所有登录用户返回全部项目。
-      const projects = await apiFetch<ProjectRef[]>('/api/projects');
-      const items = await Promise.all(
-        (projects ?? []).map((p) =>
-          apiFetch<LedgerResponse>(`/api/projects/${p.id}/ledger?year=${year}`)
-            .then((l) => ({ project: p, ledger: l }))
-            .catch(() => null),
-        ),
-      );
-      const out: RiskRow[] = [];
-      for (const item of items) {
-        if (!item) continue;
-        for (const n of item.ledger.nodes) {
-          const bal = Number.parseFloat(n.balance ?? '0');
-          if (Number.isFinite(bal) && bal < 0) {
-            out.push({
-              key: `${item.project.id}-${n.subjectId}`,
-              projectId: item.project.id,
-              projectName: item.project.name,
-              subjectCode: n.code,
-              subjectName: n.name,
-              balance: n.balance,
-              executionRate: n.executionRate,
-            });
-          }
-        }
-      }
-      // 按结余升序(最负在前)。
-      out.sort((a, b) => Number.parseFloat(a.balance) - Number.parseFloat(b.balance));
-      return out;
+      // 全局只读:一次取回全部项目的负结余科目(服务端单条 SQL 聚合,
+      // 不再对每项目各拉一次执行台账——500 项目即 500 并发请求的落地页风暴已消除)。
+      const data = await apiFetch<RiskSummaryResult>(`/api/statistics/risk-summary?year=${year}`);
+      return data.rows.map((r) => ({
+        key: `${r.projectId}-${r.subjectId}`,
+        projectId: r.projectId,
+        projectName: r.projectName,
+        subjectCode: r.subjectCode,
+        subjectName: r.subjectName,
+        balance: r.balance,
+        executionRate: r.executionRate,
+      }));
     };
 
     compute()

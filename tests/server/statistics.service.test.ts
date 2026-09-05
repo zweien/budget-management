@@ -10,12 +10,13 @@ import {
   type InitialBudgetPayload,
 } from '@/server/services/initialBudget.service';
 import { createProject } from '@/server/services/project.service';
-import { createRecord } from '@/server/services/businessRecord.service';
+import { createRecord, voidRecord } from '@/server/services/businessRecord.service';
 import {
   balanceStatistics,
   crossProjectStatistics,
   customStatistics,
   monthlyHistory,
+  riskSummary,
 } from '@/server/services/statistics.service';
 
 // 集成测试直连真实 PG(:5434)。建项目 + 编制 + 业务记录,需级联清理。
@@ -551,5 +552,124 @@ describe('statistics.service (integration, real PG)', () => {
     );
     expect(none.records.length).toBe(0);
     expect(none.summary.currentBudget).toBe('0.00');
+  });
+
+  // ---------------- riskSummary:首页风险预警(跨项目负结余科目) ----------------
+
+  it('riskSummary: 一次取回全部项目负结余科目(仅超支科目,作废不计,最负在前)', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('RISK1');
+    const { project: p2, leafA: leafA2 } = await seedApprovedProject('RISK2');
+
+    // p1/leafA(2026 年度预算 600):记录 700 → 负结余 -100;作废 5000 不计入。
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '700.00',
+        businessDate: '2026-03-01',
+        handler: '经办',
+        summary: 'over',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    const voided = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '5000.00',
+        businessDate: '2026-03-02',
+        handler: '经办',
+        summary: 'void-me',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    await voidRecord(voided.record.id, '作废', adminUser());
+    // p1/leafB(预算 400):记录 800 → 负结余 -400(比 leafA 更负,排序应在前)。
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafB.id,
+        amount: '800.00',
+        businessDate: '2026-03-03',
+        handler: '经办',
+        summary: 'worse',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    // p2/leafA2:记录 50 → 不超支。
+    await createRecord(
+      p2.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA2.id,
+        amount: '50.00',
+        businessDate: '2026-03-04',
+        handler: '经办',
+        summary: 'ok2',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    const { rows } = await riskSummary({ year: 2026 }, adminUser());
+    // 断言收敛到本项目(共享库中其他用例可能产生各自的风险行)。
+    const own = rows.filter((r) => r.projectId === project.id);
+    expect(own).toHaveLength(2);
+    // 排序:结余升序(最负在前)——leafB(-400)在 leafA(-100)之前。
+    expect(own[0].subjectCode).toBe('B');
+    expect(own[0].budget).toBe('400.00');
+    expect(own[0].occupied).toBe('800.00');
+    expect(own[0].balance).toBe('-400.00');
+    expect(own[1].subjectCode).toBe('A');
+    expect(own[1].balance).toBe('-100.00');
+
+    // 其他年度本项目无风险行。
+    const otherYear = await riskSummary({ year: 2027 }, adminUser());
+    expect(otherYear.rows.some((r) => r.projectId === project.id)).toBe(false);
+
+    // 已归档项目排除(旧口径经 /api/projects 默认不含归档,保持一致)。
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { archivedAt: new Date() },
+    });
+    const afterArchive = await riskSummary({ year: 2026 }, adminUser());
+    expect(afterArchive.rows.some((r) => r.projectId === project.id)).toBe(false);
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { archivedAt: null },
+    });
+  });
+
+  it('riskSummary: 未编制年度预算但发生占用的科目按 0 预算判定超支', async () => {
+    const { project, leafA } = await seedApprovedProject('RISK3');
+    // 删除 leafA 的 2026 科目年度预算 → 预算 0,任何占用都是负结余。
+    await prisma.subjectBudget.deleteMany({
+      where: { projectId: project.id, year: 2026, subjectId: leafA.id },
+    });
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '120.00',
+        businessDate: '2026-04-01',
+        handler: '经办',
+        summary: 'no-budget',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    const { rows } = await riskSummary({ year: 2026 }, adminUser());
+    const row = rows.find((r) => r.projectId === project.id && r.subjectCode === 'A');
+    expect(row).toBeDefined();
+    expect(row!.budget).toBe('0.00');
+    expect(row!.balance).toBe('-120.00');
+    expect(row!.executionRate).toBeNull();
   });
 });
