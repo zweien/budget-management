@@ -76,6 +76,11 @@ interface Props {
    */
   hideAnnualColumns?: boolean;
   /**
+   * 年度台账视图(可选):隐藏「总预算」预算列组(跨年度口径)——
+   * 初始预算编制页等只看编制年度执行情况的场景;与 hideAnnualColumns 互斥使用。
+   */
+  hideTotalColumns?: boolean;
+  /**
    * 总预算列组的列名(默认「总预算」)。包干制总口径下科目分母 = Σ 历年科目计划,
    * 与项目总预算无加法关系,传「累计计划」如实标注。
    */
@@ -161,6 +166,7 @@ export function BudgetTreeTable({
   showLevel1Total,
   yearLabel,
   hideAnnualColumns = false,
+  hideTotalColumns = false,
   totalGroupLabel = '总预算',
 }: Props) {
   const treeData = useMemo(() => buildTree(nodes), [nodes]);
@@ -272,21 +278,26 @@ export function BudgetTreeTable({
           </span>
         ),
       },
-      moneyCol(
-        'totalInitial',
-        columnLabel('总预算·原始', '总预算', totalGroupLabel),
-        'totalInitial',
-      ),
-      moneyCol(
-        'totalAdjustment',
-        columnLabel('总预算·调整', '总预算', totalGroupLabel),
-        'totalAdjustment',
-      ),
-      moneyCol(
-        'totalCurrent',
-        columnLabel('总预算·当前', '总预算', totalGroupLabel),
-        'totalCurrent',
-      ),
+      // §年度视图:跨年度总预算口径不属本表(hideTotalColumns),整组省略。
+      ...(hideTotalColumns
+        ? []
+        : [
+            moneyCol(
+              'totalInitial',
+              columnLabel('总预算·原始', '总预算', totalGroupLabel),
+              'totalInitial',
+            ),
+            moneyCol(
+              'totalAdjustment',
+              columnLabel('总预算·调整', '总预算', totalGroupLabel),
+              'totalAdjustment',
+            ),
+            moneyCol(
+              'totalCurrent',
+              columnLabel('总预算·当前', '总预算', totalGroupLabel),
+              'totalCurrent',
+            ),
+          ]),
       // §总预算视图:跨年度口径无年度维度,整组隐藏(hideAnnualColumns)。
       ...(hideAnnualColumns
         ? []
@@ -329,7 +340,15 @@ export function BudgetTreeTable({
       },
     ];
     return cols;
-  }, [subjectHref, showLevel1Total, level1Total, yearLabel, hideAnnualColumns, totalGroupLabel]);
+  }, [
+    subjectHref,
+    showLevel1Total,
+    level1Total,
+    yearLabel,
+    hideAnnualColumns,
+    hideTotalColumns,
+    totalGroupLabel,
+  ]);
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常),禁用该告警。
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -344,9 +363,11 @@ export function BudgetTreeTable({
     getExpandedRowModel: getExpandedRowModel(),
   });
 
-  const groups: ('总预算' | '年度' | '执行')[] = hideAnnualColumns
-    ? ['总预算', '执行']
-    : ['总预算', '年度', '执行'];
+  const groups: ('总预算' | '年度' | '执行')[] = hideTotalColumns
+    ? ['年度', '执行']
+    : hideAnnualColumns
+      ? ['总预算', '执行']
+      : ['总预算', '年度', '执行'];
 
   return (
     <div className="space-y-2">
