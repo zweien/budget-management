@@ -16,7 +16,7 @@
 ### 角色模型
 
 - 全局角色只有两级:**`ADMIN`**(全部权限)/ **`USER`**(全局只读:所有项目的台账/记录/统计/审计可见)。
-- **项目编辑权由 `ProjectMember` 驱动**:OWNER=可编辑,HANDLER=只读成员;与全局角色正交(USER 成为某项目 OWNER 后即可编辑该项目)。
+- **项目编辑权由 `ProjectMember` 驱动**:OWNER=可编辑(预算/项目维护/作废),HANDLER=录入人员(可录记录/导入/到账,不可改预算);与全局角色正交(USER 成为某项目 OWNER 后即可编辑该项目)。
 - 管理入口:项目概览页「成员管理」卡片(仅 ADMIN 可见);API 层由 `requirePermission(user, action, projectId)` 统一拦截(编辑类动作查成员表,其余查全局矩阵)。
 - **首次启用 SSO 的管理员引导**:先用 Authentik 账号登录一次(JIT 自动建档为 USER),再 `npm run make-admin -- <用户名>` 提升 ADMIN。
 
