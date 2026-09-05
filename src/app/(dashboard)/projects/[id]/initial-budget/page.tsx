@@ -593,17 +593,28 @@ export default function InitialBudgetPage() {
   const editable = statusEditable && project?.canEdit !== false;
 
   // 已生效(APPROVED)态:拉取台账数据,以树形表(与 ledger 页一致)展示。
-  const approvedYear = draft?.annualBudgets?.[0]?.year ?? new Date().getFullYear();
+  // 多年度编制:默认看当前年,未编制当前年则回退最近的编制年度;标题旁可切换。
+  const compiledYears = useMemo(
+    () => (draft?.annualBudgets ?? []).map((a) => a.year).sort((a, b) => b - a),
+    [draft],
+  );
+  useEffect(() => {
+    if (status !== 'APPROVED' || compiledYears.length === 0) return;
+    const current = new Date().getFullYear();
+    const fallback = compiledYears.includes(current) ? current : compiledYears[0];
+    // 用户手动选中的年份仍有效则不覆盖。
+    setLedgerYear((prev) => (compiledYears.includes(prev) ? prev : fallback));
+  }, [status, compiledYears]);
+
   useEffect(() => {
     if (status !== 'APPROVED') return;
     let cancelled = false;
     (async () => {
       try {
         const ledger = await apiFetch<{ nodes: LedgerNode[] }>(
-          `/api/projects/${projectId}/ledger?year=${approvedYear}`,
+          `/api/projects/${projectId}/ledger?year=${ledgerYear}`,
         );
         if (!cancelled) {
-          setLedgerYear(approvedYear);
           setLedgerNodes(ledger.nodes ?? []);
         }
       } catch (e) {
@@ -616,7 +627,7 @@ export default function InitialBudgetPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, status, approvedYear]);
+  }, [projectId, status, ledgerYear]);
 
   // ====== 年度预算编辑 ======
   const addAnnualRow = () => {
@@ -1241,7 +1252,25 @@ export default function InitialBudgetPage() {
             如需变更预算,请点击「修改预算」进入预算调整流程,初始预算编制不可再直接修改。
           </AlertDescription>
         </Alert>
-        <h2 className="text-base font-semibold tracking-[-0.3px]">{ledgerYear} 年度预算执行台账</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-base font-semibold tracking-[-0.3px]">
+            {ledgerYear} 年度预算执行台账
+          </h2>
+          {compiledYears.length > 1 ? (
+            <select
+              className="h-8 rounded-md border border-border bg-card px-2 text-sm"
+              value={ledgerYear}
+              onChange={(e) => setLedgerYear(Number(e.target.value))}
+              aria-label="切换台账年度"
+            >
+              {compiledYears.map((y) => (
+                <option key={y} value={y}>
+                  {y} 年
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
         {ledgerNodes.length > 0 ? (
           <BudgetTreeTable
             nodes={ledgerNodes}
