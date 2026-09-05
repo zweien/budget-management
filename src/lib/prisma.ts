@@ -25,3 +25,9 @@ export const prisma =
   });
 
 if (env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+/**
+ * 大批量写事务(导入解析落库/科目指派/确认入账)的显式超时。
+ * 行数已由 MAX_IMPORT_ROWS 封顶,最坏耗时线性可控;客户端基线 30s 对数千行写入仍偏紧。
+ */
+export const BULK_TX_OPTIONS = { maxWait: 10_000, timeout: 120_000 } as const;

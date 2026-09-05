@@ -1,8 +1,9 @@
 import ExcelJS from 'exceljs';
 import { BusinessStatus, ImportRow, Prisma, User } from '@prisma/client';
 
-import { prisma } from '@/lib/prisma';
+import { BULK_TX_OPTIONS, prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
+import { env } from '@/lib/env';
 import { requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { D, ZERO, fromStored, toStored } from '@/lib/decimal';
@@ -232,6 +233,13 @@ export async function parseAndValidate(
   if (!sheet) {
     throw new HTTPError(422, 'Excel 文件不含任何工作表');
   }
+  // 容量边界:行数上限(超大文件/zip 炸弹的 OOM 与事件循环阻塞防护)。
+  if (sheet.rowCount - 1 > env.MAX_IMPORT_ROWS) {
+    throw new HTTPError(
+      422,
+      `数据行数(${sheet.rowCount - 1})超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`,
+    );
+  }
 
   // 列索引:按表头匹配(更稳健);若表头缺失则退回 EXCEL_COLUMNS 顺序。
   const headerMap = new Map<string, number>();
@@ -295,6 +303,9 @@ export async function parseAndValidate(
     // 空行(全列空)跳过,不计入。
     const isEmpty = Object.values(data).every((v) => v === null || v === '');
     if (isEmpty) return;
+    if (parsedRows.length >= env.MAX_IMPORT_ROWS) {
+      throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
+    }
 
     const errors: RowFieldError[] = [];
 
@@ -456,7 +467,7 @@ export async function parseAndValidate(
         })),
       });
     }
-  });
+  }, BULK_TX_OPTIONS);
 
   return batchId;
 }
@@ -718,7 +729,7 @@ export async function confirmImport(
           createdCount: createdIds.length,
         },
       });
-    })
+    }, BULK_TX_OPTIONS)
     .catch((e) => {
       // 并发窗口兜底(codex P2):两个批次同时确认同号行 → 后者撞唯一索引 → 可读 422。
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
