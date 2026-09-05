@@ -118,11 +118,16 @@ export default function UsersPage() {
         toast.error(e instanceof Error ? e.message : '加载用户列表失败');
         setUsers((prev) => prev ?? []);
       });
-    apiFetch<{ id: string }>('/api/me')
-      .then((me) => {
-        if (!cancelled) setMeId(me.id);
-      })
-      .catch(() => {});
+    const syncMe = () => {
+      apiFetch<{ id: string }>('/api/me')
+        .then((me) => {
+          if (!cancelled) setMeId(me.id);
+        })
+        .catch(() => {});
+    };
+    syncMe();
+    // MOCK 模式切换身份会派发 mock-user-change(codex P2):自我护栏立即跟随当前身份。
+    window.addEventListener('mock-user-change', syncMe);
     apiFetch<ProjectRow[]>('/api/projects')
       .then((rows) => {
         if (!cancelled) setProjects(rows);
@@ -130,6 +135,7 @@ export default function UsersPage() {
       .catch(() => {});
     return () => {
       cancelled = true;
+      window.removeEventListener('mock-user-change', syncMe);
     };
   }, [fetchUsers]);
 
@@ -224,7 +230,10 @@ export default function UsersPage() {
                 <button
                   key={u.id}
                   type="button"
-                  onClick={() => setSelectedId(u.id)}
+                  onClick={() => {
+                    setSelectedId(u.id);
+                    setAddProjectId(''); // codex P2:换人不沿用上一位的待选项目
+                  }}
                   className={`flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors ${
                     u.id === selectedId
                       ? 'border-primary/40 bg-accent'
