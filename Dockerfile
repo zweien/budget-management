@@ -40,4 +40,7 @@ COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh && chown -R node:node /app
 USER node
 EXPOSE 3000
+# 就绪探针:/api/health 做 DB ping,区分「进程活着」与「能服务」
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/health" | grep -q '"ok"' || exit 1
 ENTRYPOINT ["./docker-entrypoint.sh"]

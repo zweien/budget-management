@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { withRoute } from '@/lib/api/withRoute';
 import { HTTPError, requireUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/permissions';
 import { prisma } from '@/lib/prisma';
@@ -16,8 +17,8 @@ import { fromStored } from '@/lib/decimal';
  * 调整表单据此显示「原总预算 / 原年度预算」只读列并联动计算调整后值;
  * 追加模式用 remaining 实时预检下达额(服务端提交/审批时精确复核)。
  */
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
+export const GET = withRoute(
+  async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id: projectId } = await params;
     await requirePermission(user, 'project:view', projectId);
@@ -82,10 +83,5 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     });
 
     return NextResponse.json({ year, baseline });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

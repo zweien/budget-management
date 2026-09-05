@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import {
   balanceStatistics,
   type BalanceStatisticsFilters,
@@ -13,38 +14,31 @@ import {
  *   year(可选,选定后行内追加年度口径), onlyNegative(0/1,仅看总结余<0)。
  * 返回 { hitProjects, hitSubjects, rows, total }。
  */
-export async function GET(req: NextRequest) {
-  try {
-    const user = await requireUser();
-    const sp = req.nextUrl.searchParams;
+export const GET = withRoute(async (req: NextRequest) => {
+  const user = await requireUser();
+  const sp = req.nextUrl.searchParams;
 
-    const filters: BalanceStatisticsFilters = {};
-    const subject = sp.get('subject');
-    if (subject) filters.subject = subject;
+  const filters: BalanceStatisticsFilters = {};
+  const subject = sp.get('subject');
+  if (subject) filters.subject = subject;
 
-    const projectId = sp.get('projectId');
-    if (projectId) filters.projectId = projectId;
+  const projectId = sp.get('projectId');
+  if (projectId) filters.projectId = projectId;
 
-    const yearParam = sp.get('year');
-    if (yearParam !== null) {
-      const year = Number.parseInt(yearParam, 10);
-      if (!Number.isInteger(year) || year < 1900 || year > 9999) {
-        return NextResponse.json({ error: '年度参数无效' }, { status: 400 });
-      }
-      filters.year = year;
+  const yearParam = sp.get('year');
+  if (yearParam !== null) {
+    const year = Number.parseInt(yearParam, 10);
+    if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+      return NextResponse.json({ error: '年度参数无效' }, { status: 400 });
     }
-
-    const onlyNegative = sp.get('onlyNegative');
-    if (onlyNegative === '1' || onlyNegative === 'true') {
-      filters.onlyNegative = true;
-    }
-
-    const result = await balanceStatistics(filters, user);
-    return NextResponse.json(result);
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
+    filters.year = year;
   }
-}
+
+  const onlyNegative = sp.get('onlyNegative');
+  if (onlyNegative === '1' || onlyNegative === 'true') {
+    filters.onlyNegative = true;
+  }
+
+  const result = await balanceStatistics(filters, user);
+  return NextResponse.json(result);
+});

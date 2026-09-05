@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BusinessStatus } from '@prisma/client';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import {
   createRecord,
   listRecords,
@@ -17,8 +18,8 @@ const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
  *       handler(包含), summary(包含), businessDateFrom/To(yyyy-mm-dd 闭区间)。
  * 默认不含作废记录。
  */
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
+export const GET = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
     const sp = req.nextUrl.searchParams;
@@ -70,21 +71,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const records = await listRecords(id, filters, user);
     return NextResponse.json({ records });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);
 
 /**
  * POST /api/projects/:id/records — 新增业务记录(§8.1/8.4)。
  * 返回 { record, overBudget, overTotalBudget, overSubjectTotal };超预算仅预警仍保存
  * (§8.4 年度科目口径 / §8.4b 项目总预算与 GENERAL 科目总预算口径)。
  */
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
+export const POST = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
     const body = (await req.json()) as CreateRecordInput;
@@ -98,10 +94,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const result = await createRecord(id, body, user);
     return NextResponse.json(result, { status: 201 });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

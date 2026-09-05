@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { requireUser } from '@/lib/auth/session';
 import { confirmImport } from '@/server/services/excelImport.service';
 import { confirmSettlementImport } from '@/server/services/settlementImport.service';
 import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
@@ -11,11 +12,8 @@ import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
  * body = { selectedRowIds: string[] }(用户在预览页勾选的有效/重复行 id)。
  * 返回 { created, batchId }。
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; batchId: string }> },
-) {
-  try {
+export const POST = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; batchId: string }> }) => {
     const user = await requireUser();
     const { batchId } = await params;
 
@@ -39,10 +37,5 @@ export async function POST(
         ? await confirmSettlementImport(batchId, selectedRowIds, user)
         : await confirmImport(batchId, selectedRowIds, user);
     return NextResponse.json(result);
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

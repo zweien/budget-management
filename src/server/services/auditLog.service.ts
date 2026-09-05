@@ -1,6 +1,7 @@
 import { Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
+import { HTTPError } from '@/lib/auth/session';
 
 /**
  * 操作日志查询服务(§14.1)。
@@ -39,15 +40,15 @@ export interface ListAuditLogsResult {
   total: number;
 }
 
-/** 校验 ISO yyyy-mm-dd,返回 UTC 0 点 Date(避免时区漂移);无效抛 TypeError。 */
+/** 校验 ISO yyyy-mm-dd,返回 UTC 0 点 Date(避免时区漂移);无效抛 HTTPError(400)。 */
 function parseDateBound(s: string, label: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) {
-    throw new TypeError(`${label} 日期格式无效(应为 yyyy-mm-dd):${s}`);
+    throw new HTTPError(400, `${label} 日期格式无效(应为 yyyy-mm-dd):${s}`);
   }
   const dt = new Date(`${s}T00:00:00Z`);
   if (Number.isNaN(dt.getTime())) {
-    throw new TypeError(`${label} 日期无效:${s}`);
+    throw new HTTPError(400, `${label} 日期无效:${s}`);
   }
   return dt;
 }

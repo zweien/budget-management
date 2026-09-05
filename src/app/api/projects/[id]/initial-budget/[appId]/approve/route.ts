@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import { approveApplication } from '@/server/services/initialBudget.service';
 
 /**
  * POST /api/projects/:id/initial-budget/:appId/approve — 审批生效(§6.3 整体生效)。
  * body 可选 { opinion }。仅 ADMIN 有 budget:approve 权限。
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; appId: string }> },
-) {
-  try {
+export const POST = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; appId: string }> }) => {
     const user = await requireUser();
     const { appId } = await params;
     let opinion: string | undefined;
@@ -23,10 +21,5 @@ export async function POST(
     }
     const result = await approveApplication(appId, user, opinion);
     return NextResponse.json(result);
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

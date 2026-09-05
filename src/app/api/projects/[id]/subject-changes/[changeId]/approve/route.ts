@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import { approveSubjectChange } from '@/server/services/subjectChange.service';
 
 /**
  * POST /api/projects/:id/subject-changes/:changeId/approve — 审批通过(应用 afterSnapshot)。
  * body = { opinion?: string }。
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; changeId: string }> },
-) {
-  try {
+export const POST = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; changeId: string }> }) => {
     const user = await requireUser();
     const { changeId } = await params;
 
@@ -27,10 +25,5 @@ export async function POST(
 
     const application = await approveSubjectChange(changeId, user, opinion);
     return NextResponse.json({ application });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import { voidRecordsBatch } from '@/server/services/businessRecord.service';
 
 /**
@@ -8,8 +9,8 @@ import { voidRecordsBatch } from '@/server/services/businessRecord.service';
  * body = { recordIds: string[], reason: string }(原因全部行共用;已作废行自动跳过)。
  * 返回 { voided, skipped }。
  */
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
+export const POST = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
 
@@ -27,10 +28,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const result = await voidRecordsBatch(id, recordIds, body.reason, user);
     return NextResponse.json(result);
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);
