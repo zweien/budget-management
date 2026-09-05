@@ -392,7 +392,12 @@ export default function InitialBudgetPage() {
   const [submitting, setSubmitting] = useState(false);
   // 已生效态复用台账数据(树形展示,与 ledger 页一致)。
   const [ledgerNodes, setLedgerNodes] = useState<LedgerNode[]>([]);
-  const [ledgerYear, setLedgerYear] = useState<number>(() => new Date().getFullYear());
+  // 台账视图:某一年度(执行列年度口径)或总预算(跨年度口径,与执行台账页切换一致)。
+  type LedgerView = { kind: 'total' } | { kind: 'year'; year: number };
+  const [ledgerView, setLedgerView] = useState<LedgerView>({
+    kind: 'year',
+    year: new Date().getFullYear(),
+  });
   // 行内删除/套用模板的确认对话框。
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
@@ -602,8 +607,11 @@ export default function InitialBudgetPage() {
     if (status !== 'APPROVED' || compiledYears.length === 0) return;
     const current = new Date().getFullYear();
     const fallback = compiledYears.includes(current) ? current : compiledYears[0];
-    // 用户手动选中的年份仍有效则不覆盖。
-    setLedgerYear((prev) => (compiledYears.includes(prev) ? prev : fallback));
+    // 用户手动选中的年份仍有效则不覆盖;总预算视图始终有效。
+    setLedgerView((prev) => {
+      if (prev.kind === 'total') return prev;
+      return compiledYears.includes(prev.year) ? prev : { kind: 'year', year: fallback };
+    });
   }, [status, compiledYears]);
 
   useEffect(() => {
@@ -611,9 +619,11 @@ export default function InitialBudgetPage() {
     let cancelled = false;
     (async () => {
       try {
-        const ledger = await apiFetch<{ nodes: LedgerNode[] }>(
-          `/api/projects/${projectId}/ledger?year=${ledgerYear}`,
-        );
+        const ledger = await (ledgerView.kind === 'total'
+          ? apiFetch<{ nodes: LedgerNode[] }>(`/api/projects/${projectId}/ledger-total`)
+          : apiFetch<{ nodes: LedgerNode[] }>(
+              `/api/projects/${projectId}/ledger?year=${ledgerView.year}`,
+            ));
         if (!cancelled) {
           setLedgerNodes(ledger.nodes ?? []);
         }
@@ -627,7 +637,7 @@ export default function InitialBudgetPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, status, ledgerYear]);
+  }, [projectId, status, ledgerView]);
 
   // ====== 年度预算编辑 ======
   const addAnnualRow = () => {
@@ -1254,17 +1264,26 @@ export default function InitialBudgetPage() {
         </Alert>
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-base font-semibold tracking-[-0.3px]">
-            {ledgerYear} 年度预算执行台账
+            {ledgerView.kind === 'total'
+              ? '总预算执行台账(跨年度)'
+              : `${ledgerView.year} 年度预算执行台账`}
           </h2>
-          {compiledYears.length > 1 ? (
+          {compiledYears.length > 0 ? (
             <select
               className="h-8 rounded-md border border-border bg-card px-2 text-sm"
-              value={ledgerYear}
-              onChange={(e) => setLedgerYear(Number(e.target.value))}
-              aria-label="切换台账年度"
+              value={ledgerView.kind === 'total' ? 'total' : String(ledgerView.year)}
+              onChange={(e) =>
+                setLedgerView(
+                  e.target.value === 'total'
+                    ? { kind: 'total' }
+                    : { kind: 'year', year: Number(e.target.value) },
+                )
+              }
+              aria-label="切换台账口径"
             >
+              <option value="total">总预算(跨年度)</option>
               {compiledYears.map((y) => (
-                <option key={y} value={y}>
+                <option key={y} value={String(y)}>
                   {y} 年
                 </option>
               ))}
@@ -1275,8 +1294,10 @@ export default function InitialBudgetPage() {
           <BudgetTreeTable
             nodes={ledgerNodes}
             showLevel1Total
-            yearLabel={ledgerYear}
-            hideTotalColumns
+            yearLabel={ledgerView.kind === 'year' ? ledgerView.year : undefined}
+            hideTotalColumns={ledgerView.kind === 'year'}
+            hideAnnualColumns={ledgerView.kind === 'total'}
+            totalGroupLabel={isLumpSum ? '累计计划' : '总预算'}
           />
         ) : (
           <ReadOnlyView
