@@ -5,6 +5,8 @@ import { withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import {
   customStatistics,
+  CUSTOM_SORT_FIELDS,
+  type CustomSortField,
   type CustomStatisticsFilters,
 } from '@/server/services/statistics.service';
 
@@ -56,6 +58,62 @@ export const GET = withRoute(async (req: NextRequest) => {
   const includeVoidParam = sp.get('includeVoid');
   if (includeVoidParam === '1' || includeVoidParam === 'true') {
     filters.includeVoid = true;
+  }
+
+  // ---- v0.15 扩展:服务端筛选/排序/分页(全局录入页驱动) ----
+  for (const key of ['projectIds', 'subjectNames', 'handlers', 'creatorNames'] as const) {
+    const values = sp.getAll(key).filter(Boolean);
+    if (values.length > 0) filters[key] = values;
+  }
+  const budgetYears = sp
+    .getAll('budgetYears')
+    .map((v) => Number.parseInt(v, 10))
+    .filter((v) => Number.isInteger(v) && v >= 1900 && v <= 9999);
+  if (budgetYears.length > 0) filters.budgetYears = budgetYears;
+  const statuses = sp.getAll('statuses').filter((v) => STATUS_SET.has(v));
+  if (statuses.length > 0) filters.statuses = statuses as BusinessStatus[];
+  if (sp.get('voidOnly') === '1') filters.voidOnly = true;
+
+  const remark = sp.get('remark');
+  if (remark) filters.remark = remark;
+  const summary = sp.get('summary');
+  if (summary) filters.summary = summary;
+  const docNo = sp.get('docNo');
+  if (docNo) filters.docNo = docNo;
+
+  if (sp.get('completedDateEmpty') === '1') filters.completedDateEmpty = true;
+  const completedDateFrom = sp.get('completedDateFrom');
+  if (completedDateFrom) filters.completedDateFrom = completedDateFrom;
+  const completedDateTo = sp.get('completedDateTo');
+  if (completedDateTo) filters.completedDateTo = completedDateTo;
+
+  const amountFrom = sp.get('amountFrom');
+  if (amountFrom) filters.amountFrom = amountFrom;
+  const amountTo = sp.get('amountTo');
+  if (amountTo) filters.amountTo = amountTo;
+
+  const sortField = sp.get('sortField');
+  const sortDir = sp.get('sortDir');
+  if (sortField && (sortDir === 'asc' || sortDir === 'desc')) {
+    if (Object.hasOwn(CUSTOM_SORT_FIELDS, sortField)) {
+      filters.sort = { field: sortField as CustomSortField, dir: sortDir };
+    } else {
+      return NextResponse.json({ error: `排序字段无效:${sortField}` }, { status: 400 });
+    }
+  }
+
+  const page = sp.get('page') !== null ? Number.parseInt(sp.get('page')!, 10) : undefined;
+  const pageSize =
+    sp.get('pageSize') !== null ? Number.parseInt(sp.get('pageSize')!, 10) : undefined;
+  if (page !== undefined && (!Number.isInteger(page) || page < 1 || page > 100000)) {
+    return NextResponse.json({ error: 'page 参数无效' }, { status: 400 });
+  }
+  if (pageSize !== undefined && (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 500)) {
+    return NextResponse.json({ error: 'pageSize 参数无效(1-500)' }, { status: 400 });
+  }
+  if (page !== undefined && pageSize !== undefined) {
+    filters.page = page;
+    filters.pageSize = pageSize;
   }
 
   const result = await customStatistics(filters, user);
