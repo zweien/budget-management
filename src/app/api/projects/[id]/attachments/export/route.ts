@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import JSZip from 'jszip';
 
+import { withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { requireUser } from '@/lib/auth/session';
 import { countForExport, listForExport } from '@/server/services/recordAttachment.service';
 
 /**
@@ -19,8 +20,8 @@ const EXPORT_MAX_ATTACHMENTS = 500;
  * 无附件 → 404;附件数超 EXPORT_MAX_ATTACHMENTS → 413(避免堆耗尽)。
  * 权限:project:view(全局只读 USER 也可导出查阅)。
  */
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
+export const GET = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id: projectId } = await params;
     // 优先用 NextRequest.nextUrl(Next 运行时);测试期传入裸 Request 时回退到 new URL(req.url)。
@@ -83,9 +84,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         'Cache-Control': 'no-store',
       },
     });
-  } catch (e) {
-    if (e instanceof HTTPError)
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    throw e;
-  }
-}
+  },
+);

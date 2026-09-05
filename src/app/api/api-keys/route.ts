@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import {
   assertInteractiveSession,
   CreateApiKeyInput,
@@ -16,42 +17,28 @@ import {
  * 红线(ADR 0001):凭证管理仅限登录会话;Bearer 机器凭证一律 403
  * (含 attended 凭证——防 agent 自我签发凭证)。
  */
-export async function GET() {
-  try {
-    const user = await requireUser();
-    assertInteractiveSession(user);
-    const keys = await listApiKeys(user.id);
-    return NextResponse.json({ keys });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+export const GET = withRoute(async () => {
+  const user = await requireUser();
+  assertInteractiveSession(user);
+  const keys = await listApiKeys(user.id);
+  return NextResponse.json({ keys });
+});
 
-export async function POST(req: NextRequest) {
-  try {
-    const user = await requireUser();
-    assertInteractiveSession(user);
-    const body = (await req.json().catch(() => null)) as Partial<CreateApiKeyInput> | null;
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: '请求体无效' }, { status: 400 });
-    }
-    const { record, plaintext } = await issueApiKey({
-      userId: user.id,
-      name: String(body.name ?? ''),
-      unattended: body.unattended !== false,
-      tier: (body.tier ?? 'full') as CreateApiKeyInput['tier'],
-      projectScope: (body.projectScope ?? 'all') as CreateApiKeyInput['projectScope'],
-      projectIds: Array.isArray(body.projectIds) ? (body.projectIds as string[]) : undefined,
-      expiresInDays: body.expiresInDays ?? null,
-    });
-    return NextResponse.json({ key: toPublicApiKey(record), plaintext }, { status: 201 });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
+export const POST = withRoute(async (req: NextRequest) => {
+  const user = await requireUser();
+  assertInteractiveSession(user);
+  const body = (await req.json().catch(() => null)) as Partial<CreateApiKeyInput> | null;
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ error: '请求体无效' }, { status: 400 });
   }
-}
+  const { record, plaintext } = await issueApiKey({
+    userId: user.id,
+    name: String(body.name ?? ''),
+    unattended: body.unattended !== false,
+    tier: (body.tier ?? 'full') as CreateApiKeyInput['tier'],
+    projectScope: (body.projectScope ?? 'all') as CreateApiKeyInput['projectScope'],
+    projectIds: Array.isArray(body.projectIds) ? (body.projectIds as string[]) : undefined,
+    expiresInDays: body.expiresInDays ?? null,
+  });
+  return NextResponse.json({ key: toPublicApiKey(record), plaintext }, { status: 201 });
+});

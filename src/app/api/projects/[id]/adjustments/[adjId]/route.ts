@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import {
   deleteDraftAdjustment,
   getAdjustment,
@@ -13,11 +14,8 @@ import {
  * GET /api/projects/:id/adjustments/:adjId — 取单个调整单(含明细 + 锁)。
  * 另带 `detail`:科目行原预算/调整额/调整后金额(§issue15 审批详情,基线重建)。
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string; adjId: string }> },
-) {
-  try {
+export const GET = withRoute(
+  async (_req: NextRequest, { params }: { params: Promise<{ id: string; adjId: string }> }) => {
     const user = await requireUser();
     const { adjId } = await params;
     const [adjustment, detail] = await Promise.all([
@@ -25,20 +23,12 @@ export async function GET(
       getAdjustmentDetail(adjId, user),
     ]);
     return NextResponse.json({ adjustment, detail });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);
 
 /** PATCH /api/projects/:id/adjustments/:adjId — 编辑调整草稿(仅 DRAFT)。 */
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; adjId: string }> },
-) {
-  try {
+export const PATCH = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; adjId: string }> }) => {
     const user = await requireUser();
     const { adjId } = await params;
     const body = (await req.json()) as AdjustmentPayload;
@@ -49,28 +39,15 @@ export async function PATCH(
 
     const adjustment = await updateDraftAdjustment(adjId, body, user);
     return NextResponse.json({ adjustment });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);
 
 /** DELETE /api/projects/:id/adjustments/:adjId — 删除调整草稿(仅 DRAFT)。 */
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string; adjId: string }> },
-) {
-  try {
+export const DELETE = withRoute(
+  async (_req: NextRequest, { params }: { params: Promise<{ id: string; adjId: string }> }) => {
     const user = await requireUser();
     const { adjId } = await params;
     await deleteDraftAdjustment(adjId, user);
     return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { withRoute } from '@/lib/api/withRoute';
 import { HTTPError, requireUser } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/permissions';
 import { prisma } from '@/lib/prisma';
@@ -13,11 +14,8 @@ import { prisma } from '@/lib/prisma';
  * 权限:project:view + 项目范围(查看记录历史归入"查看获授权项目")。
  * 额外校验:该 recordId 必须属于路径中的项目 id(避免越权读他项目记录历史)。
  */
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string; recordId: string }> },
-) {
-  try {
+export const GET = withRoute(
+  async (_req: Request, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { id: projectId, recordId } = await params;
 
@@ -38,10 +36,5 @@ export async function GET(
     });
 
     return NextResponse.json({ history: rows });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

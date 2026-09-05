@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import { withdrawAdjustment } from '@/server/services/adjustment.service';
 
 /**
  * POST /api/projects/:id/adjustments/:adjId/withdraw — 撤回调整单(PENDING→DRAFT,释放锁)。
  * 申请人发起,无 body。
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; adjId: string }> },
-) {
-  try {
+export const POST = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; adjId: string }> }) => {
     const user = await requireUser();
     const { adjId } = await params;
 
@@ -28,10 +26,5 @@ export async function POST(
 
     const adjustment = await withdrawAdjustment(adjId, user, submittedAt);
     return NextResponse.json({ adjustment });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

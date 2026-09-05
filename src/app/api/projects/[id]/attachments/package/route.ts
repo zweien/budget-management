@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import JSZip from 'jszip';
 
+import { withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { requireUser } from '@/lib/auth/session';
 import { countForExport, listForExport } from '@/server/services/recordAttachment.service';
 import {
   buildFolderPath,
@@ -21,8 +22,8 @@ const DEFAULT_TEMPLATE = '{date}_{amount}_{summary}_{original}';
  * 文件名:占位符模板(默认 {date}_{amount}_{summary}_{original})。
  * 无附件 → 404;附件数 > 500 → 413(防 OOM)。权限:project:view。
  */
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
+export const GET = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id: projectId } = await params;
     const sp = (req.nextUrl ?? new URL(req.url)).searchParams;
@@ -96,9 +97,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         'Cache-Control': 'no-store',
       },
     });
-  } catch (e) {
-    if (e instanceof HTTPError)
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    throw e;
-  }
-}
+  },
+);

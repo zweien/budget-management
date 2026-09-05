@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { requireUser } from '@/lib/auth/session';
 import { getImportBatch } from '@/server/services/excelImport.service';
 import {
   deleteImportBatch,
@@ -14,11 +15,8 @@ import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
  * GET /api/projects/:id/imports/:batchId — 取导入批次预览(§10 阶段一结果)。
  * 返回 { batchId, projectId, fileName, status, valid, errors, duplicates, ... }。
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string; batchId: string }> },
-) {
-  try {
+export const GET = withRoute(
+  async (_req: NextRequest, { params }: { params: Promise<{ id: string; batchId: string }> }) => {
     const user = await requireUser();
     const { batchId } = await params;
     // 按批次来源格式分流预览载荷(标准模板 / 个人结算单)。
@@ -34,24 +32,16 @@ export async function GET(
         ? await getSettlementBatch(batchId, user)
         : await getImportBatch(batchId, user);
     return NextResponse.json(preview);
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);
 
 /**
  * PATCH /api/projects/:id/imports/:batchId — 暂存结算单批次的行级修改。
  * body = { updates: [{ rowId, subjectId?|null, budgetYear?, forcedImport? }] }。
  * 每次变更即时持久化;批次保持 pending,可离开后从「进行中批次」继续。
  */
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; batchId: string }> },
-) {
-  try {
+export const PATCH = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; batchId: string }> }) => {
     const user = await requireUser();
     const { batchId } = await params;
 
@@ -70,31 +60,18 @@ export async function PATCH(
 
     await updateSettlementRows(batchId, updates, user);
     return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);
 
 /**
  * DELETE /api/projects/:id/imports/:batchId — 删除未导入批次(仅 pending)。
  * 已确认批次是入账历史,不可删除(409)。
  */
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string; batchId: string }> },
-) {
-  try {
+export const DELETE = withRoute(
+  async (_req: NextRequest, { params }: { params: Promise<{ id: string; batchId: string }> }) => {
     const user = await requireUser();
     const { batchId } = await params;
     await deleteImportBatch(batchId, user);
     return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

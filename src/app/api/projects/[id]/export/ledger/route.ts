@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import { exportLedger } from '@/server/services/export.service';
 
 /**
  * GET /api/projects/:id/export/ledger?year=2026 — 导出预算执行台账 xlsx(§10.5)。
  * year 缺省取当前年份。返回 application/vnd.openxmlformats-officedocument.spreadsheetml.sheet。
  */
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
+export const GET = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
     const yearParam = req.nextUrl.searchParams.get('year');
@@ -24,10 +25,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         'Content-Disposition': `attachment; filename="ledger-${year}.xlsx"`,
       },
     });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BusinessStatus } from '@prisma/client';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import { updateRecord, type UpdateRecordInput } from '@/server/services/businessRecord.service';
 
 const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
@@ -11,11 +12,8 @@ const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
  * body = UpdateRecordInput(全部字段可选):budgetYear/subjectId/amount/businessDate/
  * handler/summary/status/remark。返回 { record, overBudget, overTotalBudget, overSubjectTotal }。
  */
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; recordId: string }> },
-) {
-  try {
+export const PATCH = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { recordId } = await params;
     const body = (await req.json()) as UpdateRecordInput;
@@ -29,10 +27,5 @@ export async function PATCH(
 
     const result = await updateRecord(recordId, body, user);
     return NextResponse.json(result);
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

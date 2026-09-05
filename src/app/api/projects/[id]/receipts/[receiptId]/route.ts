@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import {
   deleteReceipt,
   updateReceipt,
@@ -11,11 +12,8 @@ import {
  * PATCH /api/projects/:id/receipts/:receiptId — 修改到账记录(§9)。
  * body = UpdateReceiptInput(receiptDate?/amount?/summary?/remark?)。
  */
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; receiptId: string }> },
-) {
-  try {
+export const PATCH = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; receiptId: string }> }) => {
     const user = await requireUser();
     const { receiptId } = await params;
     const body = (await req.json()) as UpdateReceiptInput;
@@ -26,31 +24,18 @@ export async function PATCH(
 
     const record = await updateReceipt(receiptId, body, user);
     return NextResponse.json({ record });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);
 
 /**
  * DELETE /api/projects/:id/receipts/:receiptId — 删除到账记录(§9,物理删除)。
  * 到账为参考数据;删除保留一条 delete 审计日志。
  */
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string; receiptId: string }> },
-) {
-  try {
+export const DELETE = withRoute(
+  async (_req: NextRequest, { params }: { params: Promise<{ id: string; receiptId: string }> }) => {
     const user = await requireUser();
     const { receiptId } = await params;
     await deleteReceipt(receiptId, user);
     return new NextResponse(null, { status: 204 });
-  } catch (e) {
-    if (e instanceof HTTPError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    }
-    throw e;
-  }
-}
+  },
+);

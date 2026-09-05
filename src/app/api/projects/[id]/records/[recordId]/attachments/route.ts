@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { withRoute } from '@/lib/api/withRoute';
+import { requireUser } from '@/lib/auth/session';
 import { createAttachment, listAttachments } from '@/server/services/recordAttachment.service';
 
 /**
@@ -8,11 +9,8 @@ import { createAttachment, listAttachments } from '@/server/services/recordAttac
  * 接受 multipart/form-data(file 字段)。
  * 权限/校验/审计在服务层。
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; recordId: string }> },
-) {
-  try {
+export const POST = withRoute(
+  async (req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { recordId } = await params;
 
@@ -28,28 +26,17 @@ export async function POST(
       user,
     );
     return NextResponse.json(meta, { status: 201 });
-  } catch (e) {
-    if (e instanceof HTTPError)
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    throw e;
-  }
-}
+  },
+);
 
 /**
  * GET /api/projects/:id/records/:recordId/attachments — 列出该记录的附件元数据(不含二进制)。
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string; recordId: string }> },
-) {
-  try {
+export const GET = withRoute(
+  async (_req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { recordId } = await params;
     const attachments = await listAttachments(recordId, user);
     return NextResponse.json({ attachments });
-  } catch (e) {
-    if (e instanceof HTTPError)
-      return NextResponse.json({ error: e.message }, { status: e.status });
-    throw e;
-  }
-}
+  },
+);
