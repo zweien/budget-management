@@ -42,6 +42,20 @@ describe('withRoute(HTTP 边缘)', () => {
     expect(body.requestId).toBeTruthy();
   });
 
+  it('HTTPError(5xx) → 堆栈进服务端 error 日志(客户端仍无泄漏)', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const handler = withRoute(async () => {
+      throw new HTTPError(500, '导出失败');
+    });
+    const res = await call(handler);
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe('导出失败');
+    const log = JSON.parse(errSpy.mock.calls[0][0] as string);
+    expect(log.level).toBe('error');
+    expect(typeof log.stack).toBe('string');
+    expect(log.stack.length).toBeGreaterThan(0);
+  });
+
   it('Prisma P2002 → 409 唯一性冲突(含字段)', async () => {
     const handler = withRoute(async () => {
       throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {

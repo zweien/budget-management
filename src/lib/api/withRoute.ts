@@ -23,7 +23,8 @@ interface ClassifiedError {
 /** 错误分类:可预期的翻译,不可预期的折叠为 500(细节只进服务端日志)。 */
 function classify(e: unknown): ClassifiedError {
   if (e instanceof HTTPError) {
-    return { status: e.status, message: e.message };
+    // 5xx 的 HTTPError 同样是服务端故障:堆栈进日志便于排障;客户端仍只见 message。
+    return { status: e.status, message: e.message, stack: e.status >= 500 ? e.stack : undefined };
   }
   if (e instanceof Prisma.PrismaClientKnownRequestError) {
     if (e.code === 'P2002') {
