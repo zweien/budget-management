@@ -67,8 +67,9 @@ function parseStateFromUrl(code: string | null): UrlTableState | null {
   }
 }
 
-function encodeState(state: UrlTableState): string | null {
-  if (state.columnFilters.length === 0 && state.sorting.length === 0) return null;
+function encodeState(state: UrlTableState): string {
+  // §codex P2:空状态也编码——用户有意清空全部筛选后,刷新/分享该链接
+  // 应保持「无筛选」,而不是回落到 legacyInit(状态默认值)。
   return toBase64Url(JSON.stringify(state));
 }
 
@@ -105,9 +106,7 @@ export function useUrlSyncedTableState(legacyInit: UrlTableState): UrlSyncedTabl
       return;
     }
     const params = new URLSearchParams(window.location.search);
-    const code = encodeState({ columnFilters, sorting });
-    if (code) params.set('f', code);
-    else params.delete('f');
+    params.set('f', encodeState({ columnFilters, sorting }));
     // 筛选已并入 f,移除旧深链参数避免双份状态。
     params.delete('subjectId');
     params.delete('year');

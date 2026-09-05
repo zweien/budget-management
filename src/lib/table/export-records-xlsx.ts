@@ -93,8 +93,12 @@ export async function exportRecordsToXlsx(
   const withProject = rows.some((r) => r.project !== undefined);
   const usedColumns = withProject ? columns : columns.slice(1);
 
-  ws.columns = usedColumns.map((c) => ({ header: c.header, width: c.width }));
-  const headerRow = ws.getRow(headerOffset + 1);
+  // §codex P1:ws.columns 赋值会把 header 写进第 1 行,有标题时会覆盖合并单元格——
+  // 这里只设列宽,表头用 addRow 显式写入(无标题=第 1 行;有标题=第 2 行,紧随其后)。
+  usedColumns.forEach((c, i) => {
+    ws.getColumn(i + 1).width = c.width;
+  });
+  const headerRow = ws.addRow(usedColumns.map((c) => c.header));
   headerRow.font = { bold: true };
   headerRow.height = 18;
 

@@ -103,6 +103,7 @@ interface UnifiedRecordRow {
   handler: string;
   summary: string;
   remark: string | null;
+  docNo: string | null;
   creatorName: string | null;
   isVoid: boolean;
   createdAt: string;
@@ -524,6 +525,7 @@ function UnifiedRecordsPageInner() {
           completedDate: o.completedDate,
           amount: o.amount,
           status: o.isVoid ? '已作废' : (STATUS_LABEL[o.status] ?? o.status),
+          docNo: o.docNo,
           handler: o.handler,
           summary: o.summary,
           remark: o.remark,
