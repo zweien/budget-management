@@ -8,6 +8,7 @@
  *   npm run make-agent -- --key <账号名> [--name X]   # 给已有账号再发一把无人值守 key
  *   npm run make-agent -- --list [账号名]             # 查看账号与凭证
  *   npm run make-agent -- --revoke <bma_前缀或keyId>  # 撤销凭证(泄露/换人时)
+ *   [--actor <用户名|id>]                             # 审计操作者(谁在执行脚本;缺省记为账号自身)
  *
  * key 明文仅创建时展示一次(库中只存 SHA-256)。凭据写入 ~/.budget-agent.json
  * (chmod 600)后,MCP server 与 agent skill 均自动读取。
@@ -32,6 +33,7 @@ function usage(): never {
       '  npm run make-agent -- --key <账号名> [--name X]   # 再发一把无人值守 key',
       '  npm run make-agent -- --list [账号名]             # 查看账号与凭证',
       '  npm run make-agent -- --revoke <bma_前缀或keyId>  # 撤销凭证',
+      '  [--actor <用户名|id>]                             # 审计操作者(谁在执行脚本)',
     ].join('\n'),
   );
   process.exit(1);
@@ -52,7 +54,7 @@ async function ensureUser(name: string) {
   return user;
 }
 
-async function issue(userId: string, unattended: boolean, name: string) {
+async function issue(userId: string, unattended: boolean, name: string, actorId?: string) {
   try {
     return await issueApiKey({
       userId,
@@ -60,6 +62,8 @@ async function issue(userId: string, unattended: boolean, name: string) {
       unattended,
       tier: 'full',
       projectScope: 'all',
+      actorId,
+      via: 'make-agent',
     });
   } catch (e) {
     if (e instanceof HTTPError) {
@@ -83,24 +87,42 @@ function printIssued(
   console.log(JSON.stringify({ baseUrl, token: plaintext }, null, 2));
 }
 
-/** 解析参数:位置参数 + --name <名称>(codex P2:`--key alice --name nightly` 生效)。 */
+/** 解析参数:位置参数 + --name <名称>(codex P2:`--key alice --name nightly` 生效)+ --actor。 */
 function parseArgs(argv: string[]) {
   const positional: string[] = [];
   let nameOption: string | undefined;
+  let actorOption: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--name') {
       nameOption = argv[++i];
       if (!nameOption) usage();
+    } else if (argv[i] === '--actor') {
+      actorOption = argv[++i];
+      if (!actorOption) usage();
     } else {
       positional.push(argv[i]);
     }
   }
-  return { positional, nameOption };
+  return { positional, nameOption, actorOption };
+}
+
+/** 解析 --actor:审计操作者(脚本代管时归因到实际管理者,而非目标账号自身)。 */
+async function resolveActor(nameOrId: string | undefined) {
+  if (!nameOrId) return undefined;
+  const user = UUID_RE.test(nameOrId)
+    ? await prisma.user.findUnique({ where: { id: nameOrId } })
+    : await findUserByName(nameOrId);
+  if (!user) {
+    console.error(`未找到操作者用户: ${nameOrId}`);
+    process.exit(1);
+  }
+  return user;
 }
 
 async function main() {
   loadEnvConfig(process.cwd());
-  const { positional, nameOption } = parseArgs(process.argv.slice(2));
+  const { positional, nameOption, actorOption } = parseArgs(process.argv.slice(2));
+  const actor = await resolveActor(actorOption);
   const [first, second] = positional;
   const baseUrl = (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 
@@ -109,7 +131,7 @@ async function main() {
   if (!first.startsWith('--')) {
     // 默认:建账号 + 发无人值守 key
     const user = await ensureUser(first);
-    const { record, plaintext } = await issue(user.id, true, 'default');
+    const { record, plaintext } = await issue(user.id, true, 'default', actor?.id);
     printIssued(record, plaintext, baseUrl);
     console.log(
       `\n项目授权:以 ADMIN 在「项目概览 → 成员管理」把 ${user.name} 加为项目成员(OWNER 可编辑)。`,
@@ -126,7 +148,7 @@ async function main() {
     }
     const unattended = first === '--key';
     const name = nameOption ?? (unattended ? 'default' : 'attended');
-    const { record, plaintext } = await issue(user.id, unattended, name);
+    const { record, plaintext } = await issue(user.id, unattended, name, actor?.id);
     printIssued(record, plaintext, baseUrl);
     return;
   }
@@ -167,7 +189,7 @@ async function main() {
       console.error(`未找到凭证: ${second}(用 --list 查看前缀)`);
       process.exit(1);
     }
-    await revokeApiKey(rec.userId, rec.id);
+    await revokeApiKey(rec.userId, rec.id, { actorId: actor?.id, via: 'make-agent' });
     console.log(`🚫 已撤销凭证: ${rec.prefix}… (${rec.id})`);
     return;
   }

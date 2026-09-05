@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
@@ -150,5 +150,67 @@ describe('apiKey.service (integration, real PG)', () => {
       projectScope: 'all',
     });
     await expect(revokeApiKey(userId, record.id)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('issueApiKey:actorId/via 写入审计(脚本代管归因到实际管理者)', async () => {
+    const actorId = uuidv7();
+    await prisma.user.create({
+      data: { id: actorId, name: 'key-actor-test', role: UserRole.USER },
+    });
+    createdUserIds.push(actorId);
+    const { record } = await issueApiKey({
+      userId,
+      name: 'script-issued',
+      unattended: true,
+      tier: 'read',
+      projectScope: 'all',
+      actorId,
+      via: 'make-agent',
+    });
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { objectType: 'api_keys', objectId: record.id, action: 'apikey.issue' },
+    });
+    expect(audit.operatorId).toBe(actorId);
+    expect((audit.afterData as Record<string, unknown>).via).toBe('make-agent');
+  });
+
+  it('revokeApiKey:竞态输者不覆盖赢家时间戳、不重复写审计', async () => {
+    const { record } = await issueApiKey({
+      userId,
+      name: 'race',
+      unattended: true,
+      tier: 'read',
+      projectScope: 'all',
+    });
+    // 复刻并发竞态:findFirst 读到「仍为活态」的旧快照后、事务执行前,
+    // 另一请求已完成撤销(置时间戳 + 写赢家审计)。
+    const winnerRevokedAt = new Date(Date.now() - 5_000);
+    await prisma.apiKey.update({
+      where: { id: record.id },
+      data: { revokedAt: winnerRevokedAt },
+    });
+    await prisma.auditLog.create({
+      data: {
+        id: uuidv7(),
+        objectType: 'api_keys',
+        objectId: record.id,
+        action: 'apikey.revoke',
+        operatorId: userId,
+      },
+    });
+    const spy = vi
+      .spyOn(prisma.apiKey, 'findFirst')
+      .mockResolvedValueOnce({ ...record, revokedAt: null } as never);
+    await revokeApiKey(userId, record.id);
+    spy.mockRestore();
+
+    // 输者不得覆盖赢家的撤销时间戳
+    const row = await prisma.apiKey.findUniqueOrThrow({ where: { id: record.id } });
+    expect(row.revokedAt?.getTime()).toBe(winnerRevokedAt.getTime());
+    // 审计仍只有赢家那一条(输者未写 apikey.revoke)
+    const revokeAudits = await prisma.auditLog.count({
+      where: { objectType: 'api_keys', objectId: record.id, action: 'apikey.revoke' },
+    });
+    expect(revokeAudits).toBe(1);
   });
 });
