@@ -24,7 +24,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { NumberRangeValue } from '@/lib/table/filter-fns';
+import type { DateRangeFilterValue, NumberRangeValue } from '@/lib/table/filter-fns';
 
 export type ColumnFilterType = 'values' | 'text' | 'range' | 'dateRange';
 
@@ -42,6 +42,11 @@ interface HeaderFilterProps<TData> {
   options?: unknown[];
   placeholder?: string;
   /**
+   * dateRange 类型可选:提供时在弹层顶部显示「仅看空值」勾选
+   * (如完成日期的「仅看无完成日期」;勾选后忽略日期区间,二者互斥)。
+   */
+  emptyLabel?: string;
+  /**
    * 可排序:标题变为按钮,点击循环 升序→降序→取消(§Q1 盘问结论)。
    * 与漏斗筛选按钮相互独立;排序激活时标题+箭头高亮 link 蓝。
    */
@@ -56,8 +61,8 @@ function isFilterActive(type: ColumnFilterType, value: unknown): boolean {
     const v = value as NumberRangeValue;
     return Boolean(v?.min || v?.max);
   }
-  const v = value as DateRange | undefined;
-  return Boolean(v?.from || v?.to);
+  const v = value as DateRangeFilterValue | undefined;
+  return Boolean(v?.empty || v?.from || v?.to);
 }
 
 /**
@@ -74,6 +79,7 @@ export function HeaderFilter<TData>({
   valueLabels,
   options,
   placeholder,
+  emptyLabel,
   sortable,
 }: HeaderFilterProps<TData>) {
   const active = isFilterActive(type, column.getFilterValue());
@@ -129,7 +135,9 @@ export function HeaderFilter<TData>({
           ) : null}
           {type === 'text' ? <TextFilter column={column} placeholder={placeholder} /> : null}
           {type === 'range' ? <RangeFilter column={column} /> : null}
-          {type === 'dateRange' ? <DateRangeFilter column={column} /> : null}
+          {type === 'dateRange' ? (
+            <DateRangeFilter column={column} emptyLabel={emptyLabel} />
+          ) : null}
         </PopoverContent>
       </Popover>
     </span>
@@ -329,10 +337,10 @@ function useDatePresets(): DatePreset[] {
   }, []);
 }
 
-/** 两个 DateRange 是否代表同一天区间。 */
-function sameRange(a?: DateRange, b?: DateRange): boolean {
-  const fa = a?.from ? a.from.getTime() : 0;
-  const ta = a?.to ? a.to.getTime() : 0;
+/** 两个日期区间是否代表同一天区间(from/to 兼容 Date 与 URL 还原出的字符串)。 */
+function sameRange(a?: DateRangeFilterValue, b?: DateRange): boolean {
+  const fa = a?.from ? new Date(a.from).getTime() : 0;
+  const ta = a?.to ? new Date(a.to).getTime() : 0;
   const fb = b?.from ? b.from.getTime() : 0;
   const tb = b?.to ? b.to.getTime() : 0;
   return fa === fb && ta === tb;
@@ -358,8 +366,15 @@ function parseDateInput(s: string): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function DateRangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
-  const value = column.getFilterValue() as DateRange | undefined;
+function DateRangeFilter<TData>({
+  column,
+  emptyLabel,
+}: {
+  column: Column<TData, unknown>;
+  emptyLabel?: string;
+}) {
+  const value = column.getFilterValue() as DateRangeFilterValue | undefined;
+  const isEmptyOnly = value?.empty === true;
   const presets = useDatePresets();
 
   const apply = (r: DateRange | undefined) => {
@@ -367,77 +382,89 @@ function DateRangeFilter<TData>({ column }: { column: Column<TData, unknown> }) 
   };
 
   return (
-    <div className="flex gap-2">
-      {/* 快捷预设 */}
-      <div className="flex w-32 shrink-0 flex-col gap-0.5 border-r border-border pr-2">
-        <button
-          type="button"
-          onClick={() => apply(undefined)}
-          className={cn(
-            'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
-            !value ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
-          )}
-        >
-          全部
-        </button>
-        {presets.map((p) => {
-          const r = p.get();
-          const active = sameRange(value, r);
-          return (
-            <button
-              key={p.label}
-              type="button"
-              onClick={() => apply(r)}
-              className={cn(
-                'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
-                active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
-              )}
-            >
-              {p.label}
-            </button>
-          );
-        })}
-      </div>
-      {/* 右栏:起止日期输入 + 日历选范围 */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-1.5">
-          <input
-            type="date"
-            value={value?.from ? toDateInput(value.from) : ''}
-            onChange={(e) => {
-              const from = parseDateInput(e.target.value);
-              if (from) {
-                apply({ from, to: value?.to ?? from });
-              } else {
-                apply(undefined);
-              }
-            }}
-            aria-label="起始日期"
-            className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+    <div className="flex flex-col gap-2">
+      {/* 仅看空值(如「仅看无完成日期」):与日期区间互斥,勾选时区间区灰置。 */}
+      {emptyLabel ? (
+        <label className="flex cursor-pointer items-center gap-2 border-b border-border px-0.5 pb-1.5 text-xs hover:text-foreground">
+          <Checkbox
+            checked={isEmptyOnly}
+            onCheckedChange={(c) => column.setFilterValue(c === true ? { empty: true } : undefined)}
           />
-          <span className="text-mute">—</span>
-          <input
-            type="date"
-            value={value?.to ? toDateInput(value.to) : ''}
-            onChange={(e) => {
-              const to = parseDateInput(e.target.value);
-              if (to) {
-                apply({ from: value?.from ?? to, to });
-              } else {
-                apply(undefined);
-              }
-            }}
-            aria-label="结束日期"
-            className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          {emptyLabel}
+        </label>
+      ) : null}
+      <div className={cn('flex gap-2', isEmptyOnly && 'pointer-events-none opacity-40')}>
+        {/* 快捷预设 */}
+        <div className="flex w-32 shrink-0 flex-col gap-0.5 border-r border-border pr-2">
+          <button
+            type="button"
+            onClick={() => apply(undefined)}
+            className={cn(
+              'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
+              !value ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            全部
+          </button>
+          {presets.map((p) => {
+            const r = p.get();
+            const active = sameRange(value, r);
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => apply(r)}
+                className={cn(
+                  'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
+                  active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+        {/* 右栏:起止日期输入 + 日历选范围 */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date"
+              value={value?.from ? toDateInput(new Date(value.from)) : ''}
+              onChange={(e) => {
+                const from = parseDateInput(e.target.value);
+                if (from) {
+                  apply({ from, to: value?.to ? new Date(value.to) : from });
+                } else {
+                  apply(undefined);
+                }
+              }}
+              aria-label="起始日期"
+              className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+            <span className="text-mute">—</span>
+            <input
+              type="date"
+              value={value?.to ? toDateInput(new Date(value.to)) : ''}
+              onChange={(e) => {
+                const to = parseDateInput(e.target.value);
+                if (to) {
+                  apply({ from: value?.from ? new Date(value.from) : to, to });
+                } else {
+                  apply(undefined);
+                }
+              }}
+              aria-label="结束日期"
+              className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+          </div>
+          <Calendar
+            mode="range"
+            selected={value as DateRange | undefined}
+            onSelect={apply}
+            numberOfMonths={1}
+            className="border-0 p-0"
           />
         </div>
-        <Calendar
-          mode="range"
-          selected={value}
-          onSelect={apply}
-          numberOfMonths={1}
-          className="border-0 p-0"
-        />
       </div>
     </div>
   );

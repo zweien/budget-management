@@ -3,7 +3,16 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { ChevronDown, FolderArchive, Funnel, Paperclip, Package, Plus, Upload } from 'lucide-react';
+import {
+  ChevronDown,
+  Download,
+  FolderArchive,
+  Funnel,
+  Paperclip,
+  Package,
+  Plus,
+  Upload,
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -19,7 +28,6 @@ import {
   useReactTable,
   type ColumnDef,
   type ColumnFiltersState,
-  type SortingState,
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
@@ -29,6 +37,9 @@ import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { PackageAttachmentsDialog } from '@/components/records/PackageAttachmentsDialog';
 import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
+import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
+import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
+import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -142,6 +153,8 @@ interface BusinessRecordRow {
   status: BusinessStatus;
   docNo: string | null;
   remark: string | null;
+  /** 录入人姓名(服务端随记录带出;0.14 筛选扩展)。 */
+  creatorName: string | null;
   isVoid: boolean;
   voidReason: string | null;
   voidedBy: string | null;
@@ -247,20 +260,24 @@ function BusinessRecordsPageInner() {
   const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
   // 业务记录列表。
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
-  // Excel 式表头筛选(TanStack columnFilters)。
-  // 初始值:状态默认排除已作废 + URL 深链(台账叶科目跳转:?subjectId=xx&year=yyyy)。
-  // 单列排序(§Q4:后点覆盖;不持久化;取消=回到服务端默认序:申请日期降序)。
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(() => {
-    const init: ColumnFiltersState = [
-      { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
-    ];
-    const sid = search.get('subjectId');
-    if (sid) init.push({ id: 'subjectId', value: [sid] });
-    const y = search.get('year');
-    const n = y ? Number(y) : NaN;
-    if (Number.isInteger(n) && n >= 1900 && n <= 9999) init.push({ id: 'budgetYear', value: [n] });
-    return init;
+  // Excel 式表头筛选(TanStack columnFilters)+ 单列排序,状态同步到 URL(可刷新/分享)。
+  // 初始值:URL `f` 参数优先;否则回落 legacy 深链(?subjectId=xx&year=yyyy)+ 状态默认值
+  // (默认排除已作废,勾选「已作废」才显示)。
+  const { columnFilters, sorting, setColumnFilters, setSorting } = useUrlSyncedTableState({
+    columnFilters: (() => {
+      const init: ColumnFiltersState = [
+        { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
+      ];
+      const sid = search.get('subjectId');
+      if (sid) init.push({ id: 'subjectId', value: [sid] });
+      const y = search.get('year');
+      const n = y ? Number(y) : NaN;
+      if (Number.isInteger(n) && n >= 1900 && n <= 9999) {
+        init.push({ id: 'budgetYear', value: [n] });
+      }
+      return init;
+    })(),
+    sorting: [],
   });
   // 加载/错误。
   const [loadingRecords, setLoadingRecords] = useState(true);
@@ -643,6 +660,14 @@ function BusinessRecordsPageInner() {
     () => Array.from(new Set(records.map((r) => r.budgetYear))).sort((a, b) => b - a),
     [records],
   );
+  /** 录入人列稳定候选(有名字才进清单;缺失者以「—」由 faceted 兜底)。 */
+  const creatorOptions = useMemo(
+    () =>
+      Array.from(new Set(records.map((r) => r.creatorName).filter((v): v is string => !!v))).sort(
+        (a, b) => a.localeCompare(b, 'zh-Hans-CN'),
+      ),
+    [records],
+  );
 
   /**
    * 从 TanStack columnFilters 派生当前生效的年度/科目筛选(用于"导出附件 zip",
@@ -660,6 +685,26 @@ function BusinessRecordsPageInner() {
     const v = f?.value;
     return Array.isArray(v) && v.length === 1 ? String(v[0]) : undefined;
   })();
+
+  /** 条件 chips 的人话描述(与表头漏斗同一份 columnFilters)。 */
+  const describeFilterValue = (columnId: string, value: unknown): string => {
+    if (Array.isArray(value)) {
+      const labelOf = (v: unknown): string => {
+        if (columnId === 'subjectId') return subjectLabels[String(v)] ?? String(v);
+        if (columnId === 'status') return STATUS_FILTER_LABELS[String(v)] ?? String(v);
+        return String(v);
+      };
+      return value.map(labelOf).join('、');
+    }
+    if (columnId === 'amount') {
+      const v = value as { min?: string; max?: string };
+      return [v.min ? `≥ ${v.min}` : '', v.max ? `≤ ${v.max}` : ''].filter(Boolean).join(' ');
+    }
+    if (columnId === 'businessDate' || columnId === 'completedDate' || columnId === 'enteredAt') {
+      return describeDateRangeValue(value);
+    }
+    return String(value);
+  };
 
   /** 行内操作:修改/状态切换/作废(可录入者且未作废);历史全员可见。 */
   function RowActions({ row }: { row: BusinessRecordRow }) {
@@ -831,7 +876,13 @@ function BusinessRecordsPageInner() {
         id: 'completedDate',
         accessorKey: 'completedDate',
         header: ({ column }) => (
-          <HeaderFilter column={column} title="完成日期" type="dateRange" sortable />
+          <HeaderFilter
+            column={column}
+            title="完成日期"
+            type="dateRange"
+            emptyLabel="仅看无完成日期"
+            sortable
+          />
         ),
         cell: ({ row }) => (
           <span className="tabular-nums">{formatDate(row.original.completedDate)}</span>
@@ -909,6 +960,26 @@ function BusinessRecordsPageInner() {
         filterFn: textContains<BusinessRecordRow>(),
       },
       {
+        id: 'remark',
+        accessorFn: (row) => row.remark ?? undefined,
+        sortUndefined: 'last',
+        header: ({ column }) => <HeaderFilter column={column} title="备注" type="text" sortable />,
+        cell: ({ row }) =>
+          row.original.remark ? (
+            <span
+              className="block max-w-32 truncate text-muted-foreground"
+              title={row.original.remark}
+            >
+              {row.original.remark}
+            </span>
+          ) : (
+            <span className="text-mute">—</span>
+          ),
+        sortingFn: (a, b, id) =>
+          (a.getValue<string>(id) ?? '').localeCompare(b.getValue<string>(id) ?? '', 'zh-Hans-CN'),
+        filterFn: textContains<BusinessRecordRow>(),
+      },
+      {
         id: 'enteredAt',
         accessorKey: 'enteredAt',
         header: ({ column }) => (
@@ -918,6 +989,20 @@ function BusinessRecordsPageInner() {
           <span className="tabular-nums">{formatDateTime(row.original.enteredAt)}</span>
         ),
         filterFn: dateRange<BusinessRecordRow>(),
+      },
+      {
+        id: 'creatorName',
+        accessorFn: (row) => row.creatorName ?? '—',
+        header: ({ column }) => (
+          <HeaderFilter
+            column={column}
+            title="录入人"
+            type="values"
+            options={creatorOptions}
+            sortable
+          />
+        ),
+        filterFn: multiSelect<BusinessRecordRow>(),
       },
       {
         id: 'attachments',
@@ -944,7 +1029,7 @@ function BusinessRecordsPageInner() {
         cell: ({ row }) => <RowActions row={row.original} />,
       },
     ],
-    [subjectLabels, yearOptions, project?.canEdit, selectedIds],
+    [subjectLabels, yearOptions, creatorOptions, project?.canEdit, selectedIds],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
@@ -986,6 +1071,39 @@ function BusinessRecordsPageInner() {
     amountSum = amountSum.plus(new D(r.original.amount));
   }
 
+  // §筛选结果导出 Excel:所见即所导(当前筛选可见行,作废行按状态注明)。
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+  const handleExportXlsx = async () => {
+    setExportingXlsx(true);
+    try {
+      await exportRecordsToXlsx(
+        filteredRows.map(({ original: o }) => ({
+          budgetYear: o.budgetYear,
+          subject: subjectMap.get(o.subjectId)?.name ?? o.subjectId.slice(0, 8),
+          businessDate: o.businessDate,
+          completedDate: o.completedDate,
+          amount: o.amount,
+          status: o.isVoid ? '已作废' : (STATUS_LABEL[o.status] ?? o.status),
+          docNo: o.docNo,
+          handler: o.handler,
+          summary: o.summary,
+          remark: o.remark,
+          creatorName: o.creatorName,
+          enteredAt: o.enteredAt,
+        })),
+        {
+          fileName: `业务记录-${project?.code ?? projectId}-${format(new Date(), 'yyyyMMdd')}`,
+          title: project ? `${project.name} 业务记录(筛选结果)` : undefined,
+        },
+      );
+      toast.success(`已导出 ${filteredRows.length} 条记录`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '导出失败');
+    } finally {
+      setExportingXlsx(false);
+    }
+  };
+
   if (loadingMeta) {
     return (
       <div className="space-y-3">
@@ -1012,6 +1130,15 @@ function BusinessRecordsPageInner() {
           点击表头 <Funnel className="inline size-3.5" /> 可按任意列筛选(勾选清单/文本/范围)。
         </p>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleExportXlsx()}
+            disabled={exportingXlsx || filteredRows.length === 0}
+          >
+            <Download />
+            {exportingXlsx ? '导出中…' : '导出筛选结果'}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1047,6 +1174,28 @@ function BusinessRecordsPageInner() {
           ) : null}
         </div>
       </div>
+
+      {/* 当前生效筛选的条件 chips(与表头漏斗同一份状态,可单删/一键清空) */}
+      <ActiveFilterChips
+        filters={columnFilters}
+        labels={{
+          budgetYear: '年度',
+          subjectId: '科目',
+          amount: '金额',
+          businessDate: '申请日期',
+          completedDate: '完成日期',
+          status: '状态',
+          handler: '经办人',
+          docNo: '单据编号',
+          summary: '摘要',
+          remark: '备注',
+          creatorName: '录入人',
+          enteredAt: '录入时间',
+        }}
+        describe={describeFilterValue}
+        onRemove={(id) => setColumnFilters((prev) => prev.filter((c) => c.id !== id))}
+        onClearAll={() => setColumnFilters([])}
+      />
 
       {/* 批量操作条(有勾选时出现) */}
       {project?.canEdit && selectedVisibleCount > 0 ? (

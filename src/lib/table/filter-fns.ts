@@ -1,5 +1,4 @@
 import type { FilterFn } from '@tanstack/react-table';
-import type { DateRange } from 'react-day-picker';
 
 /**
  * TanStack Table 列筛选函数集(Excel 式表头筛选)。
@@ -45,11 +44,24 @@ export function numberRange<T>(): FilterFn<T> {
   };
 }
 
-/** 日期范围(闭区间;行值为可解析日期字符串)。 */
+/** 日期范围筛选值:起止区间,或「仅看空值」(如未回填的完成日期);二者互斥。 */
+export interface DateRangeFilterValue {
+  from?: Date | string;
+  to?: Date | string;
+  /** true = 只看该列为空的行(忽略 from/to)。 */
+  empty?: boolean;
+}
+
+/** 日期范围(闭区间;行值为可解析日期字符串);empty=true 时只保留空值行。 */
 export function dateRange<T>(): FilterFn<T> {
   return (row, columnId, filterValue) => {
-    const r = filterValue as DateRange | undefined;
-    if (!r?.from && !r?.to) return true;
+    const r = filterValue as DateRangeFilterValue | undefined;
+    if (!r) return true;
+    if (r.empty) {
+      const raw = row.getValue(columnId) as string | null | undefined;
+      return raw == null || raw === '';
+    }
+    if (!r.from && !r.to) return true;
     const raw = row.getValue(columnId) as string;
     const d = new Date(raw);
     if (Number.isNaN(d.getTime())) return false;

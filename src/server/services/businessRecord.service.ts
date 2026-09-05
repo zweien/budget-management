@@ -54,6 +54,9 @@ export interface UpdateRecordInput {
   remark?: string | null;
 }
 
+/** 业务记录行 + 录入人姓名(listRecords 返回,0.14 筛选扩展)。 */
+export type BusinessRecordWithName = BusinessRecord & { creatorName: string | null };
+
 /** §8 list 组合筛选参数。 */
 export interface ListRecordsFilters {
   year?: number;
@@ -391,7 +394,7 @@ export async function listRecords(
   projectId: string,
   filters: ListRecordsFilters,
   user: Pick<User, 'id' | 'role'>,
-): Promise<BusinessRecord[]> {
+): Promise<BusinessRecordWithName[]> {
   await requirePermission(user, 'project:view', projectId);
 
   const where: Prisma.BusinessRecordWhereInput = { projectId };
@@ -423,10 +426,13 @@ export async function listRecords(
     }
   }
 
-  return prisma.businessRecord.findMany({
+  const rows = await prisma.businessRecord.findMany({
     where,
     orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }],
+    include: { createdBy: { select: { name: true } } },
   });
+  // creatorName(0.14 筛选扩展):录入人展示/筛选直接用名字,前端不必再查用户表。
+  return rows.map(({ createdBy, ...r }) => ({ ...r, creatorName: createdBy?.name ?? null }));
 }
 
 /**
