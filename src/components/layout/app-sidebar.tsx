@@ -14,10 +14,12 @@ import {
   LayoutDashboard,
   NotebookText,
   ScrollText,
+  UserCog,
   Wallet,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -32,6 +34,8 @@ const NAV_ITEMS = [
 ] as const;
 
 const CHANGELOG_ITEM = { href: '/changelog', label: '更新日志', icon: NotebookText } as const;
+/** 仅管理员可见(经 /api/me 判定;MOCK 模式随身份切换即时显隐)。 */
+const ADMIN_NAV_ITEM = { href: '/users', label: '用户管理', icon: UserCog } as const;
 
 function isActive(pathname: string, href: string) {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -95,6 +99,21 @@ function NavLink({
  */
 export function SidebarNav({ collapsed, onNavigate }: NavState) {
   const pathname = usePathname();
+  const [isAdmin, setIsAdmin] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ role: string }>('/api/me')
+      .then((me) => {
+        if (!cancelled) setIsAdmin(me.role === 'ADMIN');
+      })
+      .catch(() => {
+        /* 未登录不显示管理入口 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <nav className={cn('flex flex-col gap-0.5 py-4', collapsed ? 'px-2' : 'px-3')}>
@@ -109,6 +128,16 @@ export function SidebarNav({ collapsed, onNavigate }: NavState) {
           onNavigate={onNavigate}
         />
       ))}
+      {isAdmin ? (
+        <NavLink
+          href={ADMIN_NAV_ITEM.href}
+          label={ADMIN_NAV_ITEM.label}
+          icon={ADMIN_NAV_ITEM.icon}
+          active={isActive(pathname, ADMIN_NAV_ITEM.href)}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
+      ) : null}
     </nav>
   );
 }
