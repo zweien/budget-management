@@ -233,8 +233,10 @@ export async function parseAndValidate(
   if (!sheet) {
     throw new HTTPError(422, 'Excel 文件不含任何工作表');
   }
-  // 容量边界:行数上限(超大文件/zip 炸弹的 OOM 与事件循环阻塞防护)。
-  if (sheet.rowCount - 1 > env.MAX_IMPORT_ROWS) {
+  // 容量边界(宽松早退):rowCount 含幽灵空行(仅格式/游离单元格),故只拦截约 2 倍
+  // 明显超限的文件,精确封顶交给行内闸(逐行计非空行)。文件内存占用的第一道闸是路由的
+  // MAX_IMPORT_BYTES。
+  if (sheet.rowCount - 1 > env.MAX_IMPORT_ROWS * 2) {
     throw new HTTPError(
       422,
       `数据行数(${sheet.rowCount - 1})超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`,
@@ -303,6 +305,7 @@ export async function parseAndValidate(
     // 空行(全列空)跳过,不计入。
     const isEmpty = Object.values(data).every((v) => v === null || v === '');
     if (isEmpty) return;
+    // 精确封顶:只计非空行(预闸的 rowCount 会含幽灵空行)。
     if (parsedRows.length >= env.MAX_IMPORT_ROWS) {
       throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
     }

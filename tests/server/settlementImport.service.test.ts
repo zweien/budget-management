@@ -1160,9 +1160,12 @@ describe('settlementImport.service (integration, real PG)', () => {
     const stl = await buildSettlementXlsx(rows);
     const wb = await loadSettlementWorkbookIfMatch(stl);
     expect(wb).not.toBeNull();
+    const batchesBefore = await prisma.importBatch.count({ where: { projectId } });
     await expect(parseSettlement(wb!, projectId, adminUser())).rejects.toMatchObject({
       status: 422,
       message: expect.stringContaining('超过上限'),
     });
+    // 不落任何批次/行(与测试前计数持平——本项目已有其他测试的批次)。
+    expect(await prisma.importBatch.count({ where: { projectId } })).toBe(batchesBefore);
   });
 });

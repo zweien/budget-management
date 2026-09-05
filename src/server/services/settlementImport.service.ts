@@ -255,8 +255,9 @@ export async function parseSettlement(
 
   // 表头所在工作表即数据区(而非固定取第一个 sheet)。
   const sheet = headerSheet;
-  // 容量边界:行数上限(超大文件/zip 炸弹的 OOM 与事件循环阻塞防护)。
-  if (sheet.rowCount - 1 - headerRowNo > env.MAX_IMPORT_ROWS) {
+  // 容量边界(宽松早退):候选数据行粗计 rowCount-headerRowNo,只拦截约 2 倍明显超限
+  // 的文件,精确封顶交给行内闸;文件内存占用的第一道闸是路由的 MAX_IMPORT_BYTES。
+  if (sheet.rowCount - headerRowNo > env.MAX_IMPORT_ROWS * 2) {
     throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
   }
   sheet.eachRow((row, rowNumber) => {
@@ -277,6 +278,7 @@ export async function parseSettlement(
 
     // 空行(关键列全空)跳过。
     if (!docNo && !statusLabel && !dateRaw && !summary && !amountRaw && !handler) return;
+    // 精确封顶:只计非空行(预闸的 rowCount 会含幽灵空行)。
     if (parsedRows.length >= env.MAX_IMPORT_ROWS) {
       throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
     }
