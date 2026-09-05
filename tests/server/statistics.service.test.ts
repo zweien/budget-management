@@ -203,6 +203,10 @@ describe('statistics.service (integration, real PG)', () => {
     expect(result.summary.executionRate).toBeCloseTo(0.3, 5);
     // 明细列表 2 条。
     expect(result.records.length).toBe(2);
+    // creatorName(0.14 筛选扩展):录入人姓名随明细带出。
+    for (const r of result.records) {
+      expect(r.creatorName).toBe('admin-stat');
+    }
   });
 
   it('customStatistics: 跨项目(无 projectId)普通用户可查(v0.3.0 全局只读)', async () => {

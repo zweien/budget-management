@@ -724,6 +724,8 @@ describe('businessRecord.service (integration, real PG)', () => {
     const all = await listRecords(project.id, {}, adminUser());
     expect(all.length).toBe(1);
     expect(all[0].summary).toBe('A1');
+    // creatorName(0.14 筛选扩展):录入人姓名随记录带出。
+    expect(all[0].creatorName).toBe('admin-t6');
 
     // includeVoid → 2 条。
     const withVoid = await listRecords(project.id, { includeVoid: true }, adminUser());

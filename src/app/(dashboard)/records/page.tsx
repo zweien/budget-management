@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { ClipboardPlus, Funnel, History } from 'lucide-react';
+import { ClipboardPlus, Download, Funnel, History } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -15,14 +15,18 @@ import {
   getFacetedRowModel,
   getFacetedUniqueValues,
   getFilteredRowModel,
+  getSortedRowModel,
   useReactTable,
   type ColumnDef,
-  type ColumnFiltersState,
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { D } from '@/lib/decimal';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
+import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
 import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
+import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
+import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
 import { Badge } from '@/components/ui/badge';
@@ -94,10 +98,13 @@ interface UnifiedRecordRow {
   subjectId: string;
   amount: string;
   businessDate: string;
+  completedDate: string | null;
   status: BusinessStatus;
   handler: string;
   summary: string;
   remark: string | null;
+  docNo: string | null;
+  creatorName: string | null;
   isVoid: boolean;
   createdAt: string;
   subject: { id: string; code: string; name: string } | null;
@@ -155,7 +162,7 @@ type RecordFormValues = z.infer<typeof recordSchema>;
  * - 记录列表:默认"我可录入的项目",可切全部(只读);行内修改/作废(可写项目)。
  * 权限真相源在服务端(record:create/edit/void 二次校验),此处仅做门控。
  */
-export default function UnifiedRecordsPage() {
+function UnifiedRecordsPageInner() {
   // ---- 元数据 ----
   const [projects, setProjects] = useState<ProjectWithPermissions[] | null>(null);
   const [subjectsByProject, setSubjectsByProject] = useState<Record<string, SubjectNode[]>>({});
@@ -168,8 +175,14 @@ export default function UnifiedRecordsPage() {
   const [scope, setScope] = useState<'writable' | 'all'>('writable');
   const [records, setRecords] = useState<UnifiedRecordRow[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(true);
-  // Excel 式表头筛选(TanStack columnFilters;空数组=不过滤)。
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  // Excel 式表头筛选 + 排序,状态同步到 URL(与项目记录页同一 hook)。
+  // 初始值:URL `f` 优先;否则状态默认排除已作废(与项目页口径一致)+ 申请日期降序。
+  const { columnFilters, sorting, setColumnFilters, setSorting } = useUrlSyncedTableState({
+    columnFilters: [
+      { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
+    ],
+    sorting: [{ id: 'businessDate', desc: true }],
+  });
 
   // ---- 编辑/作废 ----
   const [editing, setEditing] = useState<UnifiedRecordRow | null>(null);
@@ -263,6 +276,14 @@ export default function UnifiedRecordsPage() {
 
   /** 项目列的稳定候选(不受本列筛选影响)。 */
   const projectOptions = useMemo(() => Array.from(projectName.values()), [projectName]);
+  /** 录入人列稳定候选(缺失者以「—」由 faceted 兜底)。 */
+  const creatorOptions = useMemo(
+    () =>
+      Array.from(new Set(records.map((r) => r.creatorName).filter((v): v is string => !!v))).sort(
+        (a, b) => a.localeCompare(b, 'zh-Hans-CN'),
+      ),
+    [records],
+  );
 
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
   const columns = useMemo<ColumnDef<UnifiedRecordRow>[]>(
@@ -271,7 +292,13 @@ export default function UnifiedRecordsPage() {
         id: 'project',
         accessorFn: (row) => projectName.get(row.projectId) ?? row.projectId,
         header: ({ column }) => (
-          <HeaderFilter column={column} title="项目" type="values" options={projectOptions} />
+          <HeaderFilter
+            column={column}
+            title="项目"
+            type="values"
+            options={projectOptions}
+            sortable
+          />
         ),
         cell: ({ row }) => (
           <Link
@@ -288,14 +315,18 @@ export default function UnifiedRecordsPage() {
       {
         id: 'budgetYear',
         accessorKey: 'budgetYear',
-        header: ({ column }) => <HeaderFilter column={column} title="年度" type="values" />,
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="年度" type="values" sortable />
+        ),
         cell: ({ row }) => <span className="tabular-nums">{row.original.budgetYear}</span>,
         filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'subject',
         accessorFn: (row) => row.subject?.name ?? '—',
-        header: ({ column }) => <HeaderFilter column={column} title="科目" type="values" />,
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="科目" type="values" sortable />
+        ),
         filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
@@ -303,7 +334,7 @@ export default function UnifiedRecordsPage() {
         accessorKey: 'amount',
         header: ({ column }) => (
           <span className="block text-right">
-            <HeaderFilter column={column} title="金额" type="range" />
+            <HeaderFilter column={column} title="金额" type="range" sortable />
           </span>
         ),
         cell: ({ row }) => <MoneyText value={row.original.amount} riskOnNegative={false} />,
@@ -312,7 +343,9 @@ export default function UnifiedRecordsPage() {
       {
         id: 'businessDate',
         accessorKey: 'businessDate',
-        header: ({ column }) => <HeaderFilter column={column} title="业务日期" type="dateRange" />,
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="申请日期" type="dateRange" sortable />
+        ),
         cell: ({ row }) => (
           <span className="tabular-nums">
             {format(new Date(row.original.businessDate), 'yyyy-MM-dd')}
@@ -329,6 +362,7 @@ export default function UnifiedRecordsPage() {
             title="状态"
             type="values"
             valueLabels={STATUS_FILTER_LABELS}
+            sortable
           />
         ),
         cell: ({ row }) =>
@@ -344,19 +378,76 @@ export default function UnifiedRecordsPage() {
       {
         id: 'handler',
         accessorKey: 'handler',
-        header: ({ column }) => <HeaderFilter column={column} title="经办人" type="values" />,
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="经办人" type="values" sortable />
+        ),
         filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'summary',
         accessorKey: 'summary',
-        header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" />,
+        header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
         cell: ({ row }) => (
           <span className="block max-w-40 truncate" title={row.original.summary}>
             {row.original.summary}
           </span>
         ),
         filterFn: textContains<UnifiedRecordRow>(),
+      },
+      {
+        id: 'remark',
+        accessorFn: (row) => row.remark ?? undefined,
+        sortUndefined: 'last',
+        header: ({ column }) => <HeaderFilter column={column} title="备注" type="text" sortable />,
+        cell: ({ row }) =>
+          row.original.remark ? (
+            <span
+              className="block max-w-32 truncate text-muted-foreground"
+              title={row.original.remark}
+            >
+              {row.original.remark}
+            </span>
+          ) : (
+            <span className="text-mute">—</span>
+          ),
+        sortingFn: (a, b, id) =>
+          (a.getValue<string>(id) ?? '').localeCompare(b.getValue<string>(id) ?? '', 'zh-Hans-CN'),
+        filterFn: textContains<UnifiedRecordRow>(),
+      },
+      {
+        id: 'completedDate',
+        accessorKey: 'completedDate',
+        header: ({ column }) => (
+          <HeaderFilter
+            column={column}
+            title="完成日期"
+            type="dateRange"
+            emptyLabel="仅看无完成日期"
+            sortable
+          />
+        ),
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {row.original.completedDate
+              ? format(new Date(row.original.completedDate), 'yyyy-MM-dd')
+              : '—'}
+          </span>
+        ),
+        filterFn: dateRange<UnifiedRecordRow>(),
+      },
+      {
+        id: 'creatorName',
+        accessorFn: (row) => row.creatorName ?? '—',
+        header: ({ column }) => (
+          <HeaderFilter
+            column={column}
+            title="录入人"
+            type="values"
+            options={creatorOptions}
+            sortable
+          />
+        ),
+        filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'actions',
@@ -367,20 +458,89 @@ export default function UnifiedRecordsPage() {
     ],
     // RowActions 闭包内引用稳定函数;projectName 随项目元数据变化。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectName],
+    [projectName, creatorOptions],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
   const table = useReactTable({
     data: tableData,
     columns,
-    state: { columnFilters },
+    state: { columnFilters, sorting },
     onColumnFiltersChange: setColumnFilters,
+    onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
+    enableSortingRemoval: true,
+    enableMultiSort: false,
   });
+
+  // §总计行:当前筛选结果统计(所见即所总);作废行不计入金额,标签注明。
+  const filteredRows = table.getFilteredRowModel().rows;
+  let totalValidCount = 0;
+  let totalVoidCount = 0;
+  let amountSum = new D(0);
+  for (const r of filteredRows) {
+    if (r.original.isVoid) {
+      totalVoidCount++;
+      continue;
+    }
+    totalValidCount++;
+    amountSum = amountSum.plus(new D(r.original.amount));
+  }
+
+  /** 条件 chips 的人话描述(与表头漏斗同一份 columnFilters)。 */
+  const describeFilterValue = (columnId: string, value: unknown): string => {
+    if (Array.isArray(value)) {
+      const labelOf = (v: unknown): string => {
+        if (columnId === 'project') return String(v);
+        if (columnId === 'status') return STATUS_FILTER_LABELS[String(v)] ?? String(v);
+        return String(v);
+      };
+      return value.map(labelOf).join('、');
+    }
+    if (columnId === 'amount') {
+      const v = value as { min?: string; max?: string };
+      return [v.min ? `≥ ${v.min}` : '', v.max ? `≤ ${v.max}` : ''].filter(Boolean).join(' ');
+    }
+    if (columnId === 'businessDate' || columnId === 'completedDate') {
+      return describeDateRangeValue(value);
+    }
+    return String(value);
+  };
+
+  // §筛选结果导出 Excel(所见即所导;含项目列)。
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+  const handleExportXlsx = async () => {
+    setExportingXlsx(true);
+    try {
+      await exportRecordsToXlsx(
+        filteredRows.map(({ original: o }) => ({
+          project: projectName.get(o.projectId) ?? o.projectId.slice(0, 8),
+          budgetYear: o.budgetYear,
+          subject: o.subject?.name ?? o.subjectId.slice(0, 8),
+          businessDate: o.businessDate,
+          completedDate: o.completedDate,
+          amount: o.amount,
+          status: o.isVoid ? '已作废' : (STATUS_LABEL[o.status] ?? o.status),
+          docNo: o.docNo,
+          handler: o.handler,
+          summary: o.summary,
+          remark: o.remark,
+          creatorName: o.creatorName,
+          enteredAt: o.createdAt,
+        })),
+        { fileName: `业务录入-${format(new Date(), 'yyyyMMdd')}` },
+      );
+      toast.success(`已导出 ${filteredRows.length} 条记录`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '导出失败');
+    } finally {
+      setExportingXlsx(false);
+    }
+  };
 
   /** 行内操作(修改/作废/查看;修改与作废仅可写项目且未作废)。 */
   function RowActions({ row }: { row: UnifiedRecordRow }) {
@@ -730,8 +890,37 @@ export default function UnifiedRecordsPage() {
             >
               刷新
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => void handleExportXlsx()}
+              disabled={exportingXlsx || filteredRows.length === 0}
+            >
+              <Download />
+              {exportingXlsx ? '导出中…' : '导出筛选结果'}
+            </Button>
           </div>
         </div>
+
+        {/* 当前生效筛选的条件 chips(与表头漏斗同一份状态) */}
+        <ActiveFilterChips
+          filters={columnFilters}
+          labels={{
+            project: '项目',
+            budgetYear: '年度',
+            subject: '科目',
+            amount: '金额',
+            businessDate: '申请日期',
+            status: '状态',
+            handler: '经办人',
+            summary: '摘要',
+            remark: '备注',
+            completedDate: '完成日期',
+            creatorName: '录入人',
+          }}
+          describe={describeFilterValue}
+          onRemove={(id) => setColumnFilters((prev) => prev.filter((c) => c.id !== id))}
+          onClearAll={() => setColumnFilters([])}
+        />
 
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
           <Table>
@@ -758,11 +947,29 @@ export default function UnifiedRecordsPage() {
               ))}
             </TableHeader>
             <TableBody>
+              {/* §总计行:首行显示当前筛选结果的笔数与金额合计(作废不计)。 */}
+              {!loadingRecords && filteredRows.length > 0 ? (
+                <TableRow className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40">
+                  {table.getVisibleLeafColumns().map((col, idx) => (
+                    <TableCell key={col.id} className="py-1.5">
+                      {col.id === 'amount' ? (
+                        <span className="block text-right tabular-nums">
+                          {amountSum.toFixed(2)}
+                        </span>
+                      ) : idx === 0 ? (
+                        <span className="whitespace-nowrap tabular-nums">
+                          总计 {totalValidCount} 笔{totalVoidCount > 0 ? '(作废不计)' : ''}
+                        </span>
+                      ) : null}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ) : null}
               {loadingRecords ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 9 }).map((_, j) => (
-                      <TableCell key={j}>
+                    {table.getAllLeafColumns().map((col) => (
+                      <TableCell key={col.id}>
                         <Skeleton className="h-5 w-full" />
                       </TableCell>
                     ))}
@@ -770,7 +977,10 @@ export default function UnifiedRecordsPage() {
                 ))
               ) : table.getRowModel().rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
+                  <TableCell
+                    colSpan={table.getAllLeafColumns().length}
+                    className="py-10 text-center text-muted-foreground"
+                  >
                     暂无匹配记录
                   </TableCell>
                 </TableRow>
@@ -952,5 +1162,21 @@ export default function UnifiedRecordsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** useSearchParams 需要Suspense 边界(Next.js 预渲染要求)。 */
+export default function UnifiedRecordsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-3">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      }
+    >
+      <UnifiedRecordsPageInner />
+    </Suspense>
   );
 }

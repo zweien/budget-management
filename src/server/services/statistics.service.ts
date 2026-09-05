@@ -61,10 +61,16 @@ export interface CustomStatisticsSummary {
   executionRate: number | null;
 }
 
-/** §11.3 业务明细行(join 科目,便于前端展示科目编码/名称)。 */
-export type CustomStatisticsRecord = Prisma.BusinessRecordGetPayload<{
-  include: { subject: { select: { id: true; code: true; name: true } } };
-}>;
+/** §11.3 业务明细行(join 科目,便于前端展示科目编码/名称;creatorName=录入人姓名)。 */
+export type CustomStatisticsRecord = Omit<
+  Prisma.BusinessRecordGetPayload<{
+    include: {
+      subject: { select: { id: true; code: true; name: true } };
+      createdBy: { select: { name: true } };
+    };
+  }>,
+  'createdBy'
+> & { creatorName: string | null };
 
 export interface CustomStatisticsResult {
   summary: CustomStatisticsSummary;
@@ -139,11 +145,18 @@ export async function customStatistics(
     }
   }
 
-  const records = await prisma.businessRecord.findMany({
+  const rows = await prisma.businessRecord.findMany({
     where,
     orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }],
-    include: { subject: { select: { id: true, code: true, name: true } } },
+    include: {
+      subject: { select: { id: true, code: true, name: true } },
+      createdBy: { select: { name: true } },
+    },
   });
+  const records = rows.map(({ createdBy, ...r }) => ({
+    ...r,
+    creatorName: createdBy?.name ?? null,
+  }));
 
   // 4) 占用(computeOccupancy 对所查记录全集,内部已自检 isVoid)。
   const occ = computeOccupancy({
