@@ -32,5 +32,12 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
+# 迁移执行链:standalone 不含 prisma CLI,显式带入(不拷 .bin——单文件 COPY 会物化
+# 符号链接,CLI 内部按 __dirname 找 wasm 会失效),入口脚本以 node 直调 CLI 入口
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x docker-entrypoint.sh && chown -R node:node /app
+USER node
 EXPOSE 3000
-CMD ["node", "server.js"]
+ENTRYPOINT ["./docker-entrypoint.sh"]

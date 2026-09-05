@@ -121,6 +121,23 @@ npm run dev                   # http://localhost:3000
 > - **李负责人**（普通用户 USER)
 > - **王经办人**（普通用户 USER)
 
+## 🚀 生产部署
+
+```bash
+docker build -t budget-management .
+docker run -d -p 3000:3000 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/budget" \
+  -e MOCK_AUTH=false \
+  -e AUTHENTIK_ISSUER=… -e AUTHENTIK_CLIENT_ID=… -e AUTHENTIK_CLIENT_SECRET=… \
+  -e AUTH_SECRET="$(openssl rand -base64 32)" \
+  -e APP_BASE_URL=https://your-domain \
+  budget-management
+```
+
+- 容器入口先执行 `prisma migrate deploy`（幂等）再起服务，`RUN_MIGRATIONS=false` 可跳过（改由外部 Job 统一执行）；容器以 `node` 用户运行。
+- **红线：生产环境 `MOCK_AUTH=true` 会在启动时直接失败**（mock 模式仅凭 `x-mock-user-id` header 即可冒充任意用户，见 `src/instrumentation.ts`）。
+- CI（GitHub Actions）在每次 push/PR 上跑：空库 `prisma migrate deploy`（迁移可执行性）、`check-types`、`lint`、全量 vitest 集成测试（PostgreSQL 16 service 容器）。
+
 ## 📖 主要功能
 
 | 模块           | 说明                                                                                                                                                                                   |

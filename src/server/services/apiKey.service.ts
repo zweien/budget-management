@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
 import { HTTPError } from '@/lib/auth/session';
 import { apiKeyDisplayPrefix, generateApiKey, hashApiKey } from '@/lib/auth/api-key';
+import { recordAudit } from '@/server/audit/interceptor';
 
 /**
  * API 凭证管理(ADR 0001):签发/列表/撤销,脚本(make-agent)与管理 UI 共用。
@@ -79,19 +80,30 @@ export async function issueApiKey(
   }
 
   const plaintext = generateApiKey();
-  const record = await prisma.apiKey.create({
-    data: {
-      id: uuidv7(),
-      userId: input.userId,
-      name,
-      keyHash: hashApiKey(plaintext),
-      prefix: apiKeyDisplayPrefix(plaintext),
-      unattended: input.unattended,
-      tier: input.tier,
-      projectScope: input.projectScope,
-      projectIds: input.projectScope === 'selected' ? uniqueProjectIds : Prisma.JsonNull,
-      expiresAt,
-    },
+  // 签发与审计同事务(§14.2):凭证是越权高价值目标,签发必留痕(不含哈希/明文)。
+  const record = await prisma.$transaction(async (tx) => {
+    const created = await tx.apiKey.create({
+      data: {
+        id: uuidv7(),
+        userId: input.userId,
+        name,
+        keyHash: hashApiKey(plaintext),
+        prefix: apiKeyDisplayPrefix(plaintext),
+        unattended: input.unattended,
+        tier: input.tier,
+        projectScope: input.projectScope,
+        projectIds: input.projectScope === 'selected' ? uniqueProjectIds : Prisma.JsonNull,
+        expiresAt,
+      },
+    });
+    await recordAudit(tx, {
+      objectType: 'api_keys',
+      objectId: created.id,
+      action: 'apikey.issue',
+      operatorId: input.userId,
+      after: toPublicApiKey(created) as unknown as Record<string, unknown>,
+    });
+    return created;
   });
   return { record, plaintext };
 }
@@ -155,9 +167,20 @@ export async function revokeApiKey(userId: string, keyId: string): Promise<ApiKe
   const rec = await prisma.apiKey.findFirst({ where: { id: keyId, userId } });
   if (!rec) throw new HTTPError(404, '凭证不存在');
   if (rec.revokedAt) return toPublicApiKey(rec);
-  const updated = await prisma.apiKey.update({
-    where: { id: rec.id },
-    data: { revokedAt: new Date() },
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.apiKey.update({
+      where: { id: rec.id },
+      data: { revokedAt: new Date() },
+    });
+    await recordAudit(tx, {
+      objectType: 'api_keys',
+      objectId: row.id,
+      action: 'apikey.revoke',
+      operatorId: userId,
+      before: toPublicApiKey(rec) as unknown as Record<string, unknown>,
+      after: toPublicApiKey(row) as unknown as Record<string, unknown>,
+    });
+    return row;
   });
   return toPublicApiKey(updated);
 }

@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     'out/**',
     'build/**',
     'next-env.d.ts',
+    // 自托管第三方产物(@file-viewer 预打包 bundle),不参与 lint。
+    'public/**',
   ]),
   // Turn off ESLint rules that conflict with Prettier formatting.
   eslintConfigPrettier,

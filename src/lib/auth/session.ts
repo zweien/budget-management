@@ -69,7 +69,10 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (env.MOCK_AUTH) {
     const mockUserId = h.get('x-mock-user-id');
     if (!mockUserId) return null;
-    return prisma.user.findUnique({ where: { id: mockUserId } });
+    // 与 SSO 分支同语义:停用账号即时失效,不因 mock 模式放行。
+    const user = await prisma.user.findUnique({ where: { id: mockUserId } });
+    if (!user || user.status !== 'active') return null;
+    return user;
   }
 
   const store = await cookies();

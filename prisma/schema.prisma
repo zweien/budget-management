@@ -384,6 +384,7 @@ model BusinessRecord {
   @@index([projectId, budgetYear, subjectId, isVoid])
   @@index([projectId, budgetYear])
   @@index([projectId, docNo])
+  @@index([projectId, businessDate]) // 记录页默认按申请日期排序
   @@map("business_records")
 }
 
@@ -399,6 +400,7 @@ model BusinessRecordHistory {
 
   businessRecord BusinessRecord @relation(fields: [businessRecordId], references: [id])
 
+  @@index([businessRecordId, operatedAt]) // 历史抽屉按记录取时间倒序;该表增长最快
   @@map("business_record_history")
 }
 
@@ -415,6 +417,7 @@ model ReceiptRecord {
   project Project @relation(fields: [projectId], references: [id])
   creator User    @relation(fields: [creatorId], references: [id])
 
+  @@index([projectId, receiptDate]) // 到账列表按日期倒序 + 求和
   @@map("receipt_records")
 }
 
@@ -452,6 +455,7 @@ model ImportRow {
 
   batch ImportBatch @relation(fields: [batchId], references: [id])
 
+  @@index([batchId]) // 批次预览/确认全量取行
   @@map("import_rows")
 }
 
@@ -486,6 +490,8 @@ model AuditLog {
 
   @@index([objectType, objectId])
   @@index([projectId])
+  @@index([operatedAt]) // 审计页默认时间倒序
+  @@index([operatorId]) // 按操作人筛选
   @@map("audit_logs")
 }
 

@@ -118,8 +118,22 @@ describe('apiKey.service (integration, real PG)', () => {
 
     await revokeApiKey(userId, record.id);
     await expect(verifyApiKey(plaintext)).resolves.toBeNull();
-    // 幂等:重复撤销不再报错
+    // 幂等:重复撤销不再报错(不重复写审计)
     await expect(revokeApiKey(userId, record.id)).resolves.toMatchObject({ id: record.id });
+
+    // 生命周期入审计链:签发/撤销各一条,afterData 只含公开字段(无哈希/明文)
+    const audits = await prisma.auditLog.findMany({
+      where: { objectType: 'api_keys', objectId: record.id },
+      orderBy: { operatedAt: 'asc' },
+    });
+    expect(audits.map((a) => a.action)).toEqual(['apikey.issue', 'apikey.revoke']);
+    expect(audits.every((a) => a.operatorId === userId)).toBe(true);
+    const issuedAfter = audits[0].afterData as Record<string, unknown> | null;
+    expect(issuedAfter?.prefix).toBe(record.prefix);
+    expect(JSON.stringify(audits)).not.toContain('keyHash');
+    expect(JSON.stringify(audits)).not.toContain(plaintext);
+    const revokeBefore = audits[1].beforeData as Record<string, unknown> | null;
+    expect(revokeBefore?.revokedAt).toBeNull();
   });
 
   it('revokeApiKey:非本人凭证 → 404', async () => {
