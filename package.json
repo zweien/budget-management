@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:seed": "tsx prisma/seed.ts",
+    "db:migrate": "prisma migrate deploy",
     "prepare": "husky",
     "make-admin": "tsx scripts/make-admin.ts",
     "make-agent": "tsx scripts/make-agent.ts",

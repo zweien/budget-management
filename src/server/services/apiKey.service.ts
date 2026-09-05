@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
 import { HTTPError } from '@/lib/auth/session';
 import { apiKeyDisplayPrefix, generateApiKey, hashApiKey } from '@/lib/auth/api-key';
+import { recordAudit } from '@/server/audit/interceptor';
 
 /**
  * API 凭证管理(ADR 0001):签发/列表/撤销,脚本(make-agent)与管理 UI 共用。
@@ -31,6 +32,10 @@ export interface CreateApiKeyInput {
   projectIds?: string[];
   /** 有效期天数(自签发起算);缺省永不过期。 */
   expiresInDays?: number | null;
+  /** 审计操作者(缺省=凭证属主);脚本代管时传实际管理者,避免归因失真。 */
+  actorId?: string;
+  /** 审计来源标记(如 'make-agent');缺省视为本人自助操作。 */
+  via?: string;
 }
 
 /** 凭证管理仅限人在场交互会话:Bearer 凭证(含 attended)一律 403。 */
@@ -79,19 +84,33 @@ export async function issueApiKey(
   }
 
   const plaintext = generateApiKey();
-  const record = await prisma.apiKey.create({
-    data: {
-      id: uuidv7(),
-      userId: input.userId,
-      name,
-      keyHash: hashApiKey(plaintext),
-      prefix: apiKeyDisplayPrefix(plaintext),
-      unattended: input.unattended,
-      tier: input.tier,
-      projectScope: input.projectScope,
-      projectIds: input.projectScope === 'selected' ? uniqueProjectIds : Prisma.JsonNull,
-      expiresAt,
-    },
+  // 签发与审计同事务(§14.2):凭证是越权高价值目标,签发必留痕(不含哈希/明文)。
+  const record = await prisma.$transaction(async (tx) => {
+    const created = await tx.apiKey.create({
+      data: {
+        id: uuidv7(),
+        userId: input.userId,
+        name,
+        keyHash: hashApiKey(plaintext),
+        prefix: apiKeyDisplayPrefix(plaintext),
+        unattended: input.unattended,
+        tier: input.tier,
+        projectScope: input.projectScope,
+        projectIds: input.projectScope === 'selected' ? uniqueProjectIds : Prisma.JsonNull,
+        expiresAt,
+      },
+    });
+    await recordAudit(tx, {
+      objectType: 'api_keys',
+      objectId: created.id,
+      action: 'apikey.issue',
+      operatorId: input.actorId ?? input.userId,
+      after: {
+        ...toPublicApiKey(created),
+        ...(input.via ? { via: input.via } : {}),
+      } as unknown as Record<string, unknown>,
+    });
+    return created;
   });
   return { record, plaintext };
 }
@@ -150,14 +169,40 @@ export async function listApiKeys(userId: string): Promise<ApiKeyPublic[]> {
   return rows;
 }
 
+/** 撤销选项:审计操作者/来源(语义同 CreateApiKeyInput.actorId/via)。 */
+export interface RevokeApiKeyOptions {
+  actorId?: string;
+  via?: string;
+}
+
 /** 撤销凭证(仅限本人;脚本场景先自行按前缀定位再调用)。已撤销幂等返回。 */
-export async function revokeApiKey(userId: string, keyId: string): Promise<ApiKeyPublic> {
+export async function revokeApiKey(
+  userId: string,
+  keyId: string,
+  opts: RevokeApiKeyOptions = {},
+): Promise<ApiKeyPublic> {
   const rec = await prisma.apiKey.findFirst({ where: { id: keyId, userId } });
   if (!rec) throw new HTTPError(404, '凭证不存在');
   if (rec.revokedAt) return toPublicApiKey(rec);
-  const updated = await prisma.apiKey.update({
-    where: { id: rec.id },
-    data: { revokedAt: new Date() },
+  const revokedAt = new Date();
+  const viaFields = opts.via ? { via: opts.via } : {};
+  const row = await prisma.$transaction(async (tx) => {
+    // 原子首撤:只认领仍为活态的行——并发输者不再覆盖赢家时间戳、不重复写审计。
+    const claim = await tx.apiKey.updateMany({
+      where: { id: rec.id, userId, revokedAt: null },
+      data: { revokedAt },
+    });
+    const latest = await tx.apiKey.findUniqueOrThrow({ where: { id: rec.id } });
+    if (claim.count === 0) return latest;
+    await recordAudit(tx, {
+      objectType: 'api_keys',
+      objectId: latest.id,
+      action: 'apikey.revoke',
+      operatorId: opts.actorId ?? userId,
+      before: { ...toPublicApiKey(rec), ...viaFields } as unknown as Record<string, unknown>,
+      after: { ...toPublicApiKey(latest), ...viaFields } as unknown as Record<string, unknown>,
+    });
+    return latest;
   });
-  return toPublicApiKey(updated);
+  return toPublicApiKey(row);
 }

@@ -5,6 +5,8 @@ const envSchema = z
     DATABASE_URL: z.string().url(),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     APP_PORT: z.coerce.number().default(3000),
+    /** Prisma 连接池上限(拼进 DATABASE_URL 的 connection_limit;URL 已带该参数时不覆盖)。 */
+    DB_CONNECTION_LIMIT: z.coerce.number().int().positive().default(10),
     /** true=本地 mock 鉴权(开发/测试);false=Authentik SSO。 */
     MOCK_AUTH: z
       .string()
