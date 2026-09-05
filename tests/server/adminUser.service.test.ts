@@ -97,6 +97,30 @@ describe('adminUser.service (integration, real PG)', () => {
       },
     ]);
 
+    // 已过期无人值守 Key 不标记服务账号(codex P2)。
+    const expiredHolder = uuidv7();
+    createdUserIds.push(expiredHolder);
+    await prisma.user.create({
+      data: { id: expiredHolder, name: 'usr-expired', role: UserRole.USER },
+    });
+    const expired = generateApiKey();
+    await prisma.apiKey.create({
+      data: {
+        id: uuidv7(),
+        userId: expiredHolder,
+        name: 'expired',
+        keyHash: hashApiKey(expired),
+        prefix: apiKeyDisplayPrefix(expired),
+        unattended: true,
+        tier: 'full',
+        projectScope: 'all',
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+    expect(
+      (await listAdminUsers(admin())).find((r) => r.id === expiredHolder)?.serviceAccount,
+    ).toBe(false);
+
     // 停用用户仍在列表(管理页需要看见)。
     await prisma.user.update({ where: { id: plainId }, data: { status: 'disabled' } });
     const after = await listAdminUsers(admin());

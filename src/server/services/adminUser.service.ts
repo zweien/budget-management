@@ -49,7 +49,12 @@ export async function listAdminUsers(
   const [users, unattendedKeys, memberships] = await Promise.all([
     prisma.user.findMany({ orderBy: [{ status: 'asc' }, { createdAt: 'asc' }] }),
     prisma.apiKey.findMany({
-      where: { unattended: true, revokedAt: null },
+      where: {
+        unattended: true,
+        revokedAt: null,
+        // 已过期 Key 不可用(codex P2),不应标记服务账号。
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
       select: { userId: true },
       distinct: ['userId'],
     }),
@@ -115,30 +120,33 @@ export async function updateUserAccount(
     throw new HTTPError(422, '不能变更自己的角色或状态');
   }
 
-  const target = await prisma.user.findUnique({ where: { id: targetUserId } });
-  if (!target) throw new HTTPError(404, '用户不存在');
-
-  // 最后一个活跃 ADMIN 护栏:对 ADMIN 降级或停用前,确认还有其他活跃管理员。
-  if (target.role === 'ADMIN' && (role === 'USER' || status === 'disabled')) {
-    const otherActiveAdmins = await prisma.user.count({
-      where: { role: 'ADMIN', status: 'active', id: { not: targetUserId } },
-    });
-    if (otherActiveAdmins === 0) {
-      throw new HTTPError(409, '该账号是最后一个活跃管理员,不可降级或停用');
-    }
-  }
-
-  const statusChanged = status !== undefined && status !== target.status;
-  const roleChanged = role !== undefined && role !== target.role;
-  if (!statusChanged && !roleChanged) {
-    throw new HTTPError(422, '账号的角色与状态均未变化');
-  }
-
-  const data: { status?: string; role?: UserRole } = {};
-  if (statusChanged) data.status = status;
-  if (roleChanged) data.role = role as UserRole;
-
   return prisma.$transaction(async (tx) => {
+    // 最后一个活跃 ADMIN 护栏(原子化,codex P1):先锁全部活跃管理员行再在事务内
+    // 重验——并发互降时后提交方会看到前者的结果,不会把最后一名也降掉。
+    // ORDER BY 保证加锁顺序确定,避免死锁。
+    await tx.$queryRaw`SELECT id FROM users WHERE role = 'ADMIN' AND status = 'active' ORDER BY id FOR UPDATE`;
+    const target = await tx.user.findUnique({ where: { id: targetUserId } });
+    if (!target) throw new HTTPError(404, '用户不存在');
+
+    if (target.role === 'ADMIN' && (role === 'USER' || status === 'disabled')) {
+      const otherActiveAdmins = await tx.user.count({
+        where: { role: 'ADMIN', status: 'active', id: { not: targetUserId } },
+      });
+      if (otherActiveAdmins === 0) {
+        throw new HTTPError(409, '该账号是最后一个活跃管理员,不可降级或停用');
+      }
+    }
+
+    const statusChanged = status !== undefined && status !== target.status;
+    const roleChanged = role !== undefined && role !== target.role;
+    if (!statusChanged && !roleChanged) {
+      throw new HTTPError(422, '账号的角色与状态均未变化');
+    }
+
+    const data: { status?: string; role?: UserRole } = {};
+    if (statusChanged) data.status = status;
+    if (roleChanged) data.role = role as UserRole;
+
     const row = await tx.user.update({ where: { id: targetUserId }, data });
     if (statusChanged) {
       await recordAudit(tx, {

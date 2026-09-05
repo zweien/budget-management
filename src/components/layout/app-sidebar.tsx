@@ -103,15 +103,21 @@ export function SidebarNav({ collapsed, onNavigate }: NavState) {
 
   React.useEffect(() => {
     let cancelled = false;
-    apiFetch<{ role: string }>('/api/me')
-      .then((me) => {
-        if (!cancelled) setIsAdmin(me.role === 'ADMIN');
-      })
-      .catch(() => {
-        /* 未登录不显示管理入口 */
-      });
+    const sync = () => {
+      apiFetch<{ role: string }>('/api/me')
+        .then((me) => {
+          if (!cancelled) setIsAdmin(me.role === 'ADMIN');
+        })
+        .catch(() => {
+          if (!cancelled) setIsAdmin(false);
+        });
+    };
+    sync();
+    // MOCK 模式切换身份会派发 mock-user-change(codex P2):随身份即时显隐。
+    window.addEventListener('mock-user-change', sync);
     return () => {
       cancelled = true;
+      window.removeEventListener('mock-user-change', sync);
     };
   }, []);
 
