@@ -9,22 +9,12 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import {
-  flexRender,
-  getCoreRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
-  getSortedRowModel,
-  useReactTable,
-  type ColumnDef,
-} from '@tanstack/react-table';
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
-import { D } from '@/lib/decimal';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
-import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
+import type { DateRangeFilterValue } from '@/lib/table/filter-fns';
 import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
 import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -175,6 +165,22 @@ function UnifiedRecordsPageInner() {
   const [scope, setScope] = useState<'writable' | 'all'>('writable');
   const [records, setRecords] = useState<UnifiedRecordRow[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(true);
+  // 服务端分页/合计(筛选在 SQL 侧,页面只渲染)。
+  const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState<{
+    totalCount: number;
+    validCount: number;
+    amountSum: string;
+  } | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  // 值列稳定候选(独立接口,不随页内数据漂移)。
+  const [facets, setFacets] = useState<{
+    years: number[];
+    handlerNames: string[];
+    creatorNames: string[];
+    subjectNames: string[];
+  } | null>(null);
   // Excel 式表头筛选 + 排序,状态同步到 URL(与项目记录页同一 hook)。
   // 初始值:URL `f` 优先;否则状态默认排除已作废(与项目页口径一致)+ 申请日期降序。
   const { columnFilters, sorting, setColumnFilters, setSorting } = useUrlSyncedTableState({
@@ -247,43 +253,152 @@ function UnifiedRecordsPageInner() {
     };
   }, []);
 
-  /** 列表重拉:全量拉取(表头筛选全部在客户端进行,Excel 式即时过滤)。 */
+  /** 列 id(表头筛选)→ 服务端查询参数(筛选/排序语义全部下推 SQL)。 */
+  const idByLabel = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [id, label] of projectName) m.set(label, id);
+    return m;
+  }, [projectName]);
+
+  const buildParams = useCallback(
+    (targetPage: number, targetPageSize: number) => {
+      const sp = new URLSearchParams();
+      sp.set('includeVoid', '1');
+      const projectIds: string[] = [];
+      for (const f of columnFilters) {
+        const v = f.value as unknown;
+        switch (f.id) {
+          case 'project': {
+            for (const label of v as string[]) {
+              const id = idByLabel.get(label);
+              if (id) projectIds.push(id);
+            }
+            break;
+          }
+          case 'budgetYear':
+            for (const y of v as number[]) sp.append('budgetYears', String(y));
+            break;
+          case 'subject':
+            for (const n of v as string[]) sp.append('subjectNames', n);
+            break;
+          case 'status': {
+            const arr = v as string[];
+            for (const st of arr) {
+              if (st !== '__void__') sp.append('statuses', st);
+            }
+            if (arr.length !== arr.filter((st) => st !== '__void__').length) {
+              sp.set('includeVoid', '1');
+            }
+            break;
+          }
+          case 'handler':
+            for (const h of v as string[]) sp.append('handlers', h);
+            break;
+          case 'summary':
+            sp.set('summary', String(v));
+            break;
+          case 'remark':
+            sp.set('remark', String(v));
+            break;
+          case 'amount': {
+            const r = v as { min?: string; max?: string };
+            if (r.min) sp.set('amountFrom', r.min);
+            if (r.max) sp.set('amountTo', r.max);
+            break;
+          }
+          case 'businessDate': {
+            const r = v as DateRangeFilterValue;
+            if (r.from) sp.set('businessDateFrom', format(new Date(r.from), 'yyyy-MM-dd'));
+            if (r.to) sp.set('businessDateTo', format(new Date(r.to), 'yyyy-MM-dd'));
+            break;
+          }
+          case 'completedDate': {
+            const r = v as DateRangeFilterValue;
+            if (r.empty) sp.set('completedDateEmpty', '1');
+            if (r.from) sp.set('completedDateFrom', format(new Date(r.from), 'yyyy-MM-dd'));
+            if (r.to) sp.set('completedDateTo', format(new Date(r.to), 'yyyy-MM-dd'));
+            break;
+          }
+          case 'creatorName':
+            for (const c of v as string[]) sp.append('creatorNames', c);
+            break;
+        }
+      }
+      // 权限范围(writable)转服务端项目过滤;显式项目筛选取交集语义(叠加 projectIds)。
+      if (projectIds.length > 0) {
+        for (const id of projectIds) sp.append('projectIds', id);
+      } else if (scope === 'writable') {
+        for (const id of writableIds) sp.append('projectIds', id);
+      }
+      const firstSort = sorting[0];
+      if (firstSort) {
+        sp.set('sortField', firstSort.id);
+        sp.set('sortDir', firstSort.desc ? 'desc' : 'asc');
+      }
+      sp.set('page', String(targetPage));
+      sp.set('pageSize', String(targetPageSize));
+      return sp;
+    },
+    [columnFilters, sorting, scope, writableIds, idByLabel],
+  );
+
+  /** 列表重拉:服务端筛选/排序/分页,一次一页。 */
   const reloadRecords = useCallback(async () => {
+    if (scope === 'writable' && writableIds.size === 0) {
+      setRecords([]);
+      setTotal(0);
+      setStats({ totalCount: 0, validCount: 0, amountSum: '0.00' });
+      setLoadingRecords(false);
+      return;
+    }
     setLoadingRecords(true);
     try {
-      // 含作废记录:状态列默认排除已作废,但勾选「已作废」后需能看到;作废可见性由客户端筛选控制。
-      const data = await apiFetch<{ records: UnifiedRecordRow[] }>(
-        '/api/statistics/custom?includeVoid=1',
-      );
+      const data = await apiFetch<{
+        records: UnifiedRecordRow[];
+        total: number;
+        stats: { totalCount: number; validCount: number; amountSum: string };
+      }>(`/api/statistics/custom?${buildParams(page, pageSize).toString()}`);
       setRecords(data.records ?? []);
+      setTotal(data.total ?? 0);
+      setStats(data.stats ?? null);
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
     } finally {
       setLoadingRecords(false);
     }
-  }, []);
+  }, [buildParams, page, pageSize, scope, writableIds]);
 
   useEffect(() => {
     // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中(异步)。
     void reloadRecords();
   }, [reloadRecords]);
 
-  /** 范围过滤(权限范围,非数据筛选):可录入项目 或 全部(只读)。 */
-  const tableData = useMemo(
-    () => (scope === 'writable' ? records.filter((r) => writableIds.has(r.projectId)) : records),
-    [records, scope, writableIds],
-  );
+  // 值列候选:项目集合或权限范围变化时拉一次(跨项目接口,全局只读)。
+  useEffect(() => {
+    let cancelled = false;
+    const qs = new URLSearchParams();
+    const ids = scope === 'writable' ? Array.from(writableIds) : Array.from(projectName.keys());
+    for (const id of ids) qs.append('projectIds', id);
+    apiFetch<{
+      years: number[];
+      handlerNames: string[];
+      creatorNames: string[];
+      subjectNames: string[];
+    }>(`/api/statistics/custom-facets?${qs.toString()}`)
+      .then((f) => {
+        if (!cancelled) setFacets(f);
+      })
+      .catch(() => {
+        /* 候选拉取失败不阻断列表 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectName, scope, writableIds]);
 
   /** 项目列的稳定候选(不受本列筛选影响)。 */
   const projectOptions = useMemo(() => Array.from(projectName.values()), [projectName]);
-  /** 录入人列稳定候选(缺失者以「—」由 faceted 兜底)。 */
-  const creatorOptions = useMemo(
-    () =>
-      Array.from(new Set(records.map((r) => r.creatorName).filter((v): v is string => !!v))).sort(
-        (a, b) => a.localeCompare(b, 'zh-Hans-CN'),
-      ),
-    [records],
-  );
+  const creatorOptions = useMemo(() => facets?.creatorNames ?? [], [facets]);
 
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
   const columns = useMemo<ColumnDef<UnifiedRecordRow>[]>(
@@ -292,13 +407,7 @@ function UnifiedRecordsPageInner() {
         id: 'project',
         accessorFn: (row) => projectName.get(row.projectId) ?? row.projectId,
         header: ({ column }) => (
-          <HeaderFilter
-            column={column}
-            title="项目"
-            type="values"
-            options={projectOptions}
-            sortable
-          />
+          <HeaderFilter column={column} title="项目" type="values" options={projectOptions} />
         ),
         cell: ({ row }) => (
           <Link
@@ -310,24 +419,33 @@ function UnifiedRecordsPageInner() {
             </span>
           </Link>
         ),
-        filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'budgetYear',
         accessorKey: 'budgetYear',
         header: ({ column }) => (
-          <HeaderFilter column={column} title="年度" type="values" sortable />
+          <HeaderFilter
+            column={column}
+            title="年度"
+            type="values"
+            options={(facets?.years ?? []).map(String)}
+            sortable
+          />
         ),
         cell: ({ row }) => <span className="tabular-nums">{row.original.budgetYear}</span>,
-        filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'subject',
         accessorFn: (row) => row.subject?.name ?? '—',
         header: ({ column }) => (
-          <HeaderFilter column={column} title="科目" type="values" sortable />
+          <HeaderFilter
+            column={column}
+            title="科目"
+            type="values"
+            options={facets?.subjectNames ?? []}
+            sortable
+          />
         ),
-        filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'amount',
@@ -338,7 +456,6 @@ function UnifiedRecordsPageInner() {
           </span>
         ),
         cell: ({ row }) => <MoneyText value={row.original.amount} riskOnNegative={false} />,
-        filterFn: numberRange<UnifiedRecordRow>(),
       },
       {
         id: 'businessDate',
@@ -351,7 +468,6 @@ function UnifiedRecordsPageInner() {
             {format(new Date(row.original.businessDate), 'yyyy-MM-dd')}
           </span>
         ),
-        filterFn: dateRange<UnifiedRecordRow>(),
       },
       {
         id: 'status',
@@ -373,15 +489,19 @@ function UnifiedRecordsPageInner() {
               {STATUS_LABEL[row.original.status] ?? row.original.status}
             </Badge>
           ),
-        filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'handler',
         accessorKey: 'handler',
         header: ({ column }) => (
-          <HeaderFilter column={column} title="经办人" type="values" sortable />
+          <HeaderFilter
+            column={column}
+            title="经办人"
+            type="values"
+            options={facets?.handlerNames ?? []}
+            sortable
+          />
         ),
-        filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'summary',
@@ -392,7 +512,6 @@ function UnifiedRecordsPageInner() {
             {row.original.summary}
           </span>
         ),
-        filterFn: textContains<UnifiedRecordRow>(),
       },
       {
         id: 'remark',
@@ -410,9 +529,6 @@ function UnifiedRecordsPageInner() {
           ) : (
             <span className="text-mute">—</span>
           ),
-        sortingFn: (a, b, id) =>
-          (a.getValue<string>(id) ?? '').localeCompare(b.getValue<string>(id) ?? '', 'zh-Hans-CN'),
-        filterFn: textContains<UnifiedRecordRow>(),
       },
       {
         id: 'completedDate',
@@ -433,7 +549,6 @@ function UnifiedRecordsPageInner() {
               : '—'}
           </span>
         ),
-        filterFn: dateRange<UnifiedRecordRow>(),
       },
       {
         id: 'creatorName',
@@ -447,7 +562,6 @@ function UnifiedRecordsPageInner() {
             sortable
           />
         ),
-        filterFn: multiSelect<UnifiedRecordRow>(),
       },
       {
         id: 'actions',
@@ -458,38 +572,35 @@ function UnifiedRecordsPageInner() {
     ],
     // RowActions 闭包内引用稳定函数;projectName 随项目元数据变化。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectName, creatorOptions],
+    [projectName, creatorOptions, facets],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
   const table = useReactTable({
-    data: tableData,
+    data: records,
     columns,
     state: { columnFilters, sorting },
-    onColumnFiltersChange: setColumnFilters,
-    onSortingChange: setSorting,
+    onColumnFiltersChange: (updater) => {
+      setColumnFilters(updater);
+      setPage(1); // 筛选变化回到第一页
+    },
+    onSortingChange: (updater) => {
+      setSorting(updater);
+      setPage(1);
+    },
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFacetedRowModel: getFacetedRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
+    manualFiltering: true, // 筛选/排序/分页全部在服务端(§11.3 接口)
+    manualSorting: true,
+    manualPagination: true,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
     enableSortingRemoval: true,
     enableMultiSort: false,
   });
 
-  // §总计行:当前筛选结果统计(所见即所总);作废行不计入金额,标签注明。
-  const filteredRows = table.getFilteredRowModel().rows;
-  let totalValidCount = 0;
-  let totalVoidCount = 0;
-  let amountSum = new D(0);
-  for (const r of filteredRows) {
-    if (r.original.isVoid) {
-      totalVoidCount++;
-      continue;
-    }
-    totalValidCount++;
-    amountSum = amountSum.plus(new D(r.original.amount));
-  }
+  // §总计行:筛选全集聚合来自服务端(所见即所总;作废行不计入金额,标签注明)。
+  const totalValidCount = stats?.validCount ?? 0;
+  const totalVoidCount = (stats?.totalCount ?? 0) - (stats?.validCount ?? 0);
+  const amountSum = stats?.amountSum ?? '0.00';
 
   /** 条件 chips 的人话描述(与表头漏斗同一份 columnFilters)。 */
   const describeFilterValue = (columnId: string, value: unknown): string => {
@@ -516,8 +627,20 @@ function UnifiedRecordsPageInner() {
   const handleExportXlsx = async () => {
     setExportingXlsx(true);
     try {
+      // 所见即所导:按当前筛选逐页拉全量(单页 500,直至取满 total)。
+      const all: UnifiedRecordRow[] = [];
+      let cursor = 1;
+      for (;;) {
+        const sp = buildParams(cursor, 500);
+        const data = await apiFetch<{ records: UnifiedRecordRow[]; total: number }>(
+          `/api/statistics/custom?${sp.toString()}`,
+        );
+        all.push(...(data.records ?? []));
+        if (!data.records?.length || all.length >= (data.total ?? 0) || cursor >= 200) break;
+        cursor++;
+      }
       await exportRecordsToXlsx(
-        filteredRows.map(({ original: o }) => ({
+        all.map((o) => ({
           project: projectName.get(o.projectId) ?? o.projectId.slice(0, 8),
           budgetYear: o.budgetYear,
           subject: o.subject?.name ?? o.subjectId.slice(0, 8),
@@ -534,7 +657,7 @@ function UnifiedRecordsPageInner() {
         })),
         { fileName: `业务录入-${format(new Date(), 'yyyyMMdd')}` },
       );
-      toast.success(`已导出 ${filteredRows.length} 条记录`);
+      toast.success(`已导出 ${all.length} 条记录`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '导出失败');
     } finally {
@@ -893,7 +1016,7 @@ function UnifiedRecordsPageInner() {
             <Button
               variant="outline"
               onClick={() => void handleExportXlsx()}
-              disabled={exportingXlsx || filteredRows.length === 0}
+              disabled={exportingXlsx || total === 0}
             >
               <Download />
               {exportingXlsx ? '导出中…' : '导出筛选结果'}
@@ -948,14 +1071,12 @@ function UnifiedRecordsPageInner() {
             </TableHeader>
             <TableBody>
               {/* §总计行:首行显示当前筛选结果的笔数与金额合计(作废不计)。 */}
-              {!loadingRecords && filteredRows.length > 0 ? (
+              {!loadingRecords && records.length > 0 ? (
                 <TableRow className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40">
                   {table.getVisibleLeafColumns().map((col, idx) => (
                     <TableCell key={col.id} className="py-1.5">
                       {col.id === 'amount' ? (
-                        <span className="block text-right tabular-nums">
-                          {amountSum.toFixed(2)}
-                        </span>
+                        <span className="block text-right tabular-nums">{amountSum}</span>
                       ) : idx === 0 ? (
                         <span className="whitespace-nowrap tabular-nums">
                           总计 {totalValidCount} 笔{totalVoidCount > 0 ? '(作废不计)' : ''}
@@ -999,8 +1120,46 @@ function UnifiedRecordsPageInner() {
           </Table>
           {!loadingRecords && table.getRowModel().rows.length > 0 ? (
             <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-              共 {table.getRowModel().rows.length} 条记录
+              共 {total} 条记录
               {columnFilters.length > 0 ? '(已应用表头筛选)' : ''}
+            </div>
+          ) : null}
+          {!loadingRecords && total > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                第 {page} / {Math.max(1, Math.ceil(total / pageSize))} 页
+              </span>
+              <select
+                className="h-8 rounded-md border border-border bg-card px-2 text-sm"
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                aria-label="每页条数"
+              >
+                {[50, 100, 200].map((n) => (
+                  <option key={n} value={n}>
+                    {n} 条/页
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || loadingRecords}
+                onClick={() => setPage((v) => Math.max(1, v - 1))}
+              >
+                上一页
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= Math.ceil(total / pageSize) || loadingRecords}
+                onClick={() => setPage((v) => Math.min(Math.ceil(total / pageSize), v + 1))}
+              >
+                下一页
+              </Button>
             </div>
           ) : null}
         </div>

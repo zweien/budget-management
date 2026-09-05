@@ -43,6 +43,67 @@ export interface CustomStatisticsFilters {
   handler?: string;
   /** 是否包含作废记录(默认 false)。 */
   includeVoid?: boolean;
+
+  // ---- v0.15 扩展:全局录入页服务端筛选/分页(量级语义在实现内,页面只渲染) ----
+  /** 项目集合(in;与 projectId 叠加取并集语义)。 */
+  projectIds?: string[];
+  /** 年度集合(in)。 */
+  budgetYears?: number[];
+  /** 状态集合(in;与 status 叠加)。 */
+  statuses?: BusinessStatus[];
+  /** 经办人集合(in;与 handler 模糊叠加)。 */
+  handlers?: string[];
+  /** 科目名集合(in,精确)。 */
+  subjectNames?: string[];
+  /** 录入人姓名集合(in)。 */
+  creatorNames?: string[];
+  /** 备注(contains,忽略大小写)。 */
+  remark?: string;
+  /** 摘要(contains,忽略大小写)。 */
+  summary?: string;
+  /** 单据编号(contains)。 */
+  docNo?: string;
+  /** 仅看无完成日期。 */
+  completedDateEmpty?: boolean;
+  /** 完成日期范围起(ISO yyyy-mm-dd,含)。 */
+  completedDateFrom?: string;
+  /** 完成日期范围止(ISO yyyy-mm-dd,含)。 */
+  completedDateTo?: string;
+  /** 金额下限(字符串十进制)。 */
+  amountFrom?: string;
+  /** 金额上限。 */
+  amountTo?: string;
+  /** 排序字段(白名单;缺省 businessDate desc, createdAt desc)。 */
+  sort?: { field: CustomSortField; dir: 'asc' | 'desc' };
+  /** 页码(1 起;缺省不分页,全量返回——保持既有调用兼容)。 */
+  page?: number;
+  /** 页大小(≤500;与 page 同时给出才生效)。 */
+  pageSize?: number;
+}
+
+/** 服务端排序白名单(列 id → 排序目标;subject/creatorName 走关系字段)。 */
+export const CUSTOM_SORT_FIELDS = {
+  budgetYear: 'budgetYear',
+  subject: 'subject',
+  amount: 'amount',
+  businessDate: 'businessDate',
+  status: 'status',
+  handler: 'handler',
+  summary: 'summary',
+  remark: 'remark',
+  completedDate: 'completedDate',
+  creatorName: 'creatorName',
+} as const;
+export type CustomSortField = (typeof CUSTOM_SORT_FIELDS)[keyof typeof CUSTOM_SORT_FIELDS];
+
+/** 筛选集合计数(总计行/分页器)。 */
+export interface CustomStatisticsStats {
+  /** 筛选结果总行数(含作废)。 */
+  totalCount: number;
+  /** 有效(非作废)行数。 */
+  validCount: number;
+  /** 有效行金额合计。 */
+  amountSum: string;
 }
 
 /** §11.3 汇总(全部金额 2 位小数字符串;executionRate 为 number|null)。 */
@@ -75,6 +136,10 @@ export type CustomStatisticsRecord = Omit<
 export interface CustomStatisticsResult {
   summary: CustomStatisticsSummary;
   records: CustomStatisticsRecord[];
+  /** 筛选结果总行数(分页用;无分页时 = records.length)。 */
+  total: number;
+  /** 合计行/分页器数据(筛选全集聚合,SQL 下推)。 */
+  stats: CustomStatisticsStats;
 }
 
 /**
@@ -123,17 +188,42 @@ export async function customStatistics(
           executionRate: null,
         },
         records: [],
+        total: 0,
+        stats: { totalCount: 0, validCount: 0, amountSum: '0.00' },
       };
     }
   }
 
-  // 3) 构建 business_records 查询条件。
+  // 3) 构建 business_records 查询条件(筛选全部在 SQL 侧,页面只渲染)。
   const where: Prisma.BusinessRecordWhereInput = {};
-  if (filters.projectId) where.projectId = filters.projectId;
-  if (filters.budgetYear !== undefined) where.budgetYear = filters.budgetYear;
+  const projectIdIn = [
+    ...(filters.projectIds ?? []),
+    ...(filters.projectId ? [filters.projectId] : []),
+  ];
+  if (projectIdIn.length > 0) where.projectId = { in: projectIdIn };
+  const yearsIn = [
+    ...(filters.budgetYears ?? []),
+    ...(filters.budgetYear !== undefined ? [filters.budgetYear] : []),
+  ];
+  if (yearsIn.length > 0) where.budgetYear = { in: yearsIn };
   if (subjectLeafIds) where.subjectId = { in: [...subjectLeafIds] };
-  if (filters.status) where.status = filters.status;
-  if (filters.handler) where.handler = { contains: filters.handler, mode: 'insensitive' };
+  const statusesIn = [...(filters.statuses ?? []), ...(filters.status ? [filters.status] : [])];
+  if (statusesIn.length > 0) where.status = { in: statusesIn };
+  if (filters.handlers?.length) {
+    where.handler = { in: filters.handlers };
+  } else if (filters.handler) {
+    where.handler = { contains: filters.handler, mode: 'insensitive' };
+  }
+  if (filters.subjectNames?.length) {
+    // subjectNames 精确 in 与科目模糊检索叠加(and)。
+    where.AND = [{ subject: { name: { in: filters.subjectNames } } }];
+  }
+  if (filters.creatorNames?.length) {
+    where.createdBy = { name: { in: filters.creatorNames } };
+  }
+  if (filters.remark) where.remark = { contains: filters.remark, mode: 'insensitive' };
+  if (filters.summary) where.summary = { contains: filters.summary, mode: 'insensitive' };
+  if (filters.docNo) where.docNo = { contains: filters.docNo };
   if (!filters.includeVoid) where.isVoid = false;
   if (filters.businessDateFrom || filters.businessDateTo) {
     where.businessDate = {};
@@ -144,10 +234,69 @@ export async function customStatistics(
       where.businessDate.lte = parseDate(filters.businessDateTo, 'businessDateTo');
     }
   }
+  if (filters.completedDateEmpty) {
+    where.completedDate = {
+      ...(where.completedDate as object),
+      equals: null,
+    } as Prisma.DateTimeNullableFilter;
+  }
+  if (filters.completedDateFrom || filters.completedDateTo) {
+    where.completedDate = {
+      ...(where.completedDate as object),
+      gte: filters.completedDateFrom
+        ? parseDate(filters.completedDateFrom, 'completedDateFrom')
+        : undefined,
+      lte: filters.completedDateTo
+        ? parseDate(filters.completedDateTo, 'completedDateTo')
+        : undefined,
+    } as Prisma.DateTimeNullableFilter;
+  }
+  if (filters.amountFrom || filters.amountTo) {
+    for (const v of [filters.amountFrom, filters.amountTo]) {
+      if (v !== undefined && !Number.isFinite(Number(v))) {
+        throw new HTTPError(400, `金额筛选无效:${v}`);
+      }
+    }
+    where.amount = {
+      gte: filters.amountFrom,
+      lte: filters.amountTo,
+    };
+  }
+
+  // 排序(白名单;稳定尾排序 createdAt)。
+  const sort = filters.sort;
+  let orderBy: Prisma.BusinessRecordOrderByWithRelationInput[];
+  if (sort && sort.field in CUSTOM_SORT_FIELDS) {
+    const base =
+      sort.field === 'subject'
+        ? { subject: { name: sort.dir } }
+        : sort.field === 'creatorName'
+          ? { createdBy: { name: sort.dir } }
+          : { [sort.field]: sort.dir };
+    orderBy = [
+      ...(sort.field === 'remark'
+        ? [
+            {
+              remark: { sort: sort.dir, nulls: 'last' },
+            } as Prisma.BusinessRecordOrderByWithRelationInput,
+          ]
+        : [base as Prisma.BusinessRecordOrderByWithRelationInput]),
+      { createdAt: 'desc' },
+    ];
+  } else {
+    orderBy = [{ businessDate: 'desc' }, { createdAt: 'desc' }];
+  }
+
+  // 分页(缺省全量,保持既有调用兼容)。
+  const paginate: { skip?: number; take?: number } =
+    filters.page !== undefined && filters.pageSize !== undefined && filters.pageSize > 0
+      ? { skip: (Math.max(1, filters.page) - 1) * filters.pageSize, take: filters.pageSize }
+      : {};
 
   const rows = await prisma.businessRecord.findMany({
     where,
-    orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }],
+    orderBy,
+    ...paginate,
     include: {
       subject: { select: { id: true, code: true, name: true } },
       createdBy: { select: { name: true } },
@@ -158,10 +307,36 @@ export async function customStatistics(
     creatorName: createdBy?.name ?? null,
   }));
 
-  // 4) 占用(computeOccupancy 对所查记录全集,内部已自检 isVoid)。
-  const occ = computeOccupancy({
-    records: records.map((r) => ({ amount: r.amount, status: r.status, isVoid: r.isVoid })),
+  // 4) 合计与占用:SQL 聚合下推(筛选全集,不再全量取回内存计算)。
+  const occRows = await prisma.businessRecord.groupBy({
+    by: ['status'],
+    where: { ...where, isVoid: false },
+    _sum: { amount: true },
   });
+  const paidD = fromStored(
+    occRows.find((r) => r.status === 'PAID')?._sum.amount?.toFixed(2) ?? '0',
+  );
+  const payableD = fromStored(
+    occRows
+      .filter((r) => r.status !== 'PAID')
+      .reduce((acc, r) => acc.plus(fromStored(r._sum.amount?.toFixed(2) ?? '0')), ZERO)
+      .toFixed(2),
+  );
+  const occ = { paid: paidD, payable: payableD, totalOccupied: paidD.plus(payableD) };
+
+  const [totalCount, validAgg] = await Promise.all([
+    prisma.businessRecord.count({ where }),
+    prisma.businessRecord.aggregate({
+      where: { ...where, isVoid: false },
+      _count: { id: true },
+      _sum: { amount: true },
+    }),
+  ]);
+  const stats: CustomStatisticsStats = {
+    totalCount,
+    validCount: validAgg._count.id,
+    amountSum: fromStored(validAgg._sum.amount?.toFixed(2) ?? '0').toFixed(2),
+  };
 
   // 5) 预算:筛选项目/年度对应的 subject_budgets.currentAmount 之和。
   //    跨项目(无 projectId)且未指定年度时,预算口径无意义,置 0。
@@ -184,6 +359,8 @@ export async function customStatistics(
       executionRate: executionRate(occ.totalOccupied, currentBudget),
     },
     records,
+    total: totalCount,
+    stats,
   };
 }
 
@@ -219,28 +396,32 @@ export async function monthlyHistory(
 ): Promise<MonthlyHistoryResult> {
   await requirePermission(user, 'project:view', projectId);
 
-  const records = await prisma.businessRecord.findMany({
-    where: { projectId, budgetYear: year, isVoid: false },
-  });
-
-  // 按月份分桶(1-12)。businessDate 在 §8 存为 UTC 0 点 Date,用 UTC 月份避免时区漂移。
-  const buckets: Record<number, typeof records> = {};
-  for (let m = 1; m <= 12; m++) buckets[m] = [];
-  for (const r of records) {
-    const m = r.businessDate.getUTCMonth() + 1;
-    buckets[m].push(r);
-  }
+  // 单条 SQL 按月×状态聚合(business_date 存 UTC 0 点,EXTRACT(MONTH) 即业务月份)。
+  const rows = await prisma.$queryRaw<
+    Array<{ month: number; status: string; total: Prisma.Decimal }>
+  >`
+    SELECT EXTRACT(MONTH FROM business_date)::int AS month,
+           status::text AS status,
+           SUM(amount) AS total
+    FROM business_records
+    WHERE project_id = ${projectId}::uuid AND budget_year = ${year} AND is_void = false
+    GROUP BY 1, 2
+  `;
 
   const months: MonthlyHistoryBucket[] = [];
   for (let m = 1; m <= 12; m++) {
-    const occ = computeOccupancy({
-      records: buckets[m].map((r) => ({ amount: r.amount, status: r.status, isVoid: r.isVoid })),
-    });
+    const bucket = rows.filter((r) => r.month === m);
+    const paid = bucket
+      .filter((r) => r.status === 'PAID')
+      .reduce((a, r) => a.plus(fromStored(r.total.toFixed(2))), ZERO);
+    const payable = bucket
+      .filter((r) => r.status !== 'PAID')
+      .reduce((a, r) => a.plus(fromStored(r.total.toFixed(2))), ZERO);
     months.push({
       month: m,
-      paid: occ.paid.toFixed(2),
-      payable: occ.payable.toFixed(2),
-      totalOccupied: occ.totalOccupied.toFixed(2),
+      paid: paid.toFixed(2),
+      payable: payable.toFixed(2),
+      totalOccupied: paid.plus(payable).toFixed(2),
     });
   }
 
@@ -522,13 +703,30 @@ export async function balanceStatistics(
     where: { projectId: { in: projectIds } },
   });
 
-  // 2) 预算 + 记录一次性取齐(全量非作废,跨年度),按 项目×科目 分组。
+  // 2) 预算 + 占用聚合一次取齐:记录按 项目×科目×状态 groupBy(SQL 下推),
+  //    不再把全库记录拉进内存(跨项目余额视图的量级悬崖在此)。
   //    科目预算取全年度:§包干制的科目总口径 = Σ 各年度 SubjectBudget(回退),年份筛选在内存做。
-  const [totalBudgets, records, subjectBudgets] = await Promise.all([
+  const [totalBudgets, occGrouped, yearOccGrouped, subjectBudgets] = await Promise.all([
     prisma.subjectTotalBudget.findMany({ where: { projectId: { in: projectIds } } }),
-    prisma.businessRecord.findMany({
+    prisma.businessRecord.groupBy({
+      by: ['projectId', 'subjectId', 'status'],
       where: { projectId: { in: projectIds }, isVoid: false },
+      _sum: { amount: true },
     }),
+    filters.year === undefined
+      ? Promise.resolve(
+          [] as Array<{
+            projectId: string;
+            subjectId: string;
+            status: string;
+            _sum: { amount: Prisma.Decimal | null };
+          }>,
+        )
+      : prisma.businessRecord.groupBy({
+          by: ['projectId', 'subjectId', 'status'],
+          where: { projectId: { in: projectIds }, budgetYear: filters.year, isVoid: false },
+          _sum: { amount: true },
+        }),
     prisma.subjectBudget.findMany({ where: { projectId: { in: projectIds } } }),
   ]);
 
@@ -569,18 +767,47 @@ export async function balanceStatistics(
   }
   const occByProjectSubject = new Map<string, OccAgg>();
   const zeroAgg = (): OccAgg => ({ paid: ZERO, payable: ZERO, yearPaid: ZERO, yearPayable: ZERO });
-  for (const r of records) {
-    const key = `${r.projectId}|${r.subjectId}`;
-    const agg = occByProjectSubject.get(key) ?? zeroAgg();
-    const amount = fromStored(r.amount);
-    if (r.status === 'PAID') agg.paid = agg.paid.plus(amount);
-    else agg.payable = agg.payable.plus(amount);
-    if (filters.year !== undefined && r.budgetYear === filters.year) {
-      if (r.status === 'PAID') agg.yearPaid = agg.yearPaid.plus(amount);
-      else agg.yearPayable = agg.yearPayable.plus(amount);
+  const addTo = (
+    rows: Array<{
+      projectId: string;
+      subjectId: string;
+      status: string;
+      _sum: { amount: Prisma.Decimal | null };
+    }>,
+    pick: 'full' | 'year',
+  ) => {
+    for (const r of rows) {
+      const key = `${r.projectId}|${r.subjectId}`;
+      const agg = occByProjectSubject.get(key) ?? zeroAgg();
+      const amount = fromStored(r._sum.amount?.toFixed(2) ?? '0');
+      if (pick === 'full') {
+        if (r.status === 'PAID') agg.paid = agg.paid.plus(amount);
+        else agg.payable = agg.payable.plus(amount);
+      } else {
+        if (r.status === 'PAID') agg.yearPaid = agg.yearPaid.plus(amount);
+        else agg.yearPayable = agg.yearPayable.plus(amount);
+      }
+      occByProjectSubject.set(key, agg);
     }
-    occByProjectSubject.set(key, agg);
-  }
+  };
+  addTo(
+    occGrouped as Array<{
+      projectId: string;
+      subjectId: string;
+      status: string;
+      _sum: { amount: Prisma.Decimal | null };
+    }>,
+    'full',
+  );
+  addTo(
+    yearOccGrouped as Array<{
+      projectId: string;
+      subjectId: string;
+      status: string;
+      _sum: { amount: Prisma.Decimal | null };
+    }>,
+    'year',
+  );
 
   // 3) 逐项目匹配科目 → 行;同时累计去重叶集合(合计用)。
   const byProject = new Map<string, typeof allSubjects>();
@@ -790,4 +1017,62 @@ export async function riskSummary(
     };
   });
   return { rows };
+}
+
+// ---------------- 全局录入页筛选候选(§11.3 配套) ----------------
+
+/** 筛选候选清单(值列漏斗的稳定选项,不随分页页内数据漂移)。 */
+export interface CustomStatisticsFacets {
+  years: number[];
+  handlerNames: string[];
+  creatorNames: string[];
+  subjectNames: string[];
+}
+
+/**
+ * 筛选候选:年度/经办人/录入人/科目名(仅叶科目,项目范围内)。
+ * 全局只读;selected-scope 凭证拒绝(跨项目接口)。projectIds 为空 = 全部项目。
+ */
+export async function customStatisticsFacets(
+  projectIds: string[] | null,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<CustomStatisticsFacets> {
+  await denyApiKeyCrossProject(user, 'project:view');
+  const scopeWhere = projectIds?.length ? { projectId: { in: projectIds } } : {};
+
+  const [yearRows, handlerRows, creatorRows, subjects] = await Promise.all([
+    prisma.businessRecord.groupBy({ by: ['budgetYear'], where: scopeWhere }),
+    prisma.businessRecord.findMany({
+      where: scopeWhere,
+      select: { handler: true },
+      distinct: ['handler'],
+    }),
+    prisma.businessRecord.groupBy({ by: ['createdById'], where: scopeWhere }),
+    prisma.budgetSubject.findMany({
+      where: { ...scopeWhere, isLeaf: true },
+      select: { name: true },
+      orderBy: { name: 'asc' },
+    }),
+  ]);
+
+  const creatorUserIds = creatorRows.map((r) => r.createdById);
+  const creators = creatorUserIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: creatorUserIds } },
+        select: { name: true },
+      })
+    : [];
+
+  return {
+    years: yearRows.map((r) => r.budgetYear).sort((a, b) => b - a),
+    handlerNames: handlerRows
+      .map((r) => r.handler)
+      .filter((h): h is string => !!h)
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
+    creatorNames: creators
+      .map((c) => c.name)
+      .filter((n): n is string => !!n)
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
+    subjectNames: subjects.map((s) => s.name),
+  };
 }

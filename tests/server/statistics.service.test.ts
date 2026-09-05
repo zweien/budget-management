@@ -15,6 +15,7 @@ import {
   balanceStatistics,
   crossProjectStatistics,
   customStatistics,
+  customStatisticsFacets,
   monthlyHistory,
   riskSummary,
 } from '@/server/services/statistics.service';
@@ -671,5 +672,169 @@ describe('statistics.service (integration, real PG)', () => {
     expect(row!.budget).toBe('0.00');
     expect(row!.balance).toBe('-120.00');
     expect(row!.executionRate).toBeNull();
+  });
+
+  // ---------------- customStatistics v0.15 扩展:服务端筛选/排序/分页 ----------------
+
+  it('customStatistics: 服务端筛选/排序/分页 + stats(全局录入页驱动)', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('CSP');
+    const mk = (o: Record<string, unknown>) =>
+      createRecord(
+        project.id,
+        {
+          budgetYear: 2026,
+          subjectId: leafA.id,
+          amount: '100.00',
+          businessDate: '2026-05-01',
+          handler: '甲',
+          summary: 'csp-a',
+          remark: 'csp-note-a',
+          status: BusinessStatus.PAID,
+          ...o,
+        } as never,
+        adminUser(),
+      );
+    await mk({});
+    await mk({
+      subjectId: leafB.id,
+      amount: '200.00',
+      businessDate: '2026-05-02',
+      handler: '乙',
+      summary: 'csp-b',
+      remark: 'csp-note-b',
+      status: BusinessStatus.CONTRACT,
+    });
+    const r3 = await mk({
+      budgetYear: 2027,
+      amount: '300.00',
+      businessDate: '2027-05-01',
+      summary: 'csp-c',
+      remark: 'csp-note-c',
+    });
+
+    // remark contains(唯一前缀,免共享库串扰)。
+    const byRemark = await customStatistics({ remark: 'csp-note-b' }, adminUser());
+    expect(byRemark.total).toBe(1);
+    expect(byRemark.records[0]?.summary).toBe('csp-b');
+
+    // 年度 + 状态集合组合。
+    const f2 = await customStatistics(
+      { projectId: project.id, budgetYear: 2026, statuses: [BusinessStatus.CONTRACT] },
+      adminUser(),
+    );
+    expect(f2.records).toHaveLength(1);
+    expect(f2.records[0]?.summary).toBe('csp-b');
+
+    // 分页 + 排序(businessDate asc)。
+    const pg = await customStatistics(
+      {
+        projectId: project.id,
+        sort: { field: 'businessDate', dir: 'asc' },
+        page: 1,
+        pageSize: 2,
+      },
+      adminUser(),
+    );
+    expect(pg.records).toHaveLength(2);
+    expect(pg.total).toBe(3);
+    expect(pg.records[0]?.summary).toBe('csp-a');
+    expect(pg.stats.totalCount).toBe(3);
+    expect(pg.stats.validCount).toBe(3);
+    expect(pg.stats.amountSum).toBe('600.00');
+    const pg2 = await customStatistics(
+      {
+        projectId: project.id,
+        sort: { field: 'businessDate', dir: 'asc' },
+        page: 2,
+        pageSize: 2,
+      },
+      adminUser(),
+    );
+    expect(pg2.records).toHaveLength(1);
+    expect(pg2.records[0]?.summary).toBe('csp-c');
+
+    // 作废:不计入 stats 金额/有效数,但计入总数。
+    await voidRecord(r3.record.id, '作废', adminUser());
+    const after = await customStatistics(
+      { projectId: project.id, includeVoid: true, page: 1, pageSize: 2 },
+      adminUser(),
+    );
+    expect(after.stats.totalCount).toBe(3);
+    expect(after.stats.validCount).toBe(2);
+    expect(after.stats.amountSum).toBe('300.00');
+
+    // 录入人集合筛选(默认排除作废 → 仅剩两条有效)。
+    const byCreator = await customStatistics(
+      { projectId: project.id, creatorNames: ['admin-stat'] },
+      adminUser(),
+    );
+    expect(byCreator.total).toBe(2);
+  });
+
+  it('customStatistics: 无完成日期 / 金额区间筛选', async () => {
+    const { project, leafA } = await seedApprovedProject('CSF2');
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '150.00',
+        businessDate: '2026-06-01',
+        handler: '丙',
+        summary: 'csf2-a',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '450.00',
+        businessDate: '2026-06-02',
+        handler: '丙',
+        summary: 'csf2-b',
+        status: BusinessStatus.PAID,
+        completedDate: '2026-07-01',
+      } as never,
+      adminUser(),
+    );
+
+    const empty = await customStatistics(
+      { projectId: project.id, completedDateEmpty: true },
+      adminUser(),
+    );
+    expect(empty.total).toBe(1);
+    expect(empty.records[0]?.summary).toBe('csf2-a');
+
+    const ranged = await customStatistics(
+      { projectId: project.id, amountFrom: '400' },
+      adminUser(),
+    );
+    expect(ranged.total).toBe(1);
+    expect(ranged.records[0]?.summary).toBe('csf2-b');
+  });
+
+  it('customStatisticsFacets: 候选清单(年度/经办人/录入人/叶科目名)', async () => {
+    const { project: p2, leafA } = await seedApprovedProject('CSF3B');
+    await createRecord(
+      p2.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '10.00',
+        businessDate: '2026-08-01',
+        handler: 'facet-甲',
+        summary: 'facet',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    const facets = await customStatisticsFacets([p2.id], adminUser());
+    expect(facets.years).toContain(2026);
+    expect(facets.handlerNames).toContain('facet-甲');
+    expect(facets.creatorNames).toContain('admin-stat');
+    expect(facets.subjectNames).toEqual(expect.arrayContaining(['叶A', '叶B']));
   });
 });
