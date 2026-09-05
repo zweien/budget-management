@@ -769,6 +769,21 @@ describe('statistics.service (integration, real PG)', () => {
       adminUser(),
     );
     expect(byCreator.total).toBe(2);
+
+    // 状态 + 作废可见:status IN … OR isVoid(作废不改 status,须用 OR 语义)。
+    const withVoid = await customStatistics(
+      { projectId: project.id, statuses: [BusinessStatus.PAID], includeVoid: true },
+      adminUser(),
+    );
+    expect(withVoid.total).toBe(2); // PAID 两条(r1 + 作废的 r3)+ 非 PAID 的 r2 排除
+
+    // 仅看作废。
+    const voidOnlyRows = await customStatistics(
+      { projectId: project.id, voidOnly: true },
+      adminUser(),
+    );
+    expect(voidOnlyRows.total).toBe(1);
+    expect(voidOnlyRows.records[0]?.summary).toBe('csp-c');
   });
 
   it('customStatistics: 无完成日期 / 金额区间筛选', async () => {

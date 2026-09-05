@@ -263,7 +263,6 @@ function UnifiedRecordsPageInner() {
   const buildParams = useCallback(
     (targetPage: number, targetPageSize: number) => {
       const sp = new URLSearchParams();
-      sp.set('includeVoid', '1');
       const projectIds: string[] = [];
       for (const f of columnFilters) {
         const v = f.value as unknown;
@@ -282,13 +281,14 @@ function UnifiedRecordsPageInner() {
             for (const n of v as string[]) sp.append('subjectNames', n);
             break;
           case 'status': {
+            // 勾选 __void__ = 作废可见:statuses + includeVoid(OR isVoid);
+            // 仅勾 __void__ = voidOnly。不勾任何 = 默认排除作废(服务端 isVoid=false)。
             const arr = v as string[];
-            for (const st of arr) {
-              if (st !== '__void__') sp.append('statuses', st);
-            }
-            if (arr.length !== arr.filter((st) => st !== '__void__').length) {
-              sp.set('includeVoid', '1');
-            }
+            const statuses = arr.filter((st) => st !== '__void__');
+            const hasVoid = arr.length !== statuses.length;
+            for (const st of statuses) sp.append('statuses', st);
+            if (hasVoid) sp.set('includeVoid', '1');
+            if (statuses.length === 0 && hasVoid) sp.set('voidOnly', '1');
             break;
           }
           case 'handler':
@@ -324,11 +324,14 @@ function UnifiedRecordsPageInner() {
             break;
         }
       }
-      // 权限范围(writable)转服务端项目过滤;显式项目筛选取交集语义(叠加 projectIds)。
-      if (projectIds.length > 0) {
+      // 权限范围(writable)转服务端项目过滤;显式项目筛选与可写集取交集(范围语义不放大)。
+      if (scope === 'writable') {
+        const allowed = projectIds.length
+          ? projectIds.filter((id) => writableIds.has(id))
+          : Array.from(writableIds);
+        for (const id of allowed) sp.append('projectIds', id);
+      } else {
         for (const id of projectIds) sp.append('projectIds', id);
-      } else if (scope === 'writable') {
-        for (const id of writableIds) sp.append('projectIds', id);
       }
       const firstSort = sorting[0];
       if (firstSort) {
@@ -396,8 +399,15 @@ function UnifiedRecordsPageInner() {
     };
   }, [projectName, scope, writableIds]);
 
-  /** 项目列的稳定候选(不受本列筛选影响)。 */
-  const projectOptions = useMemo(() => Array.from(projectName.values()), [projectName]);
+  /** 项目列的稳定候选(不受本列筛选影响;writable 范围只列可写项目)。 */
+  const projectOptions = useMemo(() => {
+    const all = Array.from(projectName.values());
+    if (scope !== 'writable') return all;
+    return all.filter((label) => {
+      const id = idByLabel.get(label);
+      return id !== undefined && writableIds.has(id);
+    });
+  }, [projectName, scope, idByLabel, writableIds]);
   const creatorOptions = useMemo(() => facets?.creatorNames ?? [], [facets]);
 
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
@@ -477,6 +487,7 @@ function UnifiedRecordsPageInner() {
             column={column}
             title="状态"
             type="values"
+            options={[...BUSINESS_STATUSES, '__void__']}
             valueLabels={STATUS_FILTER_LABELS}
             sortable
           />
@@ -1041,8 +1052,14 @@ function UnifiedRecordsPageInner() {
             creatorName: '录入人',
           }}
           describe={describeFilterValue}
-          onRemove={(id) => setColumnFilters((prev) => prev.filter((c) => c.id !== id))}
-          onClearAll={() => setColumnFilters([])}
+          onRemove={(id) => {
+            setColumnFilters((prev) => prev.filter((c) => c.id !== id));
+            setPage(1);
+          }}
+          onClearAll={() => {
+            setColumnFilters([]);
+            setPage(1);
+          }}
         />
 
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">

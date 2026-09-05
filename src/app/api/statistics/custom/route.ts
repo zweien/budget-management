@@ -72,6 +72,7 @@ export const GET = withRoute(async (req: NextRequest) => {
   if (budgetYears.length > 0) filters.budgetYears = budgetYears;
   const statuses = sp.getAll('statuses').filter((v) => STATUS_SET.has(v));
   if (statuses.length > 0) filters.statuses = statuses as BusinessStatus[];
+  if (sp.get('voidOnly') === '1') filters.voidOnly = true;
 
   const remark = sp.get('remark');
   if (remark) filters.remark = remark;
@@ -94,7 +95,7 @@ export const GET = withRoute(async (req: NextRequest) => {
   const sortField = sp.get('sortField');
   const sortDir = sp.get('sortDir');
   if (sortField && (sortDir === 'asc' || sortDir === 'desc')) {
-    if (sortField in CUSTOM_SORT_FIELDS) {
+    if (Object.hasOwn(CUSTOM_SORT_FIELDS, sortField)) {
       filters.sort = { field: sortField as CustomSortField, dir: sortDir };
     } else {
       return NextResponse.json({ error: `排序字段无效:${sortField}` }, { status: 400 });

@@ -51,6 +51,8 @@ export interface CustomStatisticsFilters {
   budgetYears?: number[];
   /** 状态集合(in;与 status 叠加)。 */
   statuses?: BusinessStatus[];
+  /** 仅看作废(isVoid=true)。 */
+  voidOnly?: boolean;
   /** 经办人集合(in;与 handler 模糊叠加)。 */
   handlers?: string[];
   /** 科目名集合(in,精确)。 */
@@ -207,8 +209,20 @@ export async function customStatistics(
   ];
   if (yearsIn.length > 0) where.budgetYear = { in: yearsIn };
   if (subjectLeafIds) where.subjectId = { in: [...subjectLeafIds] };
+  // voidOnly:仅看作废;statuses 与 includeVoid 并存 = status IN … OR isVoid(作废不改 status)。
   const statusesIn = [...(filters.statuses ?? []), ...(filters.status ? [filters.status] : [])];
-  if (statusesIn.length > 0) where.status = { in: statusesIn };
+  if (filters.voidOnly) {
+    where.isVoid = true;
+  } else if (!filters.includeVoid) {
+    where.isVoid = false;
+  }
+  if (statusesIn.length > 0) {
+    if (filters.includeVoid) {
+      where.OR = [{ isVoid: true }, { status: { in: statusesIn } }];
+    } else {
+      where.status = { in: statusesIn };
+    }
+  }
   if (filters.handlers?.length) {
     where.handler = { in: filters.handlers };
   } else if (filters.handler) {
@@ -224,7 +238,6 @@ export async function customStatistics(
   if (filters.remark) where.remark = { contains: filters.remark, mode: 'insensitive' };
   if (filters.summary) where.summary = { contains: filters.summary, mode: 'insensitive' };
   if (filters.docNo) where.docNo = { contains: filters.docNo };
-  if (!filters.includeVoid) where.isVoid = false;
   if (filters.businessDateFrom || filters.businessDateTo) {
     where.businessDate = {};
     if (filters.businessDateFrom) {
@@ -266,7 +279,7 @@ export async function customStatistics(
   // 排序(白名单;稳定尾排序 createdAt)。
   const sort = filters.sort;
   let orderBy: Prisma.BusinessRecordOrderByWithRelationInput[];
-  if (sort && sort.field in CUSTOM_SORT_FIELDS) {
+  if (sort && Object.hasOwn(CUSTOM_SORT_FIELDS, sort.field)) {
     const base =
       sort.field === 'subject'
         ? { subject: { name: sort.dir } }
