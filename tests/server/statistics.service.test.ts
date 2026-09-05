@@ -588,16 +588,16 @@ describe('statistics.service (integration, real PG)', () => {
       adminUser(),
     );
     await voidRecord(voided.record.id, '作废', adminUser());
-    // p1/leafB(预算 400):记录 100 → 不超支。
+    // p1/leafB(预算 400):记录 800 → 负结余 -400(比 leafA 更负,排序应在前)。
     await createRecord(
       project.id,
       {
         budgetYear: 2026,
         subjectId: leafB.id,
-        amount: '100.00',
+        amount: '800.00',
         businessDate: '2026-03-03',
         handler: '经办',
-        summary: 'ok',
+        summary: 'worse',
         status: BusinessStatus.PAID,
       },
       adminUser(),
@@ -620,16 +620,30 @@ describe('statistics.service (integration, real PG)', () => {
     const { rows } = await riskSummary({ year: 2026 }, adminUser());
     // 断言收敛到本项目(共享库中其他用例可能产生各自的风险行)。
     const own = rows.filter((r) => r.projectId === project.id);
-    expect(own).toHaveLength(1);
-    expect(own[0].subjectCode).toBe('A');
-    expect(own[0].budget).toBe('600.00');
-    expect(own[0].occupied).toBe('700.00');
-    expect(own[0].balance).toBe('-100.00');
-    expect(own[0].executionRate).toBeCloseTo(700 / 600, 5);
+    expect(own).toHaveLength(2);
+    // 排序:结余升序(最负在前)——leafB(-400)在 leafA(-100)之前。
+    expect(own[0].subjectCode).toBe('B');
+    expect(own[0].budget).toBe('400.00');
+    expect(own[0].occupied).toBe('800.00');
+    expect(own[0].balance).toBe('-400.00');
+    expect(own[1].subjectCode).toBe('A');
+    expect(own[1].balance).toBe('-100.00');
 
     // 其他年度本项目无风险行。
     const otherYear = await riskSummary({ year: 2027 }, adminUser());
     expect(otherYear.rows.some((r) => r.projectId === project.id)).toBe(false);
+
+    // 已归档项目排除(旧口径经 /api/projects 默认不含归档,保持一致)。
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { archivedAt: new Date() },
+    });
+    const afterArchive = await riskSummary({ year: 2026 }, adminUser());
+    expect(afterArchive.rows.some((r) => r.projectId === project.id)).toBe(false);
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { archivedAt: null },
+    });
   });
 
   it('riskSummary: 未编制年度预算但发生占用的科目按 0 预算判定超支', async () => {

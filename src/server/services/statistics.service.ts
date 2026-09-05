@@ -736,8 +736,8 @@ export interface RiskSummaryRow {
  * 跨项目风险摘要:一条 SQL 聚合全部项目的负结余科目,供首页「风险预警」一次取回,
  * 替代按项目逐个拉执行台账的 N×5 查询扇出。
  * 口径:指定年度、科目年度预算(SubjectBudget.currentAmount)vs 年度占用(有效记录),
- * 只报 balance < 0 的科目(父节点汇总负值由叶节点推导,不重复列出),按超支幅度升序
- * (最负在前)。全局只读;selected-scope 凭证拒绝(跨项目接口)。
+ * 只报 balance < 0 的科目(父节点汇总负值由叶节点推导,不重复列出;已归档项目排除),
+ * 按结余升序(最负/最严重在前)。全局只读;selected-scope 凭证拒绝(跨项目接口)。
  */
 export async function riskSummary(
   filters: { year: number },
@@ -767,10 +767,10 @@ export async function riskSummary(
     JOIN budget_subjects bs ON bs.id = b.subject_id
     LEFT JOIN subject_budgets sb
       ON sb.project_id = b.project_id AND sb.year = b.budget_year AND sb.subject_id = b.subject_id
-    WHERE b.is_void = false AND b.budget_year = ${filters.year}
+    WHERE b.is_void = false AND b.budget_year = ${filters.year} AND p.archived_at IS NULL
     GROUP BY b.project_id, p.name, b.subject_id, bs.code, bs.name, sb.current_amount
     HAVING SUM(b.amount) > COALESCE(sb.current_amount, 0)
-    ORDER BY SUM(b.amount) - COALESCE(sb.current_amount, 0) ASC
+    ORDER BY COALESCE(sb.current_amount, 0) - SUM(b.amount) ASC
   `;
   const rows = raw.map((r) => {
     const budget = r.budget.toFixed(2);
