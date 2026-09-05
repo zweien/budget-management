@@ -26,6 +26,14 @@ const envSchema = z
       .int()
       .positive()
       .default(50 * 1024 * 1024),
+    /** 导入文件大小上限(字节,默认 10MB;xlsx 即 zip,须防解压爆炸与 OOM)。 */
+    MAX_IMPORT_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(10 * 1024 * 1024),
+    /** 导入数据行数上限(默认 2000;确认事务的最坏耗时随行数线性可控)。 */
+    MAX_IMPORT_ROWS: z.coerce.number().int().positive().default(2000),
   })
   .superRefine((data, ctx) => {
     if (data.MOCK_AUTH) return;

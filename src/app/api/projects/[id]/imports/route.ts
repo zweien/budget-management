@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { withRoute } from '@/lib/api/withRoute';
-import { requireUser } from '@/lib/auth/session';
+import { env } from '@/lib/env';
+import { HTTPError, requireUser } from '@/lib/auth/session';
 import { parseAndValidate } from '@/server/services/excelImport.service';
 import {
   listImportBatches,
@@ -31,6 +32,13 @@ export const POST = withRoute(
     const name = file.name || 'upload.xlsx';
     if (!/\.xlsx$/i.test(name)) {
       return NextResponse.json({ error: '仅支持 .xlsx 文件' }, { status: 400 });
+    }
+    // 容量边界:文件大小上限(xlsx 全量进内存解析,须防 OOM/事件循环阻塞)。
+    if (file.size > env.MAX_IMPORT_BYTES) {
+      throw new HTTPError(
+        413,
+        `文件 ${name} 超过大小上限 ${Math.round(env.MAX_IMPORT_BYTES / 1024 / 1024)}MB,请拆分后上传`,
+      );
     }
 
     const arrayBuffer = await file.arrayBuffer();

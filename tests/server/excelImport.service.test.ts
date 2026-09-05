@@ -528,4 +528,21 @@ describe('excelImport.service (integration, real PG)', () => {
     });
     expect(created).not.toBeNull();
   });
+
+  it('parseAndValidate:行数超过 MAX_IMPORT_ROWS → 422(容量边界,不落任何行)', async () => {
+    const { project } = await seedProject('CAP');
+    // 上限默认 2000:构造 表头 + 2002 数据行,预闸直接拒绝。
+    const rows = Array.from({ length: 2002 }, (_, i) => ({
+      summary: `cap-${i}`,
+      amount: 1,
+      businessDate: '2026-01-01',
+    }));
+    const buf = await buildXlsx(rows);
+    await expect(parseAndValidate(buf, project.id, adminUser(), 'cap.xlsx')).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('超过上限'),
+    });
+    // 未产生任何批次/行。
+    expect(await prisma.importBatch.count({ where: { projectId: project.id } })).toBe(0);
+  });
 });

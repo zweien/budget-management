@@ -1147,4 +1147,25 @@ describe('settlementImport.service (integration, real PG)', () => {
     const listedAfter = await listImportBatches(projectId, adminUser());
     expect(listedAfter.map((x) => x.batchId)).not.toContain(batchB);
   });
+
+  it('parseSettlement:行数超过 MAX_IMPORT_ROWS → 422(容量边界,不落任何行)', async () => {
+    // 上限默认 2000:构造 2100 数据行(远超上限),预闸直接拒绝。
+    const rows = Array.from({ length: 2100 }, (_, i) => ({
+      docNo: `CAP-${i}`,
+      docStatus: '已支付',
+      fillDate: '2026-01-02',
+      amount: 1,
+      handler: '经办',
+    }));
+    const stl = await buildSettlementXlsx(rows);
+    const wb = await loadSettlementWorkbookIfMatch(stl);
+    expect(wb).not.toBeNull();
+    const batchesBefore = await prisma.importBatch.count({ where: { projectId } });
+    await expect(parseSettlement(wb!, projectId, adminUser())).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('超过上限'),
+    });
+    // 不落任何批次/行(与测试前计数持平——本项目已有其他测试的批次)。
+    expect(await prisma.importBatch.count({ where: { projectId } })).toBe(batchesBefore);
+  });
 });

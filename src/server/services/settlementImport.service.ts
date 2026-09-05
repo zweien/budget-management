@@ -1,8 +1,9 @@
 import ExcelJS from 'exceljs';
 import { BusinessStatus, Prisma, User } from '@prisma/client';
 
-import { prisma } from '@/lib/prisma';
+import { BULK_TX_OPTIONS, prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
+import { env } from '@/lib/env';
 import { requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { toStored, fromStored } from '@/lib/decimal';
@@ -254,6 +255,11 @@ export async function parseSettlement(
 
   // 表头所在工作表即数据区(而非固定取第一个 sheet)。
   const sheet = headerSheet;
+  // 容量边界(宽松早退):候选数据行粗计 rowCount-headerRowNo,只拦截约 2 倍明显超限
+  // 的文件,精确封顶交给行内闸;文件内存占用的第一道闸是路由的 MAX_IMPORT_BYTES。
+  if (sheet.rowCount - headerRowNo > env.MAX_IMPORT_ROWS * 2) {
+    throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
+  }
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber <= headerRowNo) return;
     const get = (key: string): string | null => cellToString(row.getCell(colIndex.get(key) ?? 1));
@@ -272,6 +278,10 @@ export async function parseSettlement(
 
     // 空行(关键列全空)跳过。
     if (!docNo && !statusLabel && !dateRaw && !summary && !amountRaw && !handler) return;
+    // 精确封顶:只计非空行(预闸的 rowCount 会含幽灵空行)。
+    if (parsedRows.length >= env.MAX_IMPORT_ROWS) {
+      throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
+    }
 
     // 业务退单:不导入,留痕跳过。
     if (statusLabel === SETTLEMENT_SKIPPED_STATUS) {
@@ -437,7 +447,7 @@ export async function parseSettlement(
         forcedImport: false,
       })),
     });
-  });
+  }, BULK_TX_OPTIONS);
 
   return batchId;
 }
@@ -636,7 +646,7 @@ export async function updateSettlementRows(
         },
       });
     }
-  });
+  }, BULK_TX_OPTIONS);
 }
 
 /**
@@ -922,7 +932,7 @@ export async function confirmSettlementImport(
           updatedCount: refreshRows.length,
         },
       });
-    })
+    }, BULK_TX_OPTIONS)
     .catch((e) => {
       // 并发窗口兜底(codex P2):同号行与他批并发确认 → 撞唯一索引 → 可读 422(硬重复无豁免)。
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
