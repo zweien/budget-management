@@ -62,8 +62,9 @@ export async function GET(req: NextRequest) {
       claims.sub;
     const user = await prisma.user.upsert({
       where: { authSubject: claims.sub },
-      // 名字跟随 IdP 更新。
-      update: { name: displayName },
+      // 显示名以本系统为准(管理员可在用户管理页改名,codex P2):
+      // 已建档用户登录不回写 IdP 名,避免覆盖管理员改名且绕过审计。
+      update: {},
       create: { id: uuidv7(), authSubject: claims.sub, name: displayName, role: 'USER' },
     });
     if (user.status !== 'active') {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { format } from 'date-fns';
 import { ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
@@ -257,6 +258,11 @@ export default function ApprovalsPage() {
       {t.kind === 'adjustment' && (
         <Button size="sm" variant="ghost" onClick={() => setDetailTarget(t.row)}>
           详情
+        </Button>
+      )}
+      {t.kind === 'initialBudget' && (
+        <Button size="sm" variant="ghost" asChild>
+          <Link href={`/projects/${t.row.projectId}/initial-budget`}>查看详情</Link>
         </Button>
       )}
       <Button size="sm" onClick={() => openAction(t, 'approve')}>

@@ -89,6 +89,8 @@ export async function listAdminUsers(
 export interface UpdateAccountInput {
   status?: 'active' | 'disabled';
   role?: 'ADMIN' | 'USER';
+  /** 显示名(trim 后非空,≤64 字);允许改自己。 */
+  name?: string;
 }
 
 export interface UpdateAccountResult {
@@ -109,14 +111,21 @@ export async function updateUserAccount(
 ): Promise<UpdateAccountResult> {
   assertAdminSession(operator);
   const { status, role } = input;
-  if (!status && !role) throw new HTTPError(422, '缺少要变更的字段(status / role)');
+  const name = input.name?.trim();
+  if (input.name !== undefined && (!name || name.length > 64)) {
+    throw new HTTPError(422, '显示名不能为空且不超过 64 字');
+  }
+  if (status === undefined && role === undefined && name === undefined) {
+    throw new HTTPError(422, '缺少要变更的字段(status / role / name)');
+  }
   if (status !== undefined && status !== 'active' && status !== 'disabled') {
     throw new HTTPError(422, `非法状态:${status}`);
   }
   if (role !== undefined && role !== 'ADMIN' && role !== 'USER') {
     throw new HTTPError(422, `非法角色:${role}`);
   }
-  if (targetUserId === operator.id) {
+  // 自伤护栏仅限角色/状态;改自己的显示名是正常操作。
+  if (targetUserId === operator.id && (status !== undefined || role !== undefined)) {
     throw new HTTPError(422, '不能变更自己的角色或状态');
   }
 
@@ -139,13 +148,15 @@ export async function updateUserAccount(
 
     const statusChanged = status !== undefined && status !== target.status;
     const roleChanged = role !== undefined && role !== target.role;
-    if (!statusChanged && !roleChanged) {
-      throw new HTTPError(422, '账号的角色与状态均未变化');
+    const nameChanged = name !== undefined && name !== target.name;
+    if (!statusChanged && !roleChanged && !nameChanged) {
+      throw new HTTPError(422, '账号的角色、状态与姓名均未变化');
     }
 
-    const data: { status?: string; role?: UserRole } = {};
+    const data: { status?: string; role?: UserRole; name?: string } = {};
     if (statusChanged) data.status = status;
     if (roleChanged) data.role = role as UserRole;
+    if (nameChanged) data.name = name;
 
     const row = await tx.user.update({ where: { id: targetUserId }, data });
     if (statusChanged) {
@@ -166,6 +177,16 @@ export async function updateUserAccount(
         operatorId: operator.id,
         before: { name: target.name, role: target.role },
         after: { name: row.name, role: row.role },
+      });
+    }
+    if (nameChanged) {
+      await recordAudit(tx, {
+        objectType: 'users',
+        objectId: row.id,
+        action: 'user.rename',
+        operatorId: operator.id,
+        before: { name: target.name },
+        after: { name: row.name },
       });
     }
     return { id: row.id, name: row.name, role: row.role, status: row.status };

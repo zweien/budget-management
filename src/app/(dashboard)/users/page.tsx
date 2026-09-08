@@ -88,6 +88,8 @@ export default function UsersPage() {
   // 添加项目权限表单。
   const [addProjectId, setAddProjectId] = useState('');
   const [addRole, setAddRole] = useState<'OWNER' | 'HANDLER'>('HANDLER');
+  // 改名草稿(随选中用户重置)。
+  const [nameDraft, setNameDraft] = useState('');
 
   const [busy, setBusy] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
@@ -233,6 +235,7 @@ export default function UsersPage() {
                   onClick={() => {
                     setSelectedId(u.id);
                     setAddProjectId(''); // codex P2:换人不沿用上一位的待选项目
+                    setNameDraft(u.name);
                   }}
                   className={`flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors ${
                     u.id === selectedId
@@ -309,6 +312,35 @@ export default function UsersPage() {
                         {selected.authBound ? '已绑定' : '未绑定(本系统外建档)'}
                       </span>
                     </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-muted-foreground">显示名:</span>
+                    <Input
+                      className="h-8 w-56"
+                      value={nameDraft}
+                      maxLength={64}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      aria-label="显示名"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy || !nameDraft.trim() || nameDraft.trim() === selected.name}
+                      onClick={() => {
+                        const name = nameDraft.trim();
+                        void run(
+                          () =>
+                            apiFetch(`/api/admin/users/${selected.id}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name }),
+                            }),
+                          '已更新显示名',
+                        );
+                      }}
+                    >
+                      保存
+                    </Button>
                   </div>
                   {isSelf ? (
                     <Alert>

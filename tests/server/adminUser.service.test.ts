@@ -181,6 +181,28 @@ describe('adminUser.service (integration, real PG)', () => {
     ).rejects.toMatchObject({ status: 404 });
   });
 
+  it('updateUserAccount:改名写 user.rename 审计;允许改自己;空名 422', async () => {
+    const renamed = await updateUserAccount(admin(), plainId, { name: 'usr-plain-2' });
+    expect(renamed.name).toBe('usr-plain-2');
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { objectType: 'users', objectId: plainId, action: 'user.rename' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect(audit.beforeData).toMatchObject({ name: 'usr-plain' });
+    expect(audit.afterData).toMatchObject({ name: 'usr-plain-2' });
+
+    // 改自己允许(自伤护栏仅限角色/状态)。
+    const self = await updateUserAccount(admin(), adminId, { name: 'usr-admin-2' });
+    expect(self.name).toBe('usr-admin-2');
+    await expect(updateUserAccount(admin(), adminId, { name: '   ' })).rejects.toMatchObject({
+      status: 422,
+    });
+
+    // 还原。
+    await updateUserAccount(admin(), plainId, { name: 'usr-plain' });
+    await updateUserAccount(admin(), adminId, { name: 'usr-admin' });
+  });
+
   it('updateUserAccount:非管理员操作者与 Bearer 凭证一律 403', async () => {
     await expect(
       updateUserAccount({ id: plainId, role: UserRole.USER }, serviceId, { status: 'disabled' }),

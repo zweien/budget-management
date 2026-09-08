@@ -16,6 +16,7 @@ export const PATCH = withRoute(
     const body = (await req.json().catch(() => null)) as {
       status?: string;
       role?: string;
+      name?: string;
     } | null;
     if (!body || typeof body !== 'object') {
       throw new HTTPError(400, '请求体不是有效 JSON');
@@ -23,6 +24,7 @@ export const PATCH = withRoute(
     const updated = await updateUserAccount(user, userId, {
       status: body.status as 'active' | 'disabled' | undefined,
       role: body.role as 'ADMIN' | 'USER' | undefined,
+      name: typeof body.name === 'string' ? body.name : undefined,
     });
     return NextResponse.json(updated);
   },
