@@ -27,7 +27,7 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 - **403 且消息含「凭证档位」「凭证未授权访问该项目」或「禁止…跨项目操作」**:key 的范围收窄(档位/项目范围),同样**不得**绕过;原样上报,或请用户换范围更大的 key。指定项目范围的 key:统计/审计等聚合接口必须携带已授权的 `projectId`,项目列表也只含授权项目。
 - **403 且消息含「仅项目负责人」或「成员」**:不是凭证范围问题,是服务账号本身没有该项目成员身份——编制/调整/科目维护等 OWNER 动作要求 ADMIN 或项目 OWNER 成员(HANDLER 不行);请管理员在项目「成员管理」把服务账号以 **OWNER** 加入,或换管理员凭证。
 - **422**:业务校验失败,按消息修正后可重试。
-- **排查 403 先查本凭证元数据**:Bearer 不能访问 `/api/api-keys*`(红线);但 `GET /audit-logs?limit=50` 里找 `action=apikey.issue` 且 `afterData.prefix` 匹配本 key 前缀的记录,可得档位(tier)/项目范围(projectScope)/无人值守(unattended)/有效期(expiresAt)——判断是档位不够还是项目范围不含。
+- **排查 403 先查本凭证元数据(仅适用全范围 key)**:Bearer 不能访问 `/api/api-keys*`(红线);**指定项目范围(selected)的 key 此路不通**——无 projectId 的 `GET /audit-logs` 属跨项目接口会被拒,带 projectId 也查不到签发记录(`apikey.issue` 审计行的 projectId 为空)。全范围(all)key:`GET /audit-logs?limit=50` 找 `action=apikey.issue` 且 `afterData.prefix` 匹配本 key 前缀的记录,可得档位(tier)/项目范围(projectScope)/无人值守(unattended)/有效期(expiresAt);selected-scope 场景请用户在「API 凭证」页查看或问管理员。
 
 ## 2. 确认策略(必须遵守)
 
@@ -73,10 +73,11 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 | 到账登记     | `POST /projects/$PID/receipts`,body `{receiptDate, amount:"…", summary?, remark?}`                                                                                                                                             |
 | 项目创建     | `POST /projects`,body `{code, name, ownerId?, budgetMode?("GENERAL"/"LUMP_SUM"), startDate?, endDate?(YYYY-MM-DD)}`;仅管理员;ownerId 缺省=自己,**owner 自动加为 OWNER 成员**;code 系统内唯一(冲突 409),惯例「负责人拼音+序号」 |
 | 创建编制单   | `POST /projects/$PID/initial-budget` → 201 `{appId}`;一个项目仅一份编制(重复 409;归档项目 409),payload 见下                                                                                                                    |
-| 修改编制单   | `PATCH /projects/$PID/initial-budget/:appId`(同 payload 全量;仅 DRAFT 可改;服务端**删旧重建科目树,科目 id 会变**——改完后旧的 subjectId 全部作废,须重新拉取)                                                                    |
+| 修改编制单   | `PATCH /projects/$PID/initial-budget/:appId`(同 payload 全量;**DRAFT/REJECTED/WITHDRAWN 可改,改后回到 DRAFT**;服务端**删旧重建科目树,科目 id 会变**——改完后旧的 subjectId 全部作废,须重新拉取)                                 |
 | 提交审批     | `POST /projects/$PID/initial-budget/:appId/submit`(无人值守可提交;**审批通过/驳回属硬排除**,需管理员在 UI 操作,通过后 current 预算才置位生效)                                                                                  |
 | 创建调整单   | `POST /projects/$PID/adjustments`,body `{year, kind?, annualReason?, totalReason?, expandTotals?, lines:[{subjectId, totalAdjustment, annualAdjustment}]}` → 201 含 id(subjectId 取 `GET /subjects` 叶科目)                    |
-| 修改/删稿    | `PATCH` / `DELETE /projects/$PID/adjustments/:adjId`(全量 payload,仅 DRAFT 可改)                                                                                                                                               |
+| 修改调整单   | `PATCH /projects/$PID/adjustments/:adjId`(全量 payload;**DRAFT/REJECTED 可改**,驳回单改后可重新提交)                                                                                                                           |
+| 删除调整单   | `DELETE /projects/$PID/adjustments/:adjId`(仅 DRAFT 可删;REJECTED 单要弃用就走改单重提)                                                                                                                                        |
 | 提交调整单   | `POST /projects/$PID/adjustments/:adjId/submit`(DRAFT→PENDING,调减行校验可调额度并写锁)                                                                                                                                        |
 | 撤回调整单   | `POST /projects/$PID/adjustments/:adjId/withdraw`(PENDING→DRAFT 并释放锁;审批前修正用)                                                                                                                                         |
 
@@ -92,6 +93,7 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
   "annualBudgets": [{ "year": 2026, "amount": "1920000.00" }],
   "subjects": [
     { "code": "1", "name": "直接费用", "parentCode": null, "isLeaf": false },
+    { "code": "1.2", "name": "材料费", "parentCode": "1", "isLeaf": false },
     { "code": "1.2.1", "name": "高性能计算资源配件", "parentCode": "1.2", "isLeaf": true }
   ],
   "subjectBudgets": [
@@ -113,7 +115,7 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 
 - `ADJUST`(调剂,缺省):零和挪钱——`totalAdjustment` 与 `annualAdjustment` **各自 Σ=0**;包干制 totalAdjustment 恒 0(只填年度维度)。
 - `ALLOCATE`(追加下达):每行 `annualAdjustment` ≥ 0 且 Σ>0、totalAdjustment=0;`expandTotals:true`=新经费入账(项目总预算同步调增),缺省 false=余额内向年度追加计划(受项目剩余额度护栏约束)。**项目从无年度预算到首次下达走 ALLOCATE,不要用 ADJUST 硬凑**(调剂的年度维度必须零和)。容量护栏双向:项目层「年度计划 ≤ 项目剩余额度」、GENERAL 科目层「各科目本年计划 ≤ 科目总预算」;零值科目直接省略,不建零额行。
-- **「调整到 X」必须先折算**:Δ = X − 当前科目预算(基线取余额统计的 `yearBudget` 或已审批编制单);多目标先核 ΣΔ 再动手——零和 → 一张 ADJUST;净增 → ALLOCATE(必要时再配一张 ADJUST 摆匀各科目);**年度总额没有净调减通道**(ADJUST 零和、ALLOCATE 只增)。目标值不自洽时把折算表摆给用户确认,不要自行挑数凑平(实测:用户报三个「调整到」目标隐含净增 1 万,与其原口径矛盾,追问后改口为一个目标值,净额归零)。
+- **「调整到 X」必须先折算**:Δ = X − 当前科目预算。基线一律取**当前生效预算**——`GET /projects/$PID/adjustments/balance?year=Y`(调整表单余额面板)或余额统计的 `yearBudget`;已审批编制单只在项目从未批过调整时才等于当前值(`getDraft` 返回 initial 口径,批过调整后拿它折算必错)。多目标先核 ΣΔ 再动手——零和 → 一张 ADJUST;净增 → ALLOCATE(必要时再配一张 ADJUST 摆匀各科目);**年度总额没有净调减通道**(ADJUST 零和、ALLOCATE 只增)。目标值不自洽时把折算表摆给用户确认,不要自行挑数凑平(实测:用户报三个「调整到」目标隐含净增 1 万,与其原口径矛盾,追问后改口为一个目标值,净额归零)。
 - 调减行提交时校验可调额度(= 科目年度预算 − 已占用)并写预算锁;在途 PENDING 单同样占额度。
 - 提交响应体不保证字段完整,以 `GET /adjustments` 回读状态(DRAFT→PENDING)为准;调整在管理员审批通过后才生效。
 
