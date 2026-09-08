@@ -173,22 +173,27 @@ export default function ApiKeysPage() {
 
   const copyPlaintext = async () => {
     if (!created) return;
-    try {
-      await navigator.clipboard.writeText(created.plaintext);
-      toast.success('已复制');
-    } catch {
-      // 非安全上下文(如 http 局域网访问)无 clipboard API:退化为 execCommand。
-      const ta = document.createElement('textarea');
-      ta.value = created.plaintext;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(ta);
-      if (ok) toast.success('已复制');
-      else toast.error('复制失败,请手动选中凭证文本复制');
+    // 非安全上下文(http 局域网)下 navigator.clipboard 为 undefined:先特性检测,
+    // 再兜底 execCommand(旧浏览器/权限拒绝均覆盖),绝不裸调 .writeText。
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(created.plaintext);
+        toast.success('已复制');
+        return;
+      } catch {
+        /* 权限被拒等:走下方兜底 */
+      }
     }
+    const ta = document.createElement('textarea');
+    ta.value = created.plaintext;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) toast.success('已复制');
+    else toast.error('复制失败,请手动选中凭证文本复制');
   };
 
   const canSubmit =
