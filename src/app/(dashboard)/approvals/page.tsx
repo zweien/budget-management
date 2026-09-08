@@ -265,11 +265,6 @@ export default function ApprovalsPage() {
           <Link href={`/projects/${t.row.projectId}/initial-budget`}>查看详情</Link>
         </Button>
       )}
-      {t.kind === 'initialBudget' && (
-        <Button size="sm" variant="ghost" asChild>
-          <Link href={`/projects/${t.row.projectId}/initial-budget`}>查看详情</Link>
-        </Button>
-      )}
       <Button size="sm" onClick={() => openAction(t, 'approve')}>
         审批
       </Button>
