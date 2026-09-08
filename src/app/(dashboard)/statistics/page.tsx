@@ -334,7 +334,7 @@ function CustomStatisticsTab() {
                 <SelectItem value={ALL}>跨项目(管理员)</SelectItem>
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.code} {p.name}
+                    {p.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -460,7 +460,6 @@ function CustomStatisticsTab() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-32">科目编码</TableHead>
               <TableHead>科目名称</TableHead>
               <TableHead className="w-20">年度</TableHead>
               <TableHead className="w-32">申请日期</TableHead>
@@ -488,7 +487,6 @@ function CustomStatisticsTab() {
             ) : (
               result?.records.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-mono text-[13px]">{r.subject?.code ?? '—'}</TableCell>
                   <TableCell className="max-w-48 truncate" title={r.subject?.name}>
                     {r.subject?.name ?? '—'}
                   </TableCell>
@@ -577,7 +575,7 @@ function MonthlyHistoryTab() {
               <SelectContent>
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.code} {p.name}
+                    {p.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1037,7 +1035,7 @@ function BalanceTab() {
                 <SelectItem value={ALL}>全部项目</SelectItem>
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.code} {p.name}
+                    {p.name}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -12,6 +12,7 @@ import {
   FolderKanban,
   KeyRound,
   LayoutDashboard,
+  Info,
   NotebookText,
   ScrollText,
   UserCog,
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
 ] as const;
 
 const CHANGELOG_ITEM = { href: '/changelog', label: '更新日志', icon: NotebookText } as const;
+const ABOUT_ITEM = { href: '/about', label: '关于', icon: Info } as const;
 /** 仅管理员可见(经 /api/me 判定;MOCK 模式随身份切换即时显隐)。 */
 const ADMIN_NAV_ITEM = { href: '/users', label: '用户管理', icon: UserCog } as const;
 
@@ -179,6 +181,7 @@ interface FooterProps extends NavState {
 export function SidebarFooter({ collapsed, version, onNavigate, onToggleCollapse }: FooterProps) {
   const pathname = usePathname();
   const changelogActive = isActive(pathname, CHANGELOG_ITEM.href);
+  const aboutActive = isActive(pathname, ABOUT_ITEM.href);
   const ToggleIcon = collapsed ? ChevronsRight : ChevronsLeft;
 
   const toggleButton = onToggleCollapse ? (
@@ -200,6 +203,14 @@ export function SidebarFooter({ collapsed, version, onNavigate, onToggleCollapse
 
   return (
     <div className={cn('mt-auto border-t border-border py-3', collapsed ? 'px-2' : 'px-3')}>
+      <NavLink
+        href={ABOUT_ITEM.href}
+        label={ABOUT_ITEM.label}
+        icon={ABOUT_ITEM.icon}
+        active={aboutActive}
+        collapsed={collapsed}
+        onNavigate={onNavigate}
+      />
       <NavLink
         href={CHANGELOG_ITEM.href}
         label={CHANGELOG_ITEM.label}

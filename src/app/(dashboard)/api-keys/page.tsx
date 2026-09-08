@@ -173,8 +173,22 @@ export default function ApiKeysPage() {
 
   const copyPlaintext = async () => {
     if (!created) return;
-    await navigator.clipboard.writeText(created.plaintext);
-    toast.success('已复制');
+    try {
+      await navigator.clipboard.writeText(created.plaintext);
+      toast.success('已复制');
+    } catch {
+      // 非安全上下文(如 http 局域网访问)无 clipboard API:退化为 execCommand。
+      const ta = document.createElement('textarea');
+      ta.value = created.plaintext;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) toast.success('已复制');
+      else toast.error('复制失败,请手动选中凭证文本复制');
+    }
   };
 
   const canSubmit =
