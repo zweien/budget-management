@@ -1174,17 +1174,8 @@ function BalanceTab() {
             ) : (
               sortedRows.map((row) => (
                 <TableRow key={`${row.projectId}|${row.subjectId}`}>
-                  <TableCell
-                    className="max-w-40 truncate"
-                    title={`${row.projectCode} ${row.projectName}`}
-                  >
-                    {row.projectCode} {row.projectName}
-                  </TableCell>
-                  <TableCell
-                    className="max-w-48 truncate"
-                    title={`${row.subjectCode} ${row.subjectName}`}
-                  >
-                    <span className="font-mono text-[13px] text-mute">{row.subjectCode}</span>{' '}
+                  <TableCell className="max-w-40 truncate">{row.projectName}</TableCell>
+                  <TableCell className="max-w-48 truncate">
                     {row.subjectName}
                     {!row.isLeaf ? <span className="ml-1 text-xs text-mute">(含下级)</span> : null}
                   </TableCell>
