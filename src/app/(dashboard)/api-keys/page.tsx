@@ -6,6 +6,7 @@ import { Copy, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -173,27 +174,9 @@ export default function ApiKeysPage() {
 
   const copyPlaintext = async () => {
     if (!created) return;
-    // 非安全上下文(http 局域网)下 navigator.clipboard 为 undefined:先特性检测,
-    // 再兜底 execCommand(旧浏览器/权限拒绝均覆盖),绝不裸调 .writeText。
-    if (navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(created.plaintext);
-        toast.success('已复制');
-        return;
-      } catch {
-        /* 权限被拒等:走下方兜底 */
-      }
-    }
-    const ta = document.createElement('textarea');
-    ta.value = created.plaintext;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    if (ok) toast.success('已复制');
-    else toast.error('复制失败,请手动选中凭证文本复制');
+    const result = await copyTextToClipboard(created.plaintext);
+    if (result === 'copied') toast.success('已复制');
+    else toast.info('当前环境不支持自动复制:已全选明文,请按 Ctrl+C 复制');
   };
 
   const canSubmit =
@@ -411,7 +394,10 @@ export default function ApiKeysPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
-            <code className="flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
+            <code
+              className="flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs select-all"
+              data-copy-text={created?.plaintext}
+            >
               {created?.plaintext}
             </code>
             <Button variant="outline" size="icon" onClick={copyPlaintext} aria-label="复制凭证">
