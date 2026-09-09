@@ -67,14 +67,26 @@ export function ColumnSettingsPopover({
 export function useStoredColumnVisibility(
   key: string,
 ): [VisibilityState, (id: string, visible: boolean) => void] {
-  const [state, setState] = React.useState<VisibilityState>(() => {
+  // SSR 首渲与客户端水合都必须是「全部显示」(codex P2):偏好挂载后下一帧再应用,
+  // requestAnimationFrame 派发以通过 set-state-in-effect 规则。
+  const [state, setState] = React.useState<VisibilityState>({});
+  React.useEffect(() => {
+    let raw: string | null = null;
     try {
-      const raw = window.localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as VisibilityState) : {};
+      raw = window.localStorage.getItem(key);
     } catch {
-      return {};
+      return;
     }
-  });
+    if (!raw) return;
+    let parsed: VisibilityState;
+    try {
+      parsed = JSON.parse(raw) as VisibilityState;
+    } catch {
+      return;
+    }
+    const raf = requestAnimationFrame(() => setState(parsed));
+    return () => cancelAnimationFrame(raf);
+  }, [key]);
   const toggle = React.useCallback(
     (id: string, visible: boolean) => {
       setState((prev) => {

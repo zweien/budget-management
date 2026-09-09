@@ -256,14 +256,21 @@ export async function customStatistics(
     }
   }
   if (filters.enteredAtFrom || filters.enteredAtTo) {
+    // 前端传本地时刻的 ISO 瞬间(起=当日 0 点,止=次日 0 点独占,时区感知,codex P2)。
     where.createdAt = {};
     if (filters.enteredAtFrom) {
-      where.createdAt.gte = parseDate(filters.enteredAtFrom, 'enteredAtFrom');
+      const from = new Date(filters.enteredAtFrom);
+      if (Number.isNaN(from.getTime())) {
+        throw new HTTPError(400, '录入时间范围起无效');
+      }
+      where.createdAt.gte = from;
     }
     if (filters.enteredAtTo) {
-      // 止日期含当日:小于「止日 + 1 天」。
-      const end = parseDate(filters.enteredAtTo, 'enteredAtTo');
-      where.createdAt.lt = new Date(end.getTime() + 86_400_000);
+      const to = new Date(filters.enteredAtTo);
+      if (Number.isNaN(to.getTime())) {
+        throw new HTTPError(400, '录入时间范围止无效');
+      }
+      where.createdAt.lt = to;
     }
   }
   if (filters.completedDateEmpty) {

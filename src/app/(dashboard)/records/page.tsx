@@ -167,6 +167,21 @@ function UnifiedRecordsPageInner() {
   const [columnVisibility, toggleColumnVisibility] = useStoredColumnVisibility(
     'ui.records.global.columns',
   );
+  // 批量作废(勾选行按项目分组调用;仅「我可录入」范围渲染勾选列)。
+  // 选择时记录 id → projectId:跨页/改筛选后仍可成组提交(codex P2)。
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedProjectById, setSelectedProjectById] = useState<Record<string, string>>({});
+  const [batchVoidOpen, setBatchVoidOpen] = useState(false);
+  // 报销凭证附件抽屉。
+  const [attachmentTarget, setAttachmentTarget] = useState<{
+    id: string;
+    projectId: string;
+    summary: string;
+    handler: string;
+    amount: string;
+    businessDate: string;
+    isVoid: boolean;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // ---- 列表 ----
@@ -321,9 +336,14 @@ function UnifiedRecordsPageInner() {
             break;
           }
           case 'enteredAt': {
+            // 时区感知(codex P2):传本地时刻瞬间(起=当日 0 点含,止=次日 0 点独占)。
             const r = v as DateRangeFilterValue;
-            if (r.from) sp.set('enteredAtFrom', format(new Date(r.from), 'yyyy-MM-dd'));
-            if (r.to) sp.set('enteredAtTo', format(new Date(r.to), 'yyyy-MM-dd'));
+            const boundaryIso = (d: Date, endOfDay: boolean) => {
+              const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+              return new Date(start.getTime() + (endOfDay ? 86_400_000 : 0)).toISOString();
+            };
+            if (r.from) sp.set('enteredAtFrom', boundaryIso(new Date(r.from), false));
+            if (r.to) sp.set('enteredAtTo', boundaryIso(new Date(r.to), true));
             break;
           }
           case 'completedDate': {
@@ -413,6 +433,12 @@ function UnifiedRecordsPageInner() {
     };
   }, [projectName, scope, writableIds]);
 
+  /** 可作废项目集(record:void 需 OWNER/ADMIN → canEdit;录入人员 HANDLER 不可批量作废,codex P1)。 */
+  const voidableIds = useMemo(
+    () => new Set((projects ?? []).filter((p) => p.canEdit).map((p) => p.id)),
+    [projects],
+  );
+
   /** 项目列的稳定候选(不受本列筛选影响;writable 范围只列可写项目)。 */
   const projectOptions = useMemo(() => {
     const all = Array.from(projectName.values());
@@ -434,7 +460,7 @@ function UnifiedRecordsPageInner() {
               header: ({ table: tbl }) => {
                 const ids = tbl
                   .getRowModel()
-                  .rows.filter((r) => !r.original.isVoid)
+                  .rows.filter((r) => !r.original.isVoid && voidableIds.has(r.original.projectId))
                   .map((r) => r.original.id);
                 const sel = ids.filter((id) => selectedIds.has(id)).length;
                 const all = ids.length > 0 && sel === ids.length;
@@ -457,15 +483,21 @@ function UnifiedRecordsPageInner() {
               cell: ({ row }) => (
                 <Checkbox
                   checked={selectedIds.has(row.original.id)}
-                  disabled={row.original.isVoid}
-                  onCheckedChange={() =>
+                  disabled={row.original.isVoid || !voidableIds.has(row.original.projectId)}
+                  onCheckedChange={() => {
                     setSelectedIds((prev) => {
                       const next = new Set(prev);
                       if (next.has(row.original.id)) next.delete(row.original.id);
                       else next.add(row.original.id);
                       return next;
-                    })
-                  }
+                    });
+                    setSelectedProjectById((prev) => {
+                      const next = { ...prev };
+                      if (selectedIds.has(row.original.id)) delete next[row.original.id];
+                      else next[row.original.id] = row.original.projectId;
+                      return next;
+                    });
+                  }}
                   aria-label={`选择记录:${row.original.summary}`}
                 />
               ),
@@ -699,7 +731,7 @@ function UnifiedRecordsPageInner() {
     ],
     // RowActions 闭包内引用稳定函数;projectName 随项目元数据变化。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectName, creatorOptions, facets],
+    [projectName, creatorOptions, facets, selectedIds, voidableIds],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
@@ -740,9 +772,9 @@ function UnifiedRecordsPageInner() {
     try {
       const byProject = new Map<string, string[]>();
       for (const id of selectedIds) {
-        const rec = records.find((x) => x.id === id);
-        if (!rec || rec.isVoid) continue;
-        byProject.set(rec.projectId, [...(byProject.get(rec.projectId) ?? []), rec.id]);
+        const pid = selectedProjectById[id];
+        if (!pid) continue;
+        byProject.set(pid, [...(byProject.get(pid) ?? []), id]);
       }
       let voided = 0;
       for (const [pid, ids] of byProject) {
@@ -757,6 +789,7 @@ function UnifiedRecordsPageInner() {
       setVoidReason('');
       setVoidError(null);
       setSelectedIds(new Set());
+      setSelectedProjectById({});
       await reloadRecords();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '批量作废失败');
@@ -786,19 +819,6 @@ function UnifiedRecordsPageInner() {
   };
 
   // §筛选结果导出 Excel(所见即所导;含项目列)。
-  // 批量作废(勾选行按项目分组调用;仅「我可录入」范围渲染勾选列)。
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [batchVoidOpen, setBatchVoidOpen] = useState(false);
-  // 报销凭证附件抽屉。
-  const [attachmentTarget, setAttachmentTarget] = useState<{
-    id: string;
-    projectId: string;
-    summary: string;
-    handler: string;
-    amount: string;
-    businessDate: string;
-    isVoid: boolean;
-  } | null>(null);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const handleExportXlsx = async () => {
     setExportingXlsx(true);

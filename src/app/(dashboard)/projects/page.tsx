@@ -321,13 +321,12 @@ export default function ProjectsPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {(() => {
-                        const total = Number(r.projectBudget?.currentAmount ?? 0);
-                        return total > 0
-                          ? total.toLocaleString('zh-CN', {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })
-                          : '';
+                        // 仅「无 projectBudget」(未编制)留空;编制为 0 也如实渲染 0.00(codex P2)。
+                        if (!r.projectBudget) return '';
+                        return Number(r.projectBudget.currentAmount).toLocaleString('zh-CN', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        });
                       })()}
                     </TableCell>
                     <TableCell>{r.level ?? '—'}</TableCell>
