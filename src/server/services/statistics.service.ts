@@ -131,10 +131,11 @@ export interface CustomStatisticsSummary {
   executionRate: number | null;
 }
 
-/** §11.3 业务明细行(join 科目,便于前端展示科目编码/名称;creatorName=录入人姓名)。 */
+/** §11.3 业务明细行(join 科目/项目,便于前端展示名称与编号;creatorName=录入人姓名)。 */
 export type CustomStatisticsRecord = Omit<
   Prisma.BusinessRecordGetPayload<{
     include: {
+      project: { select: { id: true; code: true; name: true } };
       subject: { select: { id: true; code: true; name: true } };
       createdBy: { select: { name: true } };
       _count: { select: { attachments: true } };
@@ -339,6 +340,7 @@ export async function customStatistics(
     orderBy,
     ...paginate,
     include: {
+      project: { select: { id: true, code: true, name: true } },
       subject: { select: { id: true, code: true, name: true } },
       createdBy: { select: { name: true } },
       _count: { select: { attachments: true } },
