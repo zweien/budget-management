@@ -303,7 +303,7 @@ const SubjectDetailCell = memo(function SubjectDetailCell({
         value={unit}
         onCommit={(v) => onPatch(detailKey, { unit: v })}
         onEditStart={onEditStart}
-        placeholder="单位"
+        placeholder="项"
         className="h-7 w-16"
       />
       <span className="text-mute">×</span>
@@ -311,7 +311,7 @@ const SubjectDetailCell = memo(function SubjectDetailCell({
         value={quantity}
         onChange={(v) => onPatch(detailKey, { quantity: v })}
         onEditStart={onEditStart}
-        placeholder="数量"
+        placeholder="1"
         className="w-20"
       />
       <span className="text-mute">×</span>
@@ -719,11 +719,12 @@ export default function InitialBudgetPage() {
         // 防御:nextDetail 由上一个 updater 产出(批处理内按入队顺序执行,但跨
         // updater 传值依赖实现细节)。万一顺序异常,保留现值不清零,待下次变更同步。
         if (!nextDetail) return prev;
-        // 推导金额:quantity × unitPrice(三项齐备时)。
+        // 推导金额:quantity × unitPrice(数量留空默认 1,单位留空默认「项」在提交时落)。
         let amount = '';
-        if (nextDetail.quantity !== '' && nextDetail.unitPrice !== '') {
+        if (nextDetail.unitPrice !== '') {
           try {
-            amount = new D(nextDetail.quantity).times(new D(nextDetail.unitPrice)).toFixed(2);
+            const qty = nextDetail.quantity === '' ? '1' : nextDetail.quantity;
+            amount = new D(qty).times(new D(nextDetail.unitPrice)).toFixed(2);
           } catch {
             amount = '';
           }
@@ -919,12 +920,14 @@ export default function InitialBudgetPage() {
       const [code, yearStr] = k.split('|');
       const year = Number(yearStr);
       if (!leafCodes.has(code) || !yearSet.has(year)) continue;
-      // §enhance3:三项明细须齐备才构成一条完整分配。
-      if (!detail.unit.trim() || detail.quantity === '' || detail.unitPrice === '') continue;
+      // §enhance3:单价必填;单位/数量留空默认「项」/「1」。
+      if (detail.unitPrice === '') continue;
+      const unit = detail.unit.trim() || '项';
+      const quantity = detail.quantity === '' ? '1' : detail.quantity;
       // 前端预算金额 = quantity × unitPrice(decimal.js);后端以同样公式重算为真相源。
       let amount = '0.00';
       try {
-        amount = new D(detail.quantity).times(new D(detail.unitPrice)).toFixed(2);
+        amount = new D(quantity).times(new D(detail.unitPrice)).toFixed(2);
       } catch {
         continue;
       }
@@ -932,8 +935,8 @@ export default function InitialBudgetPage() {
         subjectCode: code,
         year,
         amount,
-        unit: detail.unit.trim(),
-        quantity: detail.quantity,
+        unit,
+        quantity,
         unitPrice: detail.unitPrice,
       });
     }

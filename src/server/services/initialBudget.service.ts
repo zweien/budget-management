@@ -118,17 +118,17 @@ function validatePayload(payload: InitialBudgetPayload, opts: { lumpSum?: boolea
   }
 
   // §enhance 年度分配明细校验 + 服务端计算金额(唯一真相源)。
-  // 每条 subjectBudget 必须带 unit(非空)/quantity≥0/unitPrice≥0,
-  // amount 以 quantity × unitPrice(decimal.js)重算覆盖客户端传入值。
+  // unitPrice 必填且 ≥0;单位留空默认「项」、数量留空默认 1(编制时只填单价即可),
+  // quantity 显式 0 仍按 0 计;amount 以 quantity × unitPrice(decimal.js)重算覆盖客户端传入值。
   for (const sb of payload.subjectBudgets) {
-    const unit = typeof sb.unit === 'string' ? sb.unit.trim() : '';
-    if (unit === '') {
-      throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配缺少计量单位`);
-    }
+    const unit = typeof sb.unit === 'string' && sb.unit.trim() !== '' ? sb.unit.trim() : '项';
     let quantity: D;
     let unitPrice: D;
     try {
-      quantity = new D(sb.quantity);
+      quantity =
+        sb.quantity === '' || sb.quantity === undefined || sb.quantity === null
+          ? new D(1)
+          : new D(sb.quantity);
       unitPrice = new D(sb.unitPrice);
     } catch {
       throw new HTTPError(
@@ -142,8 +142,10 @@ function validatePayload(payload: InitialBudgetPayload, opts: { lumpSum?: boolea
     if (!unitPrice.gte(ZERO)) {
       throw new HTTPError(422, `科目 ${sb.subjectCode} 的 ${sb.year} 年分配 单价不得为负`);
     }
-    // 覆盖金额:服务端 source of truth,忽略客户端 amount。
+    // 覆盖金额与明细:服务端 source of truth,忽略客户端传入值(默认值也在此落定)。
     sb.amount = quantity.times(unitPrice).toFixed(2);
+    sb.unit = unit;
+    sb.quantity = quantity.toFixed(2);
   }
 
   // 1) 项目初始总预算不得为负。

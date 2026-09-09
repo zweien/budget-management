@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
@@ -53,6 +54,8 @@ interface ProjectRow {
   archivedAt: string | null;
   /** 项目负责人 = 当前 OWNER 成员(§codex P2:成员管理变更后 ownerId 会漂移)。 */
   members: { user: { id: string; name: string } }[];
+  /** 总经费(当前口径);未编制初始预算的项目为 null。 */
+  projectBudget: { currentAmount: string } | null;
   /** 行级编辑权(ADMIN 或该项目 OWNER):编辑/归档/恢复按钮的门控。 */
   canEdit: boolean;
 }
@@ -276,7 +279,9 @@ export default function ProjectsPage() {
                 <TableHead className="w-40">项目编号</TableHead>
                 <TableHead>项目名称</TableHead>
                 <TableHead className="w-28">负责人</TableHead>
-                <TableHead className="w-24">级别</TableHead>
+                <TableHead className="w-24">预算类型</TableHead>
+                <TableHead className="w-36 text-right">总经费</TableHead>
+                <TableHead className="w-20">级别</TableHead>
                 <TableHead className="w-56">起止时间</TableHead>
                 <TableHead className="w-64">操作</TableHead>
               </TableRow>
@@ -284,7 +289,7 @@ export default function ProjectsPage() {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow className="">
-                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                     无匹配「{keyword}」的项目
                   </TableCell>
                 </TableRow>
@@ -295,12 +300,34 @@ export default function ProjectsPage() {
                     <TableCell className="font-mono text-[13px]">{r.code}</TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2 font-medium">
-                        {r.name}
+                        <Link
+                          href={`/projects/${r.id}`}
+                          className="text-link underline-offset-4 transition-colors hover:text-link-deep hover:underline"
+                        >
+                          {r.name}
+                        </Link>
                         {r.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
                       </span>
                     </TableCell>
                     <TableCell>
                       {r.members?.length ? r.members.map((m) => m.user.name).join('/') : '—'}
+                    </TableCell>
+                    <TableCell>
+                      {r.budgetMode === 'LUMP_SUM' ? (
+                        <Badge variant="outline">包干制</Badge>
+                      ) : (
+                        <Badge variant="secondary">一般</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {(() => {
+                        // 仅「无 projectBudget」(未编制)留空;编制为 0 也如实渲染 0.00(codex P2)。
+                        if (!r.projectBudget) return '';
+                        return Number(r.projectBudget.currentAmount).toLocaleString('zh-CN', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        });
+                      })()}
                     </TableCell>
                     <TableCell>{r.level ?? '—'}</TableCell>
                     <TableCell className="tabular-nums">

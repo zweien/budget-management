@@ -302,13 +302,20 @@ describe('initialBudget.service (integration, real PG)', () => {
     );
     createdProjectIds.push(project.id);
 
-    const bad = validPayload();
-    // 抹掉 A 的单位 → 校验拒绝。
-    bad.subjectBudgets[0]!.unit = '';
+    // 单位/数量留空 → 默认「项」/「1」,金额 = 数量 × 单价 重算。
+    const defaulted = validPayload();
+    defaulted.subjectBudgets[0]!.unit = '';
+    defaulted.subjectBudgets[0]!.quantity = '';
 
-    await expect(
-      createDraft(project.id, bad, { id: adminId, role: UserRole.ADMIN }),
-    ).rejects.toMatchObject({ status: 422 });
+    await createDraft(project.id, defaulted, {
+      id: adminId,
+      role: UserRole.ADMIN,
+    });
+    const view = await getDraft(project.id, { id: adminId, role: UserRole.ADMIN });
+    const sbA = view.subjectBudgets.find((x) => x.subjectCode === 'A')!;
+    expect(sbA.unit).toBe('项');
+    expect(sbA.quantity).toBe('1.00');
+    expect(sbA.amount).toBe('100.00'); // 默认数量 1 × 单价 100
   });
 
   it('createDraft: §B 规则1 — 叶科目跨年度总预算合计 > 项目总预算 → HTTPError 422', async () => {

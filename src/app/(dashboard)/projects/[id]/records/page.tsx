@@ -34,6 +34,8 @@ import { apiFetch } from '@/lib/api/client';
 import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
 import { D } from '@/lib/decimal';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
+import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
+import type { VisibilityState } from '@tanstack/react-table';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { PackageAttachmentsDialog } from '@/components/records/PackageAttachmentsDialog';
 import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
@@ -305,6 +307,10 @@ function BusinessRecordsPageInner() {
   const [historyLoading, setHistoryLoading] = useState(false);
   // 报销凭证附件 Sheet(Task 9 集成)。
   const [attachmentTarget, setAttachmentTarget] = useState<BusinessRecordRow | null>(null);
+  // 列显隐偏好(localStorage 持久化,与全局录入页同款交互)。
+  const [columnVisibility, toggleColumnVisibility] = useStoredColumnVisibility(
+    'ui.records.project.columns',
+  );
   // 按科目层级打包附件 Dialog(Task 5 集成)。
   const [packageOpen, setPackageOpen] = useState(false);
   // 批量选择(勾选行 → 批量作废);仅记录可写者渲染勾选列。
@@ -1020,7 +1026,6 @@ function BusinessRecordsPageInner() {
           </Button>
         ),
         enableSorting: false,
-        enableHiding: false,
       },
       {
         id: 'actions',
@@ -1037,7 +1042,7 @@ function BusinessRecordsPageInner() {
   const table = useReactTable({
     data: records,
     columns,
-    state: { columnFilters, sorting },
+    state: { columnFilters, sorting, columnVisibility },
     onColumnFiltersChange: setColumnFilters,
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
@@ -1172,6 +1177,25 @@ function BusinessRecordsPageInner() {
               导入 Excel
             </Button>
           ) : null}
+          <ColumnSettingsPopover
+            items={[
+              { id: 'budgetYear', label: '年度' },
+              { id: 'subjectId', label: '科目' },
+              { id: 'amount', label: '金额' },
+              { id: 'businessDate', label: '申请日期' },
+              { id: 'completedDate', label: '完成日期' },
+              { id: 'status', label: '状态' },
+              { id: 'handler', label: '经办人' },
+              { id: 'docNo', label: '单据编号' },
+              { id: 'summary', label: '摘要' },
+              { id: 'remark', label: '备注' },
+              { id: 'enteredAt', label: '录入时间' },
+              { id: 'creatorName', label: '录入人' },
+              { id: 'attachments', label: '附件' },
+            ]}
+            columnVisibility={columnVisibility}
+            onToggle={toggleColumnVisibility}
+          />
         </div>
       </div>
 

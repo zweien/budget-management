@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { ClipboardPlus, Download, Funnel, History } from 'lucide-react';
+import { ClipboardPlus, Download, Funnel, History, Paperclip } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -12,6 +12,9 @@ import { z } from 'zod';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
+import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
 import type { DateRangeFilterValue } from '@/lib/table/filter-fns';
@@ -97,6 +100,7 @@ interface UnifiedRecordRow {
   creatorName: string | null;
   isVoid: boolean;
   createdAt: string;
+  attachmentCount: number;
   subject: { id: string; code: string; name: string } | null;
 }
 
@@ -159,6 +163,25 @@ function UnifiedRecordsPageInner() {
 
   // ---- 录入卡片 ----
   const [entryProjectId, setEntryProjectId] = useState('');
+  // 列显隐偏好(localStorage 持久化,与项目记录页同款交互)。
+  const [columnVisibility, toggleColumnVisibility] = useStoredColumnVisibility(
+    'ui.records.global.columns',
+  );
+  // 批量作废(勾选行按项目分组调用;仅「我可录入」范围渲染勾选列)。
+  // 选择时记录 id → projectId:跨页/改筛选后仍可成组提交(codex P2)。
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedProjectById, setSelectedProjectById] = useState<Record<string, string>>({});
+  const [batchVoidOpen, setBatchVoidOpen] = useState(false);
+  // 报销凭证附件抽屉。
+  const [attachmentTarget, setAttachmentTarget] = useState<{
+    id: string;
+    projectId: string;
+    summary: string;
+    handler: string;
+    amount: string;
+    businessDate: string;
+    isVoid: boolean;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // ---- 列表 ----
@@ -312,6 +335,17 @@ function UnifiedRecordsPageInner() {
             if (r.to) sp.set('businessDateTo', format(new Date(r.to), 'yyyy-MM-dd'));
             break;
           }
+          case 'enteredAt': {
+            // 时区感知(codex P2):传本地时刻瞬间(起=当日 0 点含,止=次日 0 点独占)。
+            const r = v as DateRangeFilterValue;
+            const boundaryIso = (d: Date, endOfDay: boolean) => {
+              const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+              return new Date(start.getTime() + (endOfDay ? 86_400_000 : 0)).toISOString();
+            };
+            if (r.from) sp.set('enteredAtFrom', boundaryIso(new Date(r.from), false));
+            if (r.to) sp.set('enteredAtTo', boundaryIso(new Date(r.to), true));
+            break;
+          }
           case 'completedDate': {
             const r = v as DateRangeFilterValue;
             if (r.empty) sp.set('completedDateEmpty', '1');
@@ -399,6 +433,12 @@ function UnifiedRecordsPageInner() {
     };
   }, [projectName, scope, writableIds]);
 
+  /** 可作废项目集(record:void 需 OWNER/ADMIN → canEdit;录入人员 HANDLER 不可批量作废,codex P1)。 */
+  const voidableIds = useMemo(
+    () => new Set((projects ?? []).filter((p) => p.canEdit).map((p) => p.id)),
+    [projects],
+  );
+
   /** 项目列的稳定候选(不受本列筛选影响;writable 范围只列可写项目)。 */
   const projectOptions = useMemo(() => {
     const all = Array.from(projectName.values());
@@ -413,6 +453,57 @@ function UnifiedRecordsPageInner() {
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
   const columns = useMemo<ColumnDef<UnifiedRecordRow>[]>(
     () => [
+      ...(scope === 'writable'
+        ? [
+            {
+              id: 'select',
+              header: ({ table: tbl }) => {
+                const ids = tbl
+                  .getRowModel()
+                  .rows.filter((r) => !r.original.isVoid && voidableIds.has(r.original.projectId))
+                  .map((r) => r.original.id);
+                const sel = ids.filter((id) => selectedIds.has(id)).length;
+                const all = ids.length > 0 && sel === ids.length;
+                return (
+                  <Checkbox
+                    checked={sel > 0 && !all ? 'indeterminate' : all}
+                    onCheckedChange={() =>
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        ids.forEach((id) => (all ? next.delete(id) : next.add(id)));
+                        return next;
+                      })
+                    }
+                    aria-label="全选本页记录"
+                  />
+                );
+              },
+              enableColumnFilter: false,
+              enableSorting: false,
+              cell: ({ row }) => (
+                <Checkbox
+                  checked={selectedIds.has(row.original.id)}
+                  disabled={row.original.isVoid || !voidableIds.has(row.original.projectId)}
+                  onCheckedChange={() => {
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(row.original.id)) next.delete(row.original.id);
+                      else next.add(row.original.id);
+                      return next;
+                    });
+                    setSelectedProjectById((prev) => {
+                      const next = { ...prev };
+                      if (selectedIds.has(row.original.id)) delete next[row.original.id];
+                      else next[row.original.id] = row.original.projectId;
+                      return next;
+                    });
+                  }}
+                  aria-label={`选择记录:${row.original.summary}`}
+                />
+              ),
+            } as ColumnDef<UnifiedRecordRow>,
+          ]
+        : []),
       {
         id: 'project',
         accessorFn: (row) => projectName.get(row.projectId) ?? row.projectId,
@@ -480,6 +571,26 @@ function UnifiedRecordsPageInner() {
         ),
       },
       {
+        id: 'completedDate',
+        accessorKey: 'completedDate',
+        header: ({ column }) => (
+          <HeaderFilter
+            column={column}
+            title="完成日期"
+            type="dateRange"
+            emptyLabel="仅看无完成日期"
+            sortable
+          />
+        ),
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {row.original.completedDate
+              ? format(new Date(row.original.completedDate), 'yyyy-MM-dd')
+              : '—'}
+          </span>
+        ),
+      },
+      {
         id: 'status',
         accessorFn: (row) => (row.isVoid ? '__void__' : row.status),
         header: ({ column }) => (
@@ -515,6 +626,21 @@ function UnifiedRecordsPageInner() {
         ),
       },
       {
+        id: 'docNo',
+        accessorKey: 'docNo',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="单据编号" type="text" sortable />
+        ),
+        cell: ({ row }) => (
+          <span
+            className="block max-w-32 truncate font-mono text-xs"
+            title={row.original.docNo ?? undefined}
+          >
+            {row.original.docNo || '—'}
+          </span>
+        ),
+      },
+      {
         id: 'summary',
         accessorKey: 'summary',
         header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
@@ -542,22 +668,14 @@ function UnifiedRecordsPageInner() {
           ),
       },
       {
-        id: 'completedDate',
-        accessorKey: 'completedDate',
+        id: 'enteredAt',
+        accessorKey: 'createdAt',
         header: ({ column }) => (
-          <HeaderFilter
-            column={column}
-            title="完成日期"
-            type="dateRange"
-            emptyLabel="仅看无完成日期"
-            sortable
-          />
+          <HeaderFilter column={column} title="录入时间" type="dateRange" sortable />
         ),
         cell: ({ row }) => (
           <span className="tabular-nums">
-            {row.original.completedDate
-              ? format(new Date(row.original.completedDate), 'yyyy-MM-dd')
-              : '—'}
+            {format(new Date(row.original.createdAt), 'yyyy-MM-dd HH:mm')}
           </span>
         ),
       },
@@ -575,6 +693,36 @@ function UnifiedRecordsPageInner() {
         ),
       },
       {
+        id: 'attachments',
+        header: () => '附件',
+        enableColumnFilter: false,
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-mute"
+            onClick={() =>
+              setAttachmentTarget({
+                id: row.original.id,
+                projectId: row.original.projectId,
+                summary: row.original.summary,
+                handler: row.original.handler,
+                amount: row.original.amount,
+                businessDate: row.original.businessDate,
+                isVoid: row.original.isVoid,
+              })
+            }
+            aria-label={`查看报销凭证:${row.original.summary}`}
+          >
+            <Paperclip className="size-4" />
+            {row.original.attachmentCount > 0 ? (
+              <span className="tabular-nums">{row.original.attachmentCount}</span>
+            ) : null}
+          </Button>
+        ),
+      },
+      {
         id: 'actions',
         header: () => '操作',
         enableColumnFilter: false,
@@ -583,14 +731,14 @@ function UnifiedRecordsPageInner() {
     ],
     // RowActions 闭包内引用稳定函数;projectName 随项目元数据变化。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectName, creatorOptions, facets],
+    [projectName, creatorOptions, facets, selectedIds, voidableIds],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
   const table = useReactTable({
     data: records,
     columns,
-    state: { columnFilters, sorting },
+    state: { columnFilters, sorting, columnVisibility },
     onColumnFiltersChange: (updater) => {
       setColumnFilters(updater);
       setPage(1); // 筛选变化回到第一页
@@ -612,6 +760,43 @@ function UnifiedRecordsPageInner() {
   const totalValidCount = stats?.validCount ?? 0;
   const totalVoidCount = (stats?.totalCount ?? 0) - (stats?.validCount ?? 0);
   const amountSum = stats?.amountSum ?? '0.00';
+
+  /** 批量作废(勾选行按项目分组调用 void-batch;服务端按行校验权限)。 */
+  const submitBatchVoid = async () => {
+    const reason = voidReason.trim();
+    if (!reason) {
+      setVoidError('请填写作废原因');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const byProject = new Map<string, string[]>();
+      for (const id of selectedIds) {
+        const pid = selectedProjectById[id];
+        if (!pid) continue;
+        byProject.set(pid, [...(byProject.get(pid) ?? []), id]);
+      }
+      let voided = 0;
+      for (const [pid, ids] of byProject) {
+        const res = await apiFetch<{ voided: number }>(`/api/projects/${pid}/records/void-batch`, {
+          method: 'POST',
+          body: JSON.stringify({ recordIds: ids, reason }),
+        });
+        voided += res.voided;
+      }
+      toast.success(`已批量作废 ${voided} 条`);
+      setBatchVoidOpen(false);
+      setVoidReason('');
+      setVoidError(null);
+      setSelectedIds(new Set());
+      setSelectedProjectById({});
+      await reloadRecords();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '批量作废失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   /** 条件 chips 的人话描述(与表头漏斗同一份 columnFilters)。 */
   const describeFilterValue = (columnId: string, value: unknown): string => {
@@ -1032,6 +1217,38 @@ function UnifiedRecordsPageInner() {
               <Download />
               {exportingXlsx ? '导出中…' : '导出筛选结果'}
             </Button>
+            {scope === 'writable' && selectedIds.size > 0 ? (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setBatchVoidOpen(true);
+                  setVoidReason('');
+                  setVoidError(null);
+                }}
+              >
+                批量作废({selectedIds.size})
+              </Button>
+            ) : null}
+            <ColumnSettingsPopover
+              items={[
+                { id: 'project', label: '项目' },
+                { id: 'budgetYear', label: '年度' },
+                { id: 'subject', label: '科目' },
+                { id: 'amount', label: '金额' },
+                { id: 'businessDate', label: '申请日期' },
+                { id: 'completedDate', label: '完成日期' },
+                { id: 'status', label: '状态' },
+                { id: 'handler', label: '经办人' },
+                { id: 'docNo', label: '单据编号' },
+                { id: 'summary', label: '摘要' },
+                { id: 'remark', label: '备注' },
+                { id: 'enteredAt', label: '录入时间' },
+                { id: 'creatorName', label: '录入人' },
+                { id: 'attachments', label: '附件' },
+              ]}
+              columnVisibility={columnVisibility}
+              onToggle={toggleColumnVisibility}
+            />
           </div>
         </div>
 
@@ -1048,6 +1265,8 @@ function UnifiedRecordsPageInner() {
             handler: '经办人',
             summary: '摘要',
             remark: '备注',
+            docNo: '单据编号',
+            enteredAt: '录入时间',
             completedDate: '完成日期',
             creatorName: '录入人',
           }}
@@ -1337,6 +1556,71 @@ function UnifiedRecordsPageInner() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 批量作废 Dialog(勾选行按项目分组提交;仅「我可录入」范围可勾选) */}
+      <Dialog
+        open={batchVoidOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBatchVoidOpen(false);
+            setVoidError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>批量作废 {selectedIds.size} 条业务记录</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              已作废记录自动跳过;作废后不再计入占用,操作会留痕且不可撤销,原因写入全部记录的历史。
+            </p>
+            <div className="grid gap-1.5">
+              <Label>作废原因(必填)</Label>
+              <Input
+                value={voidReason}
+                onChange={(e) => setVoidReason(e.target.value)}
+                placeholder="如:重复录入"
+              />
+              {voidError ? <p className="text-xs text-destructive">{voidError}</p> : null}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchVoidOpen(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void submitBatchVoid()}
+              disabled={submitting}
+            >
+              {submitting ? '作废中…' : '确认作废'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 报销凭证附件抽屉(跨项目:按记录打开;「我可录入」范围外的项目只读) */}
+      <AttachmentSheet
+        projectId={attachmentTarget?.projectId ?? ''}
+        record={
+          attachmentTarget
+            ? {
+                id: attachmentTarget.id,
+                summary: attachmentTarget.summary,
+                handler: attachmentTarget.handler,
+                amount: attachmentTarget.amount,
+                businessDate: attachmentTarget.businessDate,
+                isVoid: attachmentTarget.isVoid,
+              }
+            : null
+        }
+        canWrite={
+          !!attachmentTarget && scope === 'writable' && writableIds.has(attachmentTarget.projectId)
+        }
+        open={!!attachmentTarget}
+        onOpenChange={(o) => !o && setAttachmentTarget(null)}
+      />
     </div>
   );
 }
