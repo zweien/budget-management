@@ -25,6 +25,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -56,6 +57,7 @@ interface ProjectRow {
   members: { user: { id: string; name: string } }[];
   /** 总经费(当前口径);未编制初始预算的项目为 null。 */
   projectBudget: { currentAmount: string } | null;
+  createdAt: string;
   /** 行级编辑权(ADMIN 或该项目 OWNER):编辑/归档/恢复按钮的门控。 */
   canEdit: boolean;
 }
@@ -70,6 +72,11 @@ export default function ProjectsPage() {
   const [keyword, setKeyword] = useState('');
   /** 是否包含已归档项目(项目管理:归档可恢复,开关切换查看)。 */
   const [showArchived, setShowArchived] = useState(false);
+  // 列显隐偏好(localStorage 持久化,与记录页同款交互)。
+  const [columnVisibility, toggleColumnVisibility] =
+    useStoredColumnVisibility('ui.projects.columns');
+  /** 手写表格的列显隐:未出现在偏好里的列默认显示。 */
+  const colVisible = (id: string) => columnVisibility[id] !== false;
 
   // 新建/编辑共用弹窗;editing = null 表示新建。
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -247,6 +254,23 @@ export default function ProjectsPage() {
           <Label htmlFor="show-archived" className="text-sm text-muted-foreground">
             显示已归档
           </Label>
+          <ColumnSettingsPopover
+            items={[
+              { id: 'code', label: '项目编号' },
+              { id: 'name', label: '项目名称' },
+              { id: 'members', label: '负责人' },
+              { id: 'budgetMode', label: '预算类型' },
+              { id: 'projectBudget', label: '总经费' },
+              { id: 'level', label: '级别' },
+              { id: 'projectType', label: '项目类型' },
+              { id: 'undertakingUnit', label: '承担单位' },
+              { id: 'startDate', label: '起止时间' },
+              { id: 'remark', label: '备注' },
+              { id: 'createdAt', label: '创建时间' },
+            ]}
+            columnVisibility={columnVisibility}
+            onToggle={toggleColumnVisibility}
+          />
         </div>
       </div>
 
@@ -276,20 +300,30 @@ export default function ProjectsPage() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-40">项目编号</TableHead>
-                <TableHead>项目名称</TableHead>
-                <TableHead className="w-28">负责人</TableHead>
-                <TableHead className="w-24">预算类型</TableHead>
-                <TableHead className="w-36 text-right">总经费</TableHead>
-                <TableHead className="w-20">级别</TableHead>
-                <TableHead className="w-56">起止时间</TableHead>
+                {colVisible('code') ? <TableHead className="w-40">项目编号</TableHead> : null}
+                {colVisible('name') ? <TableHead>项目名称</TableHead> : null}
+                {colVisible('members') ? <TableHead className="w-28">负责人</TableHead> : null}
+                {colVisible('budgetMode') ? <TableHead className="w-24">预算类型</TableHead> : null}
+                {colVisible('projectBudget') ? (
+                  <TableHead className="w-36 text-right">总经费</TableHead>
+                ) : null}
+                {colVisible('level') ? <TableHead className="w-20">级别</TableHead> : null}
+                {colVisible('projectType') ? (
+                  <TableHead className="w-28">项目类型</TableHead>
+                ) : null}
+                {colVisible('undertakingUnit') ? (
+                  <TableHead className="w-36">承担单位</TableHead>
+                ) : null}
+                {colVisible('startDate') ? <TableHead className="w-56">起止时间</TableHead> : null}
+                {colVisible('remark') ? <TableHead className="max-w-40">备注</TableHead> : null}
+                {colVisible('createdAt') ? <TableHead className="w-28">创建时间</TableHead> : null}
                 <TableHead className="w-64">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow className="">
-                  <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={12} className="h-32 text-center text-muted-foreground">
                     无匹配「{keyword}」的项目
                   </TableCell>
                 </TableRow>
@@ -297,42 +331,77 @@ export default function ProjectsPage() {
                 filtered.map((r) => (
                   <TableRow key={r.id} className={r.archivedAt ? 'opacity-60' : undefined}>
                     {/* 编号属技术标识,用 mono(DESIGN.md code 字体) */}
-                    <TableCell className="font-mono text-[13px]">{r.code}</TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-2 font-medium">
-                        <Link
-                          href={`/projects/${r.id}`}
-                          className="text-link underline-offset-4 transition-colors hover:text-link-deep hover:underline"
-                        >
-                          {r.name}
-                        </Link>
-                        {r.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {r.members?.length ? r.members.map((m) => m.user.name).join('/') : '—'}
-                    </TableCell>
-                    <TableCell>
-                      {r.budgetMode === 'LUMP_SUM' ? (
-                        <Badge variant="outline">包干制</Badge>
-                      ) : (
-                        <Badge variant="secondary">一般</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {(() => {
-                        // 仅「无 projectBudget」(未编制)留空;编制为 0 也如实渲染 0.00(codex P2)。
-                        if (!r.projectBudget) return '';
-                        return Number(r.projectBudget.currentAmount).toLocaleString('zh-CN', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        });
-                      })()}
-                    </TableCell>
-                    <TableCell>{r.level ?? '—'}</TableCell>
-                    <TableCell className="tabular-nums">
-                      {formatDate(r.startDate)} ~ {formatDate(r.endDate)}
-                    </TableCell>
+                    {colVisible('code') ? (
+                      <TableCell className="font-mono text-[13px]">{r.code}</TableCell>
+                    ) : null}
+                    {colVisible('name') ? (
+                      <TableCell>
+                        <span className="flex items-center gap-2 font-medium">
+                          <Link
+                            href={`/projects/${r.id}`}
+                            className="text-link underline-offset-4 transition-colors hover:text-link-deep hover:underline"
+                          >
+                            {r.name}
+                          </Link>
+                          {r.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
+                        </span>
+                      </TableCell>
+                    ) : null}
+                    {colVisible('members') ? (
+                      <TableCell>
+                        {r.members?.length ? r.members.map((m) => m.user.name).join('/') : '—'}
+                      </TableCell>
+                    ) : null}
+                    {colVisible('budgetMode') ? (
+                      <TableCell>
+                        {r.budgetMode === 'LUMP_SUM' ? (
+                          <Badge variant="outline">包干制</Badge>
+                        ) : (
+                          <Badge variant="secondary">一般</Badge>
+                        )}
+                      </TableCell>
+                    ) : null}
+                    {colVisible('projectBudget') ? (
+                      <TableCell className="text-right tabular-nums">
+                        {(() => {
+                          // 仅「无 projectBudget」(未编制)留空;编制为 0 也如实渲染 0.00(codex P2)。
+                          if (!r.projectBudget) return '';
+                          return Number(r.projectBudget.currentAmount).toLocaleString('zh-CN', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          });
+                        })()}
+                      </TableCell>
+                    ) : null}
+                    {colVisible('level') ? <TableCell>{r.level ?? '—'}</TableCell> : null}
+                    {colVisible('projectType') ? (
+                      <TableCell className="max-w-28 truncate" title={r.projectType ?? undefined}>
+                        {r.projectType || '—'}
+                      </TableCell>
+                    ) : null}
+                    {colVisible('undertakingUnit') ? (
+                      <TableCell
+                        className="max-w-32 truncate"
+                        title={r.undertakingUnit ?? undefined}
+                      >
+                        {r.undertakingUnit || '—'}
+                      </TableCell>
+                    ) : null}
+                    {colVisible('startDate') ? (
+                      <TableCell className="tabular-nums">
+                        {formatDate(r.startDate)} ~ {formatDate(r.endDate)}
+                      </TableCell>
+                    ) : null}
+                    {colVisible('remark') ? (
+                      <TableCell className="max-w-40 truncate" title={r.remark ?? undefined}>
+                        {r.remark || '—'}
+                      </TableCell>
+                    ) : null}
+                    {colVisible('createdAt') ? (
+                      <TableCell className="tabular-nums text-muted-foreground">
+                        {new Date(r.createdAt).toLocaleDateString('zh-CN')}
+                      </TableCell>
+                    ) : null}
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         <Button
