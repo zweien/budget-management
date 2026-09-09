@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
@@ -295,7 +296,12 @@ export default function ProjectsPage() {
                     <TableCell className="font-mono text-[13px]">{r.code}</TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2 font-medium">
-                        {r.name}
+                        <Link
+                          href={`/projects/${r.id}`}
+                          className="text-link underline-offset-4 transition-colors hover:text-link-deep hover:underline"
+                        >
+                          {r.name}
+                        </Link>
                         {r.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
                       </span>
                     </TableCell>

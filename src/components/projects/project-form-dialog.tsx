@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
+import { Combobox } from '@/components/ui/combobox';
 import { apiFetch } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -363,20 +364,19 @@ export function ProjectFormDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>负责人</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="默认为自己" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {userOptions.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Combobox
+                      options={userOptions.map((u) => ({
+                        value: u.id,
+                        label: u.name,
+                        keywords: u.name,
+                      }))}
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="默认为自己"
+                      searchPlaceholder="按姓名搜索…"
+                      emptyText="无匹配用户"
+                      className="w-full"
+                    />
                     <p className="text-xs text-muted-foreground">
                       负责人将获得该项目的编辑权限(OWNER 成员);之后可在项目详情页调整。
                     </p>
