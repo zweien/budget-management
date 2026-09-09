@@ -703,6 +703,7 @@ describe('statistics.service (integration, real PG)', () => {
       summary: 'csp-b',
       remark: 'csp-note-b',
       status: BusinessStatus.CONTRACT,
+      docNo: 'DOC-CSP-2',
     });
     const r3 = await mk({
       budgetYear: 2027,
@@ -769,6 +770,20 @@ describe('statistics.service (integration, real PG)', () => {
       adminUser(),
     );
     expect(byCreator.total).toBe(2);
+
+    // 单据编号筛选 + 录入时间排序 + 附件计数(无附件为 0)。
+    const byDoc = await customStatistics(
+      { projectId: project.id, docNo: 'DOC-CSP-2' },
+      adminUser(),
+    );
+    expect(byDoc.total).toBe(1);
+    expect(byDoc.records[0]?.summary).toBe('csp-b');
+    const sortedByEntry = await customStatistics(
+      { projectId: project.id, sort: { field: 'enteredAt', dir: 'asc' }, page: 1, pageSize: 2 },
+      adminUser(),
+    );
+    expect(sortedByEntry.records).toHaveLength(2);
+    expect(sortedByEntry.records.every((r) => r.attachmentCount === 0)).toBe(true);
 
     // 状态 + 作废可见:status IN … OR isVoid(作废不改 status,须用 OR 语义)。
     const withVoid = await customStatistics(

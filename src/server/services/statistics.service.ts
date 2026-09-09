@@ -67,6 +67,10 @@ export interface CustomStatisticsFilters {
   docNo?: string;
   /** 仅看无完成日期。 */
   completedDateEmpty?: boolean;
+  /** 录入时间范围起(yyyy-mm-dd,含;createdAt 按日过滤)。 */
+  enteredAtFrom?: string;
+  /** 录入时间范围止(yyyy-mm-dd,含当日)。 */
+  enteredAtTo?: string;
   /** 完成日期范围起(ISO yyyy-mm-dd,含)。 */
   completedDateFrom?: string;
   /** 完成日期范围止(ISO yyyy-mm-dd,含)。 */
@@ -95,8 +99,11 @@ export const CUSTOM_SORT_FIELDS = {
   remark: 'remark',
   completedDate: 'completedDate',
   creatorName: 'creatorName',
+  /** 录入时间(enteredAt 展示列)→ createdAt。 */
+  enteredAt: 'createdAt',
+  docNo: 'docNo',
 } as const;
-export type CustomSortField = (typeof CUSTOM_SORT_FIELDS)[keyof typeof CUSTOM_SORT_FIELDS];
+export type CustomSortField = keyof typeof CUSTOM_SORT_FIELDS;
 
 /** 筛选集合计数(总计行/分页器)。 */
 export interface CustomStatisticsStats {
@@ -130,10 +137,11 @@ export type CustomStatisticsRecord = Omit<
     include: {
       subject: { select: { id: true; code: true; name: true } };
       createdBy: { select: { name: true } };
+      _count: { select: { attachments: true } };
     };
   }>,
-  'createdBy'
-> & { creatorName: string | null };
+  'createdBy' | '_count'
+> & { creatorName: string | null; attachmentCount: number };
 
 export interface CustomStatisticsResult {
   summary: CustomStatisticsSummary;
@@ -247,6 +255,17 @@ export async function customStatistics(
       where.businessDate.lte = parseDate(filters.businessDateTo, 'businessDateTo');
     }
   }
+  if (filters.enteredAtFrom || filters.enteredAtTo) {
+    where.createdAt = {};
+    if (filters.enteredAtFrom) {
+      where.createdAt.gte = parseDate(filters.enteredAtFrom, 'enteredAtFrom');
+    }
+    if (filters.enteredAtTo) {
+      // 止日期含当日:小于「止日 + 1 天」。
+      const end = parseDate(filters.enteredAtTo, 'enteredAtTo');
+      where.createdAt.lt = new Date(end.getTime() + 86_400_000);
+    }
+  }
   if (filters.completedDateEmpty) {
     where.completedDate = {
       ...(where.completedDate as object),
@@ -285,7 +304,9 @@ export async function customStatistics(
         ? { subject: { name: sort.dir } }
         : sort.field === 'creatorName'
           ? { createdBy: { name: sort.dir } }
-          : { [sort.field]: sort.dir };
+          : sort.field === 'enteredAt'
+            ? { createdAt: sort.dir }
+            : { [sort.field]: sort.dir };
     orderBy = [
       ...(sort.field === 'remark'
         ? [
@@ -313,11 +334,13 @@ export async function customStatistics(
     include: {
       subject: { select: { id: true, code: true, name: true } },
       createdBy: { select: { name: true } },
+      _count: { select: { attachments: true } },
     },
   });
-  const records = rows.map(({ createdBy, ...r }) => ({
+  const records = rows.map(({ createdBy, _count, ...r }) => ({
     ...r,
     creatorName: createdBy?.name ?? null,
+    attachmentCount: _count.attachments,
   }));
 
   // 4) 合计与占用:SQL 聚合下推(筛选全集,不再全量取回内存计算)。

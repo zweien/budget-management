@@ -81,6 +81,10 @@ export const GET = withRoute(async (req: NextRequest) => {
   const docNo = sp.get('docNo');
   if (docNo) filters.docNo = docNo;
 
+  const enteredAtFrom = sp.get('enteredAtFrom');
+  if (enteredAtFrom) filters.enteredAtFrom = enteredAtFrom;
+  const enteredAtTo = sp.get('enteredAtTo');
+  if (enteredAtTo) filters.enteredAtTo = enteredAtTo;
   if (sp.get('completedDateEmpty') === '1') filters.completedDateEmpty = true;
   const completedDateFrom = sp.get('completedDateFrom');
   if (completedDateFrom) filters.completedDateFrom = completedDateFrom;
