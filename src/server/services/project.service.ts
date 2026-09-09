@@ -220,6 +220,8 @@ export async function listProjects(
         where: { memberRole: 'OWNER' },
         select: { user: { select: { id: true, name: true } } },
       },
+      // 项目管理列表展示总经费(当前口径);未编制初始预算的项目该行为 null。
+      projectBudget: true,
     },
   });
   // canEdit 随行下发(项目管理页编辑/归档按钮的行级门控):ADMIN 恒可,否则需 OWNER。
