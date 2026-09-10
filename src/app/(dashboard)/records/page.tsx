@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { ClipboardPlus, Download, Funnel, History, Paperclip } from 'lucide-react';
@@ -20,6 +20,7 @@ import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
 import type { DateRangeFilterValue } from '@/lib/table/filter-fns';
 import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
 import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AmountInput } from '@/components/ui/AmountInput';
 import { Badge } from '@/components/ui/badge';
@@ -379,6 +380,8 @@ function UnifiedRecordsPageInner() {
     [columnFilters, sorting, scope, writableIds, idByLabel],
   );
 
+  // 请求序号:仅最新请求可落结果(与统计页同款守卫,防翻页/筛选连点时慢旧响应覆盖新结果)。
+  const reqSeqRef = useRef(0);
   /** 列表重拉:服务端筛选/排序/分页,一次一页。 */
   const reloadRecords = useCallback(async () => {
     if (scope === 'writable' && writableIds.size === 0) {
@@ -388,6 +391,7 @@ function UnifiedRecordsPageInner() {
       setLoadingRecords(false);
       return;
     }
+    const seq = ++reqSeqRef.current;
     setLoadingRecords(true);
     try {
       const data = await apiFetch<{
@@ -395,13 +399,14 @@ function UnifiedRecordsPageInner() {
         total: number;
         stats: { totalCount: number; validCount: number; amountSum: string };
       }>(`/api/statistics/custom?${buildParams(page, pageSize).toString()}`);
+      if (seq !== reqSeqRef.current) return;
       setRecords(data.records ?? []);
       setTotal(data.total ?? 0);
       setStats(data.stats ?? null);
     } catch (e) {
-      if (e instanceof Error) toast.error(e.message);
+      if (seq === reqSeqRef.current && e instanceof Error) toast.error(e.message);
     } finally {
-      setLoadingRecords(false);
+      if (seq === reqSeqRef.current) setLoadingRecords(false);
     }
   }, [buildParams, page, pageSize, scope, writableIds]);
 
@@ -1354,49 +1359,25 @@ function UnifiedRecordsPageInner() {
               )}
             </TableBody>
           </Table>
-          {!loadingRecords && table.getRowModel().rows.length > 0 ? (
-            <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-              共 {total} 条记录
-              {columnFilters.length > 0 ? '(已应用表头筛选)' : ''}
-            </div>
-          ) : null}
-          {!loadingRecords && total > 0 ? (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                第 {page} / {Math.max(1, Math.ceil(total / pageSize))} 页
-              </span>
-              <select
-                className="h-8 rounded-md border border-border bg-card px-2 text-sm"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-                aria-label="每页条数"
-              >
-                {[50, 100, 200].map((n) => (
-                  <option key={n} value={n}>
-                    {n} 条/页
-                  </option>
-                ))}
-              </select>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1 || loadingRecords}
-                onClick={() => setPage((v) => Math.max(1, v - 1))}
-              >
-                上一页
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= Math.ceil(total / pageSize) || loadingRecords}
-                onClick={() => setPage((v) => Math.min(Math.ceil(total / pageSize), v + 1))}
-              >
-                下一页
-              </Button>
-            </div>
+          {!loadingRecords && (total > 0 || table.getRowModel().rows.length > 0) ? (
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              loading={loadingRecords}
+              onPageChange={setPage}
+              onPageSizeChange={(n) => {
+                setPageSize(n);
+                setPage(1);
+              }}
+              pageSizes={[50, 100, 200]}
+              leftHint={
+                <span>
+                  共 {total} 条记录
+                  {columnFilters.length > 0 ? '(已应用表头筛选)' : ''}
+                </span>
+              }
+            />
           ) : null}
         </div>
       </div>

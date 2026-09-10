@@ -27,6 +27,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
 import { Button } from '@/components/ui/button';
+import { TableEmpty } from '@/components/ui/table-pagination';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -322,11 +323,7 @@ export default function ProjectsPage() {
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
-                <TableRow className="">
-                  <TableCell colSpan={12} className="h-32 text-center text-muted-foreground">
-                    无匹配「{keyword}」的项目
-                  </TableCell>
-                </TableRow>
+                <TableEmpty colSpan={12}>无匹配「{keyword}」的项目</TableEmpty>
               ) : (
                 filtered.map((r) => (
                   <TableRow key={r.id} className={r.archivedAt ? 'opacity-60' : undefined}>

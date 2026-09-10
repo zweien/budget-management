@@ -35,7 +35,7 @@
   --ring: #0070f3; /* link 蓝聚焦环 */
 
   /* ── DESIGN.md 扩展 token ─────────────── */
-  --mute: #888888; /* 占位/辅助文字 */
+  --mute: #6e6e6e; /* 占位/辅助文字(AA:对 #fafafa 4.89:1) */
   --hairline-strong: #a1a1a1;
   --link: #0070f3;
   --link-deep: #0761d1;

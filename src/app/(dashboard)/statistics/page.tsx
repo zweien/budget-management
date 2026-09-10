@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { TableEmpty, TablePagination } from '@/components/ui/table-pagination';
 import {
   Table,
   TableBody,
@@ -375,8 +376,6 @@ function CustomStatisticsTab() {
   };
 
   const summary = result?.summary;
-  const total = result?.total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   const summaryCards: Array<{ label: string; node: React.ReactNode }> = summary
     ? [
@@ -587,14 +586,9 @@ function CustomStatisticsTab() {
                 </TableRow>
               ))
             ) : (result?.records.length ?? 0) === 0 ? (
-              <TableRow className="">
-                <TableCell
-                  colSpan={visibleColumnCount}
-                  className="h-32 text-center text-muted-foreground"
-                >
-                  {hasQueried ? '没有匹配的业务记录' : '点击"查询"加载明细'}
-                </TableCell>
-              </TableRow>
+              <TableEmpty colSpan={visibleColumnCount}>
+                {hasQueried ? '没有匹配的业务记录' : '点击"查询"加载明细'}
+              </TableEmpty>
             ) : (
               result?.records.map((r) => (
                 <TableRow key={r.id}>
@@ -708,50 +702,25 @@ function CustomStatisticsTab() {
           </TableBody>
         </Table>
         {!loading && result && result.records.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-            <span className="flex items-center gap-1">
-              共 {result.total} 条 · 有效 {result.stats.validCount} 条 · 金额合计
-              <MoneyText
-                value={result.stats.amountSum}
-                riskOnNegative={false}
-                className="inline text-left"
-              />
-            </span>
-            <span className="flex items-center gap-2">
-              <span>
-                第 {page} / {pageCount} 页
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={result.total}
+            loading={loading}
+            onPageChange={goToPage}
+            onPageSizeChange={changePageSize}
+            pageSizes={PAGE_SIZES}
+            leftHint={
+              <span className="flex items-center gap-1">
+                共 {result.total} 条 · 有效 {result.stats.validCount} 条 · 金额合计
+                <MoneyText
+                  value={result.stats.amountSum}
+                  riskOnNegative={false}
+                  className="inline text-left"
+                />
               </span>
-              <select
-                className="h-8 rounded-md border border-border bg-card px-2 text-sm"
-                value={pageSize}
-                onChange={(e) => changePageSize(Number(e.target.value))}
-                disabled={loading}
-                aria-label="每页条数"
-              >
-                {PAGE_SIZES.map((n) => (
-                  <option key={n} value={n}>
-                    {n} 条/页
-                  </option>
-                ))}
-              </select>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1 || loading}
-                onClick={() => goToPage(page - 1)}
-              >
-                上一页
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= pageCount || loading}
-                onClick={() => goToPage(page + 1)}
-              >
-                下一页
-              </Button>
-            </span>
-          </div>
+            }
+          />
         ) : null}
       </div>
 
@@ -876,11 +845,7 @@ function MonthlyHistoryTab() {
                 </TableRow>
               ))
             ) : (result?.months.length ?? 0) === 0 ? (
-              <TableRow className="">
-                <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
-                  {result ? '暂无数据' : '选择项目与年度后查询'}
-                </TableCell>
-              </TableRow>
+              <TableEmpty colSpan={4}>{result ? '暂无数据' : '选择项目与年度后查询'}</TableEmpty>
             ) : (
               result?.months.map((m) => (
                 <TableRow key={m.month}>
@@ -1004,11 +969,7 @@ function CrossProjectTab() {
                 </TableRow>
               ))
             ) : (result?.projects.length ?? 0) === 0 ? (
-              <TableRow className="">
-                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                  {hasQueried ? '暂无项目' : '点击"刷新"加载'}
-                </TableCell>
-              </TableRow>
+              <TableEmpty colSpan={6}>{hasQueried ? '暂无项目' : '点击"刷新"加载'}</TableEmpty>
             ) : (
               result?.projects.map((r) => (
                 <TableRow key={r.projectId}>
@@ -1409,14 +1370,7 @@ function BalanceTab() {
                 </TableRow>
               ))
             ) : sortedRows.length === 0 ? (
-              <TableRow className="">
-                <TableCell
-                  colSpan={hasYear ? 11 : 8}
-                  className="h-32 text-center text-muted-foreground"
-                >
-                  没有匹配的科目
-                </TableCell>
-              </TableRow>
+              <TableEmpty colSpan={hasYear ? 11 : 8}>没有匹配的科目</TableEmpty>
             ) : (
               sortedRows.map((row) => (
                 <TableRow key={`${row.projectId}|${row.subjectId}`}>

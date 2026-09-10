@@ -8,7 +8,7 @@ colors:
   on-primary: '#ffffff'
   ink: '#171717'
   body: '#4d4d4d'
-  mute: '#888888'
+  mute: '#6e6e6e'
   hairline: '#ebebeb'
   hairline-strong: '#a1a1a1'
   canvas: '#ffffff'
@@ -428,7 +428,7 @@ Surfaces use a four-step ladder: `{colors.canvas}` (pure white for cards), `{col
 
 - **Ink** (`{colors.ink}` — `#171717`): Every heading and body paragraph on light surfaces.
 - **Body** (`{colors.body}` — `#4d4d4d`): Secondary text — sub-headings, body captions, nav-link inactive text, footer column body.
-- **Mute** (`{colors.mute}` — `#888888`): Lowest-priority text — placeholder text, fine print, low-key labels.
+- **Mute** (`{colors.mute}` — `#6e6e6e`): Lowest-priority text — placeholder text, fine print, low-key labels. (4.89:1 on `canvas-soft`, passes WCAG AA; dark-mode `--mute` `#8f8f8f` measures 6.49:1 on black.)
 - **On Primary** (`{colors.on-primary}` — `#ffffff`): All text on `{colors.primary}` surfaces.
 
 ### Semantic
