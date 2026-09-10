@@ -227,7 +227,7 @@ const recordSchema = z
       .max(9999, '年度不合法'),
     subjectId: z.string().min(1, '请选择科目'),
     amount: z.string({ message: '请输入金额' }).min(1, '请输入金额'),
-    businessDate: z.date({ message: '请选择日期' }),
+    businessDate: z.date().optional(), // 选填:留空默认当天(服务端兜底)
     /** 完成日期(选填);与申请日期都填时不得早于申请日期(Q6a)。 */
     completedDate: z.date().optional(),
     handler: z.string().trim().min(1, '请输入经办人').max(64),
@@ -438,7 +438,7 @@ function BusinessRecordsPageInner() {
         budgetYear: values.budgetYear,
         subjectId: values.subjectId,
         amount: values.amount,
-        businessDate: format(values.businessDate, 'yyyy-MM-dd'),
+        businessDate: values.businessDate ? format(values.businessDate, 'yyyy-MM-dd') : '',
         completedDate: values.completedDate ? format(values.completedDate, 'yyyy-MM-dd') : null,
         handler: values.handler,
         summary: values.summary,
@@ -1416,7 +1416,7 @@ function BusinessRecordsPageInner() {
                   name="businessDate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>申请日期</FormLabel>
+                      <FormLabel>申请日期(选填,留空默认当天)</FormLabel>
                       <DatePicker value={field.value} onChange={field.onChange} />
                       <FormMessage />
                     </FormItem>

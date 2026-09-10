@@ -139,7 +139,7 @@ const recordSchema = z.object({
     .string()
     .min(1, '请输入金额')
     .refine((v) => Number(v) > 0, '金额必须大于 0'),
-  businessDate: z.date({ message: '请选择申请日期' }),
+  businessDate: z.date().optional(), // 选填:留空默认当天(服务端兜底)
   status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
   handler: z.string().trim().min(1, '请输入经办人'),
   summary: z.string().trim().min(1, '请输入摘要'),
@@ -913,7 +913,7 @@ function UnifiedRecordsPageInner() {
         body: JSON.stringify({
           ...values,
           amount: Number(values.amount).toFixed(2),
-          businessDate: format(values.businessDate, 'yyyy-MM-dd'),
+          businessDate: values.businessDate ? format(values.businessDate, 'yyyy-MM-dd') : '',
           remark: values.remark || null,
         }),
       });
@@ -961,7 +961,7 @@ function UnifiedRecordsPageInner() {
         body: JSON.stringify({
           ...values,
           amount: Number(values.amount).toFixed(2),
-          businessDate: format(values.businessDate, 'yyyy-MM-dd'),
+          businessDate: values.businessDate ? format(values.businessDate, 'yyyy-MM-dd') : '',
           remark: values.remark || null,
         }),
       });
@@ -1092,7 +1092,7 @@ function UnifiedRecordsPageInner() {
                     name="businessDate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>申请日期</FormLabel>
+                        <FormLabel>申请日期(选填,留空默认当天)</FormLabel>
                         <DatePicker value={field.value} onChange={field.onChange} />
                         <FormMessage />
                       </FormItem>
@@ -1431,7 +1431,7 @@ function UnifiedRecordsPageInner() {
                     name="businessDate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>申请日期</FormLabel>
+                        <FormLabel>申请日期(选填,留空默认当天)</FormLabel>
                         <DatePicker value={field.value} onChange={field.onChange} />
                         <FormMessage />
                       </FormItem>

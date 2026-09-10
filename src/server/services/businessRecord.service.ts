@@ -27,8 +27,8 @@ export interface CreateRecordInput {
   budgetYear: number;
   subjectId: string;
   amount: string;
-  /** 申请日期(0.12 前称业务发生日期),ISO yyyy-mm-dd。 */
-  businessDate: string;
+  /** 申请日期(0.12 前称业务发生日期),ISO yyyy-mm-dd;选填,缺省默认当天。 */
+  businessDate?: string;
   /** 完成日期(选填;报销完成,通常由财务系统后续导出回填)。 */
   completedDate?: string | null;
   handler: string;
@@ -159,7 +159,16 @@ function parseRecordDate(s: string, label: string): Date {
   return dt;
 }
 
-function parseBusinessDate(s: string): Date {
+/** 申请日期:选填;缺省(空串/undefined/null)默认当天(业务列 NOT NULL 且月度统计按申请日期归月,置空语义取当天)。 */
+function parseBusinessDate(s: string | null | undefined): Date {
+  if (s === undefined || s === null || s === '') {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return parseRecordDate(
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      '申请日期',
+    );
+  }
   return parseRecordDate(s, '申请日期');
 }
 
@@ -276,7 +285,7 @@ async function requireLeafSubject(
  * §8.1/8.4 新增业务记录。
  * - 权限:record:create + 项目范围。
  * - 校验:subjectId 为该项目叶节点;budgetYear 正整数;amount > 0;status 合法四态之一;
- *   businessDate 有效;handler/summary 非空。
+ *   businessDate 选填(缺省默认当天);handler/summary 非空。
  * - §8.4 超预算仍保存,仅返回 overBudget 标志。
  * - 事务内:写 business_record(id=uuidv7,createdById) + 审计 create。
  * - 返回 { record, overBudget }。

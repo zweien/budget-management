@@ -160,6 +160,46 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(audit).not.toBeNull();
   });
 
+  it('createRecord: 申请日期选填——缺省(空串/undefined)默认当天', async () => {
+    const { project, leafA } = await seedApprovedProject('NODATE');
+
+    const expected = (() => {
+      const d = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    })();
+
+    // undefined 与空串两条路径都应落为当天。
+    const { record: r1 } = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '10.00',
+        handler: '经办人A',
+        summary: '缺省申请日期-undefined',
+        status: BusinessStatus.PLACEHOLDER,
+      },
+      adminUser(),
+    );
+    expect(r1.businessDate.toISOString().slice(0, 10)).toBe(expected);
+
+    const { record: r2 } = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '10.00',
+        businessDate: '',
+        handler: '经办人A',
+        summary: '缺省申请日期-空串',
+        status: BusinessStatus.PLACEHOLDER,
+      },
+      adminUser(),
+    );
+    expect(r2.businessDate.toISOString().slice(0, 10)).toBe(expected);
+  });
+
   it('createRecord: 超预算(700 > 600)→ overBudget=true,记录仍保存(§8.4)', async () => {
     const { project, leafA } = await seedApprovedProject('OVER');
 
