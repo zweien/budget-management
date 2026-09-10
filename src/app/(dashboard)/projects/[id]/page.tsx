@@ -2,16 +2,26 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { FolderSearch, Pencil } from 'lucide-react';
+import { AlertTriangle, FolderSearch, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { EmptyState } from '@/components/layout/empty-state';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { MembersCard } from '@/components/projects/members-card';
 import {
   ProjectFormDialog,
@@ -90,8 +100,168 @@ function DescCell({
   );
 }
 
+/** 彻底删除预览(GET /api/projects/:id/purge)。 */
+interface PurgePreview {
+  projectId: string;
+  code: string;
+  name: string;
+  archivedAt: string;
+  recordCount: number;
+  voidRecordCount: number;
+  attachmentCount: number;
+  receiptCount: number;
+  importBatchCount: number;
+  memberCount: number;
+  paidAmount: string;
+  totalOccupied: string;
+}
+
+/**
+ * 危险区卡片(仅管理员 + 已归档可见):彻底删除项目。
+ * 不可逆且从全局统计抹掉金额——弹窗列明数据量,输入项目编号确认(§彻底删除裁决)。
+ */
+function DangerZoneCard({
+  projectId,
+  code,
+  onPurged,
+}: {
+  projectId: string;
+  code: string;
+  onPurged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<PurgePreview | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [purging, setPurging] = useState(false);
+
+  const canConfirm = confirmText.trim() === code && !!preview;
+
+  const openDialog = () => {
+    setOpen(true);
+    setConfirmText('');
+    setPreview(null);
+    setLoadingPreview(true);
+    void apiFetch<PurgePreview>(`/api/projects/${projectId}/purge`)
+      .then(setPreview)
+      .catch((e: unknown) => {
+        if (e instanceof Error) toast.error(e.message);
+        setOpen(false);
+      })
+      .finally(() => setLoadingPreview(false));
+  };
+
+  const handlePurge = async () => {
+    if (!canConfirm || purging) return;
+    setPurging(true);
+    try {
+      // confirmCode 服务端强校验(codex P1):输入编号确认不能只存在于前端状态。
+      await apiFetch(`/api/projects/${projectId}/purge`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmCode: confirmText.trim() }),
+      });
+      toast.success('项目已彻底删除');
+      setOpen(false);
+      onPurged();
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setPurging(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="rounded-lg border border-error/40 bg-error-soft/30 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-error-deep">
+              <AlertTriangle className="size-4" />
+              危险区
+            </p>
+            <p className="mt-1 max-w-xl text-xs text-muted-foreground">
+              项目已归档。彻底删除将永久清除该项目及其全部业务数据（不可恢复），
+              相关记录将从检索与统计中消失；操作审计保留留痕。
+            </p>
+          </div>
+          <Button variant="destructive" size="sm" onClick={openDialog}>
+            <Trash2 />
+            彻底删除
+          </Button>
+        </div>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>彻底删除项目</DialogTitle>
+            <DialogDescription>
+              此操作不可逆。项目「{code}」及其全部业务数据将被物理删除，无法恢复。
+            </DialogDescription>
+          </DialogHeader>
+
+          {loadingPreview ? (
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ) : preview ? (
+            <div className="rounded-md border border-border bg-muted/40 p-3">
+              <p className="text-sm font-medium">{preview.name}</p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <div>
+                  业务记录：
+                  {preview.recordCount} 条
+                  {preview.voidRecordCount > 0 ? `（含作废 ${preview.voidRecordCount} 条）` : ''}
+                </div>
+                <div>附件：{preview.attachmentCount} 个</div>
+                <div>到账记录：{preview.receiptCount} 笔</div>
+                <div>导入批次：{preview.importBatchCount} 个</div>
+                <div className="tabular-nums">已支出：{preview.paidAmount} 元</div>
+                <div className="tabular-nums">总占用：{preview.totalOccupied} 元</div>
+              </dl>
+              <p className="caption-mono mt-2 tabular-nums">
+                归档于 {format(new Date(preview.archivedAt), 'yyyy-MM-dd HH:mm')}
+              </p>
+            </div>
+          ) : null}
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="purge-confirm">
+              请输入项目编号 <span className="font-mono text-[13px]">{code}</span> 以确认
+            </Label>
+            <Input
+              id="purge-confirm"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder={code}
+              autoComplete="off"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={purging}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handlePurge()}
+              disabled={!canConfirm || purging}
+            >
+              <Trash2 />
+              {purging ? '删除中…' : '我已知晓后果，彻底删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const projectId = params.id;
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
@@ -224,6 +394,15 @@ export default function ProjectDetailPage() {
         <MembersCard
           projectId={project.id}
           onMembersChanged={() => setDetailVersion((v) => v + 1)}
+        />
+      ) : null}
+
+      {/* 危险区:仅管理员 + 已归档(服务端 project:delete + 会话红线二次拦截)。 */}
+      {me?.role === 'ADMIN' && project.archivedAt ? (
+        <DangerZoneCard
+          projectId={project.id}
+          code={project.code}
+          onPurged={() => router.push('/projects')}
         />
       ) : null}
 

@@ -1,6 +1,6 @@
 import { Prisma, Project, User, MemberRole } from '@prisma/client';
 
-import { prisma } from '@/lib/prisma';
+import { prisma, BULK_TX_OPTIONS } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
 import {
   requirePermission,
@@ -446,4 +446,185 @@ export async function archiveProject(
     });
     return after;
   });
+}
+
+// ---------------- 彻底删除已归档项目 ----------------
+
+/** purge 类接口的调用者(requireUser() 结果携带凭证标记)。 */
+type PurgeActor = { id: string; role: User['role'] } & {
+  viaApiKey?: boolean;
+  unattended?: boolean;
+  apiKeyPrefix?: string;
+  keyTier?: string;
+  keyProjectScope?: string;
+  keyProjectIds?: string[];
+};
+
+/** 删除预览:确认弹窗展示的数据量与金额(§彻底删除裁决 Q4:不设门槛,数字亮出来)。 */
+export interface ProjectPurgePreview {
+  projectId: string;
+  code: string;
+  name: string;
+  archivedAt: string;
+  recordCount: number;
+  voidRecordCount: number;
+  attachmentCount: number;
+  receiptCount: number;
+  importBatchCount: number;
+  memberCount: number;
+  paidAmount: string;
+  totalOccupied: string;
+}
+
+/** 会话红线:仅管理员登录会话(对齐凭证管理/用户管理红线,拒绝一切机器凭证)。 */
+function assertPurgeSession(user: PurgeActor): void {
+  if (user.viaApiKey) {
+    throw new HTTPError(403, '彻底删除项目仅限管理员登录会话使用,机器凭证不得调用');
+  }
+  if (user.role !== 'ADMIN') {
+    throw new HTTPError(403, '仅管理员可彻底删除项目');
+  }
+}
+
+/** purge 共用前置:project:delete 矩阵(无人值守凭证在此路径落 unattended.denied 审计)
+ *  → 会话红线(拒绝一切机器凭证,含 attended)→ 仅已归档。 */
+async function loadPurgeTarget(
+  id: string,
+  actor: PurgeActor,
+): Promise<Project & { archivedAt: Date }> {
+  await requirePermission(actor, 'project:delete', id);
+  assertPurgeSession(actor);
+  const project = await prisma.project.findUnique({ where: { id } });
+  if (!project) throw new HTTPError(404, '项目不存在');
+  if (!project.archivedAt) throw new HTTPError(409, '仅已归档项目可彻底删除;请先归档');
+  return project as Project & { archivedAt: Date };
+}
+
+/** 汇总删除范围内的数据量与金额。 */
+async function buildPurgePreview(
+  project: Project & { archivedAt: Date },
+): Promise<ProjectPurgePreview> {
+  const [allAgg, voidAgg, paidAgg, attachmentCount, receiptCount, importBatchCount, memberCount] =
+    await Promise.all([
+      prisma.businessRecord.aggregate({
+        where: { projectId: project.id },
+        _count: { id: true },
+      }),
+      prisma.businessRecord.aggregate({
+        where: { projectId: project.id, isVoid: true },
+        _count: { id: true },
+      }),
+      prisma.businessRecord.aggregate({
+        where: { projectId: project.id, isVoid: false, status: 'PAID' },
+        _sum: { amount: true },
+      }),
+      prisma.recordAttachment.count({ where: { record: { projectId: project.id } } }),
+      prisma.receiptRecord.count({ where: { projectId: project.id } }),
+      prisma.importBatch.count({ where: { projectId: project.id } }),
+      prisma.projectMember.count({ where: { projectId: project.id } }),
+    ]);
+  const occupiedAgg = await prisma.businessRecord.aggregate({
+    where: { projectId: project.id, isVoid: false },
+    _sum: { amount: true },
+  });
+
+  return {
+    projectId: project.id,
+    code: project.code,
+    name: project.name,
+    archivedAt: project.archivedAt.toISOString(),
+    recordCount: allAgg._count.id,
+    voidRecordCount: voidAgg._count.id,
+    attachmentCount,
+    receiptCount,
+    importBatchCount,
+    memberCount,
+    paidAmount: paidAgg._sum.amount?.toFixed(2) ?? '0.00',
+    totalOccupied: occupiedAgg._sum.amount?.toFixed(2) ?? '0.00',
+  };
+}
+
+/** GET 前瞻:删除预览(不落任何变更)。 */
+export async function getPurgePreview(id: string, actor: PurgeActor): Promise<ProjectPurgePreview> {
+  const project = await loadPurgeTarget(id, actor);
+  return buildPurgePreview(project);
+}
+
+/**
+ * 彻底删除已归档项目:单事务内按依赖顺序清空全部子数据 + 项目行。
+ *
+ * 前置:project:delete(仅 ADMIN)+ 管理员登录会话(机器凭证一律 403)+
+ * 已归档 + confirmCode 与项目编号一致(服务端强校验,不能只靠前端状态)。
+ * 不可逆:业务记录/科目树/各层预算/调整/科目变更/初始预算申请/到账/导入批次/
+ * 成员全部物理删除;audit_logs.projectId 随项目删除被 FK SetNull(行保留,快照可追溯);
+ * approval_logs 为多态引用,按「审计类只增不删」原则保留。
+ */
+export async function purgeArchivedProject(
+  id: string,
+  actor: PurgeActor,
+  confirmCode: string | undefined,
+): Promise<ProjectPurgePreview> {
+  const project = await loadPurgeTarget(id, actor);
+  // 确认编号双侧归一化比对(codex P2):建项目入口未 trim 编号,若只 trim 输入侧,
+  // 库内带空白的编号将永远无法通过确认。
+  if (!confirmCode || confirmCode.trim() !== project.code.trim()) {
+    throw new HTTPError(422, '项目编号确认不一致;请在确认弹窗中输入项目编号后再执行彻底删除');
+  }
+  const preview = await buildPurgePreview(project);
+  const purgedAt = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    // 事务内锁行并复核归档态(codex P1):预览/校验与删除之间存在「取消归档」竞态窗口,
+    // 以删除事务内的锁定读为准,防止误删已恢复为活跃的项目。
+    await tx.$queryRaw`SELECT id FROM projects WHERE id = ${id}::uuid FOR UPDATE`;
+    const fresh = await tx.project.findUnique({
+      where: { id },
+      select: { archivedAt: true },
+    });
+    if (!fresh?.archivedAt) {
+      throw new HTTPError(409, '项目已恢复为活跃状态,本次彻底删除已取消');
+    }
+    // FK 全库默认 Restrict(仅附件随记录 Cascade),按依赖顺序清表:
+    // 记录域 → 调整域 → 申请域 → 预算层 → 导入域 → 科目/到账 → 成员 → 项目。
+    await tx.businessRecordHistory.deleteMany({
+      where: { businessRecord: { projectId: id } },
+    });
+    await tx.businessRecord.deleteMany({ where: { projectId: id } });
+    await tx.budgetAdjustmentLine.deleteMany({ where: { adjustment: { projectId: id } } });
+    await tx.budgetLock.deleteMany({ where: { projectId: id } });
+    await tx.budgetAdjustment.deleteMany({ where: { projectId: id } });
+    await tx.subjectChangeApplication.deleteMany({ where: { projectId: id } });
+    await tx.initialBudgetApplication.deleteMany({ where: { projectId: id } });
+    await tx.subjectTotalBudget.deleteMany({ where: { projectId: id } });
+    await tx.subjectBudget.deleteMany({ where: { projectId: id } });
+    await tx.annualBudget.deleteMany({ where: { projectId: id } });
+    await tx.projectBudget.deleteMany({ where: { projectId: id } });
+    await tx.importRow.deleteMany({ where: { batch: { projectId: id } } });
+    await tx.importBatch.deleteMany({ where: { projectId: id } });
+    await tx.budgetSubject.deleteMany({ where: { projectId: id } });
+    await tx.receiptRecord.deleteMany({ where: { projectId: id } });
+    await tx.projectMember.deleteMany({ where: { projectId: id } });
+    // 删除动作留痕:必须在 project.delete 之前落行(FK 指向仍存在的项目);
+    // 随后的删除经 ON DELETE SET NULL 把该行 projectId 自动置空,行本身保留可追溯。
+    await recordAudit(tx, {
+      projectId: id,
+      objectType: 'project',
+      objectId: id,
+      action: 'purge',
+      operatorId: actor.id,
+      before: {
+        code: project.code,
+        name: project.name,
+        archivedAt: project.archivedAt.toISOString(),
+        recordCount: preview.recordCount,
+        attachmentCount: preview.attachmentCount,
+        receiptCount: preview.receiptCount,
+        paidAmount: preview.paidAmount,
+        totalOccupied: preview.totalOccupied,
+      },
+      after: { purgedAt: purgedAt.toISOString() },
+    });
+    await tx.project.delete({ where: { id } });
+  }, BULK_TX_OPTIONS);
+  return preview;
 }

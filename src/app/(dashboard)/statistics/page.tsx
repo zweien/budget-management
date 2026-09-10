@@ -1,17 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { Download, RotateCcw, Search } from 'lucide-react';
+import { Download, Paperclip, RotateCcw, Search } from 'lucide-react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
 import { PageHeader } from '@/components/layout/page-header';
+import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import {
+  ColumnSettingsPopover,
+  useStoredColumnVisibility,
+  type ColumnSettingItem,
+} from '@/components/ui/column-settings';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -173,19 +180,53 @@ interface CustomRecord {
   subjectId: string;
   amount: string;
   businessDate: string;
+  completedDate: string | null;
   enteredAt: string;
   handler: string;
   summary: string;
   status: BusinessStatus;
   isVoid: boolean;
+  docNo: string | null;
   remark: string | null;
   subject: { id: string; code: string; name: string };
+  project: { id: string; code: string; name: string };
+  creatorName: string | null;
+  attachmentCount: number;
+}
+
+interface CustomStats {
+  totalCount: number;
+  validCount: number;
+  amountSum: string;
 }
 
 interface CustomResult {
   summary: CustomSummary;
   records: CustomRecord[];
+  total: number;
+  stats: CustomStats;
 }
+
+/** 明细列集(与业务录入页对齐,PR #51 统一口径;列设置弹层同款)。 */
+const RECORD_COLUMNS: ColumnSettingItem[] = [
+  { id: 'project', label: '项目' },
+  { id: 'budgetYear', label: '年度' },
+  { id: 'subject', label: '科目' },
+  { id: 'amount', label: '金额' },
+  { id: 'businessDate', label: '申请日期' },
+  { id: 'completedDate', label: '完成日期' },
+  { id: 'status', label: '状态' },
+  { id: 'handler', label: '经办人' },
+  { id: 'docNo', label: '单据编号' },
+  { id: 'summary', label: '摘要' },
+  { id: 'remark', label: '备注' },
+  { id: 'enteredAt', label: '录入时间' },
+  { id: 'creatorName', label: '录入人' },
+  { id: 'attachments', label: '附件' },
+];
+
+/** 分页条可选项(与业务录入页一致)。 */
+const PAGE_SIZES = [50, 100, 200];
 
 /** 查询筛选(全部可选;查询按钮落定,避免每次输入都请求)。 */
 interface CustomFilters {
@@ -222,34 +263,63 @@ function CustomStatisticsTab() {
   const [hasQueried, setHasQueried] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // 服务端分页(§11.3 接口已支持 page/pageSize,total 为筛选全集行数)。
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  // 已应用的筛选快照:翻页/每页条数/导出都用它,与当前展示结果同源
+  // (codex P2:直接用草稿 filters 会在改完条件未点查询时翻页漂移到另一组数据的第 N 页)。
+  const [appliedFilters, setAppliedFilters] = useState<CustomFilters>({});
+  // 请求序号:仅最新请求可落结果(codex P2:慢的旧响应不得覆盖新结果)。
+  const reqSeqRef = useRef(0);
+
+  // 列显隐偏好(localStorage 持久化,与录入页/项目列表页同款交互)。
+  const [columnVisibility, toggleColumn] = useStoredColumnVisibility('ui.statistics.columns');
+  const colVisible = (id: string) => columnVisibility[id] !== false;
+  const visibleColumnCount = RECORD_COLUMNS.filter((c) => colVisible(c.id)).length;
+
+  // 附件抽屉目标(跨项目:按行打开;统计页定位是只读分析,不可写)。
+  const [attachmentTarget, setAttachmentTarget] = useState<{
+    id: string;
+    projectId: string;
+    summary: string;
+    handler: string;
+    amount: string;
+    businessDate: string;
+    isVoid: boolean;
+  } | null>(null);
+
   // setLoading(true) 由调用方(事件处理器 / 初始 state)负责,函数内只做异步落值。
-  const runQuery = useCallback(async (f: CustomFilters) => {
+  const runQuery = useCallback(async (f: CustomFilters, p: number, ps: number) => {
+    const seq = ++reqSeqRef.current;
     try {
-      const suffix = buildCustomQuery(f);
-      const data = await apiFetch<CustomResult>(
-        `/api/statistics/custom${suffix ? `?${suffix}` : ''}`,
-      );
-      setResult(data);
+      const qs = new URLSearchParams(buildCustomQuery(f));
+      qs.set('page', String(p));
+      qs.set('pageSize', String(ps));
+      const data = await apiFetch<CustomResult>(`/api/statistics/custom?${qs.toString()}`);
+      if (seq === reqSeqRef.current) setResult(data);
     } catch (e) {
-      if (e instanceof Error) toast.error(e.message);
+      if (seq === reqSeqRef.current && e instanceof Error) toast.error(e.message);
     } finally {
-      setLoading(false);
-      setHasQueried(true);
+      if (seq === reqSeqRef.current) {
+        setLoading(false);
+        setHasQueried(true);
+      }
     }
   }, []);
 
-  // 首次挂载查询一次(loading 已为 true)。
+  // 首次挂载查询一次(loading 已为 true);同一序号守卫,防慢响应被后续查询乱序覆盖。
   useEffect(() => {
+    const seq = ++reqSeqRef.current;
     let cancelled = false;
-    apiFetch<CustomResult>('/api/statistics/custom')
+    apiFetch<CustomResult>('/api/statistics/custom?page=1&pageSize=50')
       .then((data) => {
-        if (!cancelled) setResult(data);
+        if (!cancelled && seq === reqSeqRef.current) setResult(data);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) toast.error(e.message);
+        if (!cancelled && seq === reqSeqRef.current && e instanceof Error) toast.error(e.message);
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!cancelled && seq === reqSeqRef.current) {
           setLoading(false);
           setHasQueried(true);
         }
@@ -261,21 +331,41 @@ function CustomStatisticsTab() {
 
   const handleQueryClick = () => {
     setLoading(true);
-    void runQuery(filters);
+    setPage(1);
+    setAppliedFilters(filters);
+    void runQuery(filters, 1, pageSize);
   };
 
   const handleReset = () => {
     setFilters({});
+    setAppliedFilters({});
     setLoading(true);
-    void runQuery({});
+    setPage(1);
+    void runQuery({}, 1, pageSize);
   };
 
-  /** 用当前筛选作为查询参数导出 xlsx(§10.5),与 /api/statistics/custom 同参。 */
+  /** 翻页/改每页条数:沿用已应用的筛选快照(与展示结果同源)。 */
+  const goToPage = (p: number) => {
+    setLoading(true);
+    setPage(p);
+    void runQuery(appliedFilters, p, pageSize);
+  };
+
+  const changePageSize = (ps: number) => {
+    setLoading(true);
+    setPageSize(ps);
+    setPage(1);
+    void runQuery(appliedFilters, 1, ps);
+  };
+
+  /** 用已应用筛选导出 xlsx(§10.5,所见即所导);不带分页参数,导出筛选全集。
+   *  附带浏览器时区偏移:导出的「录入时间」按用户时区渲染,与页面一致(codex P2)。 */
   const handleExport = async () => {
     setExporting(true);
     try {
-      const suffix = buildCustomQuery(filters);
-      await downloadFile(`/api/statistics/export${suffix ? `?${suffix}` : ''}`, 'statistics.xlsx');
+      const qs = new URLSearchParams(buildCustomQuery(appliedFilters));
+      qs.set('tzOffset', String(new Date().getTimezoneOffset()));
+      await downloadFile(`/api/statistics/export?${qs.toString()}`, 'statistics.xlsx');
       toast.success('已开始导出');
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);
@@ -285,6 +375,8 @@ function CustomStatisticsTab() {
   };
 
   const summary = result?.summary;
+  const total = result?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   const summaryCards: Array<{ label: string; node: React.ReactNode }> = summary
     ? [
@@ -439,6 +531,11 @@ function CustomStatisticsTab() {
               <Download />
               {exporting ? '导出中…' : '导出'}
             </Button>
+            <ColumnSettingsPopover
+              items={RECORD_COLUMNS}
+              columnVisibility={columnVisibility}
+              onToggle={toggleColumn}
+            />
           </div>
         </div>
       </Card>
@@ -460,65 +557,214 @@ function CustomStatisticsTab() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead>科目名称</TableHead>
-              <TableHead className="w-20">年度</TableHead>
-              <TableHead className="w-32">申请日期</TableHead>
-              <TableHead className="w-32 text-right">金额</TableHead>
-              <TableHead className="w-32">状态</TableHead>
-              <TableHead className="w-28">经办人</TableHead>
-              <TableHead>摘要</TableHead>
+              {colVisible('project') ? <TableHead>项目</TableHead> : null}
+              {colVisible('budgetYear') ? <TableHead className="w-20">年度</TableHead> : null}
+              {colVisible('subject') ? <TableHead>科目</TableHead> : null}
+              {colVisible('amount') ? (
+                <TableHead className="w-32 text-right">金额</TableHead>
+              ) : null}
+              {colVisible('businessDate') ? <TableHead className="w-28">申请日期</TableHead> : null}
+              {colVisible('completedDate') ? (
+                <TableHead className="w-28">完成日期</TableHead>
+              ) : null}
+              {colVisible('status') ? <TableHead className="w-32">状态</TableHead> : null}
+              {colVisible('handler') ? <TableHead className="w-24">经办人</TableHead> : null}
+              {colVisible('docNo') ? <TableHead className="w-32">单据编号</TableHead> : null}
+              {colVisible('summary') ? <TableHead className="max-w-40">摘要</TableHead> : null}
+              {colVisible('remark') ? <TableHead className="max-w-32">备注</TableHead> : null}
+              {colVisible('enteredAt') ? <TableHead className="w-36">录入时间</TableHead> : null}
+              {colVisible('creatorName') ? <TableHead className="w-24">录入人</TableHead> : null}
+              {colVisible('attachments') ? <TableHead className="w-16">附件</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="">
-                  <TableCell colSpan={8}>
+                  <TableCell colSpan={visibleColumnCount}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : (result?.records.length ?? 0) === 0 ? (
               <TableRow className="">
-                <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={visibleColumnCount}
+                  className="h-32 text-center text-muted-foreground"
+                >
                   {hasQueried ? '没有匹配的业务记录' : '点击"查询"加载明细'}
                 </TableCell>
               </TableRow>
             ) : (
               result?.records.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="max-w-48 truncate" title={r.subject?.name}>
-                    {r.subject?.name ?? '—'}
-                  </TableCell>
-                  <TableCell className="tabular-nums">{r.budgetYear}</TableCell>
-                  <TableCell className="tabular-nums">{formatDate(r.businessDate)}</TableCell>
-                  <TableCell>
-                    <MoneyText value={r.amount} riskOnNegative={false} />
-                  </TableCell>
-                  <TableCell>
-                    {r.isVoid ? (
-                      <Badge variant="error">已作废</Badge>
-                    ) : (
-                      <Badge variant={STATUS_BADGE[r.status] ?? 'secondary'}>
-                        {STATUS_LABEL[r.status] ?? r.status}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{r.handler}</TableCell>
-                  <TableCell className="max-w-48 truncate" title={r.summary}>
-                    {r.summary || <span className="text-mute">—</span>}
-                  </TableCell>
+                  {colVisible('project') ? (
+                    <TableCell>
+                      <Link
+                        href={`/projects/${r.projectId}/records`}
+                        className="text-link underline-offset-4 hover:underline"
+                      >
+                        <span className="block max-w-44 truncate" title={r.project?.name}>
+                          {r.project?.name ?? '—'}
+                        </span>
+                      </Link>
+                    </TableCell>
+                  ) : null}
+                  {colVisible('budgetYear') ? (
+                    <TableCell className="tabular-nums">{r.budgetYear}</TableCell>
+                  ) : null}
+                  {colVisible('subject') ? (
+                    <TableCell className="max-w-48 truncate" title={r.subject?.name}>
+                      {r.subject?.name ?? '—'}
+                    </TableCell>
+                  ) : null}
+                  {colVisible('amount') ? (
+                    <TableCell>
+                      <MoneyText value={r.amount} riskOnNegative={false} />
+                    </TableCell>
+                  ) : null}
+                  {colVisible('businessDate') ? (
+                    <TableCell className="tabular-nums">{formatDate(r.businessDate)}</TableCell>
+                  ) : null}
+                  {colVisible('completedDate') ? (
+                    <TableCell className="tabular-nums">{formatDate(r.completedDate)}</TableCell>
+                  ) : null}
+                  {colVisible('status') ? (
+                    <TableCell>
+                      {r.isVoid ? (
+                        <Badge variant="error">已作废</Badge>
+                      ) : (
+                        <Badge variant={STATUS_BADGE[r.status] ?? 'secondary'}>
+                          {STATUS_LABEL[r.status] ?? r.status}
+                        </Badge>
+                      )}
+                    </TableCell>
+                  ) : null}
+                  {colVisible('handler') ? <TableCell>{r.handler}</TableCell> : null}
+                  {colVisible('docNo') ? (
+                    <TableCell>
+                      <span
+                        className="block max-w-32 truncate font-mono text-xs"
+                        title={r.docNo ?? undefined}
+                      >
+                        {r.docNo || '—'}
+                      </span>
+                    </TableCell>
+                  ) : null}
+                  {colVisible('summary') ? (
+                    <TableCell className="max-w-40 truncate" title={r.summary}>
+                      {r.summary || <span className="text-mute">—</span>}
+                    </TableCell>
+                  ) : null}
+                  {colVisible('remark') ? (
+                    <TableCell>
+                      {r.remark ? (
+                        <span
+                          className="block max-w-32 truncate text-muted-foreground"
+                          title={r.remark}
+                        >
+                          {r.remark}
+                        </span>
+                      ) : (
+                        <span className="text-mute">—</span>
+                      )}
+                    </TableCell>
+                  ) : null}
+                  {colVisible('enteredAt') ? (
+                    <TableCell className="tabular-nums">
+                      {r.enteredAt ? format(new Date(r.enteredAt), 'yyyy-MM-dd HH:mm') : '—'}
+                    </TableCell>
+                  ) : null}
+                  {colVisible('creatorName') ? <TableCell>{r.creatorName ?? '—'}</TableCell> : null}
+                  {colVisible('attachments') ? (
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1 px-2 text-mute"
+                        onClick={() =>
+                          setAttachmentTarget({
+                            id: r.id,
+                            projectId: r.projectId,
+                            summary: r.summary,
+                            handler: r.handler,
+                            amount: r.amount,
+                            businessDate: r.businessDate,
+                            isVoid: r.isVoid,
+                          })
+                        }
+                        aria-label={`查看报销凭证:${r.summary}`}
+                      >
+                        <Paperclip className="size-4" />
+                        {r.attachmentCount > 0 ? (
+                          <span className="tabular-nums">{r.attachmentCount}</span>
+                        ) : null}
+                      </Button>
+                    </TableCell>
+                  ) : null}
                 </TableRow>
               ))
             )}
           </TableBody>
         </Table>
-        {!loading && (result?.records.length ?? 0) > 0 ? (
-          <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-            共 {result?.records.length} 条记录
+        {!loading && result && result.records.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
+            <span className="flex items-center gap-1">
+              共 {result.total} 条 · 有效 {result.stats.validCount} 条 · 金额合计
+              <MoneyText
+                value={result.stats.amountSum}
+                riskOnNegative={false}
+                className="inline text-left"
+              />
+            </span>
+            <span className="flex items-center gap-2">
+              <span>
+                第 {page} / {pageCount} 页
+              </span>
+              <select
+                className="h-8 rounded-md border border-border bg-card px-2 text-sm"
+                value={pageSize}
+                onChange={(e) => changePageSize(Number(e.target.value))}
+                disabled={loading}
+                aria-label="每页条数"
+              >
+                {PAGE_SIZES.map((n) => (
+                  <option key={n} value={n}>
+                    {n} 条/页
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || loading}
+                onClick={() => goToPage(page - 1)}
+              >
+                上一页
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= pageCount || loading}
+                onClick={() => goToPage(page + 1)}
+              >
+                下一页
+              </Button>
+            </span>
           </div>
         ) : null}
       </div>
+
+      {/* 报销凭证附件抽屉(跨项目按行打开;统计页只读,不可上传) */}
+      <AttachmentSheet
+        projectId={attachmentTarget?.projectId ?? ''}
+        record={attachmentTarget}
+        canWrite={false}
+        open={attachmentTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setAttachmentTarget(null);
+        }}
+      />
     </div>
   );
 }

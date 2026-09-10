@@ -12,6 +12,7 @@ export type Action =
   | 'project:view' // 查看项目(台账/记录/统计等;所有登录用户,全项目可见)
   | 'project:create' // 新建项目(仅管理员)
   | 'project:edit' // 维护项目基础信息/归档(管理员或该项目 OWNER 成员)
+  | 'project:delete' // 彻底删除已归档项目(仅管理员;另拒一切机器凭证,红线在 service)
   | 'budget:editInitial' // 编制初始预算
   | 'budget:editSubjectTree' // 维护初始科目树
   | 'budget:adjust' // 发起预算调整
@@ -47,6 +48,7 @@ const ADMIN_ACTIONS = new Set<Action>([
   'project:view',
   'project:create',
   'project:edit',
+  'project:delete',
   'budget:editInitial',
   'budget:editSubjectTree',
   'budget:adjust',
@@ -78,6 +80,7 @@ export const UNATTENDED_EXCLUDED_ACTIONS = new Set<Action>([
   'record:void', // 作废(单条/批量)不可逆
   'budget:approve', // 审批:初始预算/预算调整/科目变更的通过与驳回
   'member:manage', // 项目成员与权限变更
+  'project:delete', // 彻底删除已归档项目(实际更严:一切机器凭证都被 service 红线拒绝,此处兜底)
 ]);
 
 /** 凭证档位「只读」允许的动作(查询/统计/审计;项目范围收窄仍生效)。 */
@@ -261,12 +264,14 @@ export async function requirePermission(
   // 归档项目只读(§codex P1):除豁免动作外,一切项目写动作在归档期间拒绝。
   // 前置执行(OWNER_EDIT/RECORD_WRITE 分支内有提前 return,放后面会被绕过)。
   // 豁免:查看、project:edit(恢复归档本身依赖它;updateProject 另有自己的 409)、
-  // 成员管理(项目行政事务)。project:view 不查询,读路径零额外开销。
+  // 成员管理(项目行政事务)、project:delete(彻底删除只对已归档项目开放,
+  // purge service 另有自己的归档前置校验)。project:view 不查询,读路径零额外开销。
   if (
     projectId &&
     action !== 'project:view' &&
     action !== 'project:edit' &&
-    action !== 'member:manage'
+    action !== 'member:manage' &&
+    action !== 'project:delete'
   ) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },

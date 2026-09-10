@@ -131,10 +131,11 @@ export interface CustomStatisticsSummary {
   executionRate: number | null;
 }
 
-/** §11.3 业务明细行(join 科目,便于前端展示科目编码/名称;creatorName=录入人姓名)。 */
+/** §11.3 业务明细行(join 科目/项目,便于前端展示名称与编号;creatorName=录入人姓名)。 */
 export type CustomStatisticsRecord = Omit<
   Prisma.BusinessRecordGetPayload<{
     include: {
+      project: { select: { id: true; code: true; name: true } };
       subject: { select: { id: true; code: true; name: true } };
       createdBy: { select: { name: true } };
       _count: { select: { attachments: true } };
@@ -210,7 +211,13 @@ export async function customStatistics(
     ...(filters.projectIds ?? []),
     ...(filters.projectId ? [filters.projectId] : []),
   ];
-  if (projectIdIn.length > 0) where.projectId = { in: projectIdIn };
+  if (projectIdIn.length > 0) {
+    where.projectId = { in: projectIdIn };
+  } else {
+    // 跨项目分支排除已归档项目(与 cross-project/balance/risk 口径对齐);
+    // 显式指定项目(含归档项目)仍放行——单项目视角本就是只读查看。
+    where.project = { archivedAt: null };
+  }
   const yearsIn = [
     ...(filters.budgetYears ?? []),
     ...(filters.budgetYear !== undefined ? [filters.budgetYear] : []),
@@ -339,6 +346,7 @@ export async function customStatistics(
     orderBy,
     ...paginate,
     include: {
+      project: { select: { id: true, code: true, name: true } },
       subject: { select: { id: true, code: true, name: true } },
       createdBy: { select: { name: true } },
       _count: { select: { attachments: true } },
@@ -382,9 +390,13 @@ export async function customStatistics(
   };
 
   // 5) 预算:筛选项目/年度对应的 subject_budgets.currentAmount 之和。
-  //    跨项目(无 projectId)且未指定年度时,预算口径无意义,置 0。
+  //    跨项目(无 projectId)分支排除已归档项目,与记录口径一致;未指定年度时预算为全年度口径。
   const sbWhere: Prisma.SubjectBudgetWhereInput = {};
-  if (filters.projectId) sbWhere.projectId = filters.projectId;
+  if (filters.projectId) {
+    sbWhere.projectId = filters.projectId;
+  } else {
+    sbWhere.project = { archivedAt: null };
+  }
   if (filters.budgetYear !== undefined) sbWhere.year = filters.budgetYear;
   const subjectBudgets = await prisma.subjectBudget.findMany({ where: sbWhere });
   const currentBudget = sumAmounts(subjectBudgets.map((sb) => fromStored(sb.currentAmount)));

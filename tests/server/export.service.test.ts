@@ -301,4 +301,47 @@ describe('export.service (integration, real PG)', () => {
     const buf = await exportStatistics({}, { id: outsiderId, role: UserRole.USER });
     expect(buf.length).toBeGreaterThan(0);
   });
+
+  it('exportStatistics: 录入时间按 tzOffset 指定的用户时区渲染(codex P2)', async () => {
+    const { project, leafA } = await seedApprovedProject('TZ');
+    const enteredAt = new Date('2026-09-01T00:30:00.000Z');
+    await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: 10,
+        businessDate: new Date('2026-09-01'),
+        enteredAt,
+        handler: 'tz',
+        summary: 'tz-export',
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      },
+    });
+
+    // 从明细表头动态定位「录入时间」列,读第一条数据行。
+    const findEnteredAt = async (buffer: Buffer): Promise<string> => {
+      const sheet = await readSheet(buffer);
+      for (let r = 5; r <= 40; r++) {
+        const headerVals = (sheet.getRow(r).values as unknown[]).slice(1);
+        const idx = headerVals.findIndex((v) => v != null && String(v) === '录入时间');
+        if (idx >= 0) {
+          return String(sheet.getCell(r + 1, idx + 1).value ?? '');
+        }
+      }
+      return '';
+    };
+
+    // UTC+8(getTimezoneOffset = -480)→ 08:30:00;UTC(0)→ 00:30:00。
+    const plus8 = await exportStatistics({ projectId: project.id }, adminUser(), {
+      enteredAtOffsetMinutes: -480,
+    });
+    expect(await findEnteredAt(plus8)).toBe('2026-09-01 08:30:00');
+    const utc = await exportStatistics({ projectId: project.id }, adminUser(), {
+      enteredAtOffsetMinutes: 0,
+    });
+    expect(await findEnteredAt(utc)).toBe('2026-09-01 00:30:00');
+  });
 });

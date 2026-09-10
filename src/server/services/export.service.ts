@@ -170,20 +170,29 @@ function ledgerNodeRow(node: LedgerNode): (string | number)[] {
  * - 空行。
  * - 汇总行:当前预算 / 已支出 / 应付未付 / 总占用 / 结余 / 执行率。
  * - 空行。
- * - 明细表头 + 明细行(业务记录)。
+ * - 明细表头 + 明细行(业务记录;列集与统计页对齐,另含编号列供对账)。
  */
 export async function exportStatistics(
   filters: CustomStatisticsFilters,
   user: ExportUser,
+  tz?: { enteredAtOffsetMinutes?: number },
 ): Promise<Buffer> {
   // 1) 复用 statistics service(内部已做权限 + 占用计算)。
   const result = await customStatistics(filters, user);
 
-  // 2) 元信息:操作人姓名。
-  const operator = await prisma.user.findUnique({
-    where: { id: user.id },
-    select: { name: true },
-  });
+  // 2) 元信息:操作人姓名 + 项目编号/名称(筛选描述用,避免打印 UUID)。
+  const [operator, project] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: user.id },
+      select: { name: true },
+    }),
+    filters.projectId
+      ? prisma.project.findUnique({
+          where: { id: filters.projectId },
+          select: { code: true, name: true },
+        })
+      : Promise.resolve(null),
+  ]);
 
   // 3) 构造 workbook。
   const workbook = new ExcelJS.Workbook();
@@ -192,7 +201,7 @@ export async function exportStatistics(
   const sheet = workbook.addWorksheet('自定义统计');
 
   // 元信息:筛选条件。
-  const filterDesc = describeFilters(filters);
+  const filterDesc = describeFilters(filters, project);
   sheet.getCell('A1').value = `筛选条件:${filterDesc}`;
   sheet.getCell('A2').value = `导出时间:${formatNow()}`;
   sheet.getCell('A3').value = `操作人:${operator?.name ?? user.name ?? user.id}`;
@@ -218,6 +227,7 @@ export async function exportStatistics(
   const headers = [
     '业务日期',
     '项目编号',
+    '项目名称',
     '预算年度',
     '科目编码',
     '科目名称',
@@ -226,6 +236,12 @@ export async function exportStatistics(
     '摘要',
     '业务状态',
     '是否作废',
+    '完成日期',
+    '单据编号',
+    '备注',
+    '录入时间',
+    '录入人',
+    '附件数',
   ];
   const headerRow = sheet.getRow(headerRowIdx);
   headerRow.values = headers;
@@ -249,7 +265,7 @@ export async function exportStatistics(
   let r = headerRowIdx + 1;
   for (const rec of result.records) {
     const row = sheet.getRow(r);
-    row.values = statisticsRecordRow(rec);
+    row.values = statisticsRecordRow(rec, tz);
     r++;
   }
 
@@ -262,11 +278,15 @@ export async function exportStatistics(
   return toBuffer(await workbook.xlsx.writeBuffer());
 }
 
-/** 单条业务记录 → 行数组。金额字符串(2 位小数),业务日期 ISO。 */
-function statisticsRecordRow(rec: CustomStatisticsResult['records'][number]): (string | number)[] {
+/** 单条业务记录 → 行数组。金额字符串(2 位小数),业务/完成日期 ISO,录入时间按用户时区。 */
+function statisticsRecordRow(
+  rec: CustomStatisticsResult['records'][number],
+  tz?: { enteredAtOffsetMinutes?: number },
+): (string | number)[] {
   return [
     toIsoDate(rec.businessDate),
-    rec.projectId,
+    rec.project?.code ?? '',
+    rec.project?.name ?? '',
     rec.budgetYear,
     rec.subject?.code ?? '',
     rec.subject?.name ?? '',
@@ -276,13 +296,24 @@ function statisticsRecordRow(rec: CustomStatisticsResult['records'][number]): (s
     rec.summary ?? '',
     rec.status,
     rec.isVoid ? '是' : '否',
+    rec.completedDate ? toIsoDate(rec.completedDate) : '',
+    rec.docNo ?? '',
+    rec.remark ?? '',
+    toIsoDateTime(rec.enteredAt, tz?.enteredAtOffsetMinutes),
+    rec.creatorName ?? '',
+    rec.attachmentCount,
   ];
 }
 
-/** 将 filters 渲染为人类可读的筛选条件描述。 */
-function describeFilters(filters: CustomStatisticsFilters): string {
+/** 将 filters 渲染为人类可读的筛选条件描述(项目用编号+名称,不用 UUID)。 */
+function describeFilters(
+  filters: CustomStatisticsFilters,
+  project?: { code: string; name: string } | null,
+): string {
   const parts: string[] = [];
-  if (filters.projectId) parts.push(`项目=${filters.projectId}`);
+  if (filters.projectId) {
+    parts.push(`项目=${project ? `${project.code} ${project.name}` : filters.projectId}`);
+  }
   if (filters.budgetYear !== undefined) parts.push(`年度=${filters.budgetYear}`);
   if (filters.subject) parts.push(`科目=${filters.subject}`);
   if (filters.status) parts.push(`状态=${filters.status}`);
@@ -298,11 +329,27 @@ function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** 当前时间 → yyyy-mm-dd HH:MM:SS(本地时区描述,导出时刻)。 */
-function formatNow(): string {
-  const d = new Date();
+/**
+ * Date → yyyy-MM-dd HH:mm:ss。
+ * 给定 offsetMinutes(浏览器 Date#getTimezoneOffset 值,UTC+8 = -480)时,
+ * 用 UTC 刻度平移取墙面时间,按用户时区渲染(codex P2:与页面显示一致,不随服务器时区漂移);
+ * 未给定时按服务器本地时区(formatNow 元信息沿用)。
+ */
+function toIsoDateTime(d: Date, offsetMinutes?: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const fmt = (t: Date, utc: boolean) =>
+    utc
+      ? `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())}`
+      : `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+  if (typeof offsetMinutes === 'number' && Number.isFinite(offsetMinutes)) {
+    return fmt(new Date(d.getTime() - offsetMinutes * 60_000), true);
+  }
+  return fmt(d, false);
+}
+
+/** 当前时间 → yyyy-MM-dd HH:MM:SS(本地时区描述,导出时刻)。 */
+function formatNow(): string {
+  return toIsoDateTime(new Date());
 }
 
 // ---------------- 经费余额导出 ----------------
