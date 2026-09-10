@@ -175,6 +175,7 @@ function ledgerNodeRow(node: LedgerNode): (string | number)[] {
 export async function exportStatistics(
   filters: CustomStatisticsFilters,
   user: ExportUser,
+  tz?: { enteredAtOffsetMinutes?: number },
 ): Promise<Buffer> {
   // 1) 复用 statistics service(内部已做权限 + 占用计算)。
   const result = await customStatistics(filters, user);
@@ -264,7 +265,7 @@ export async function exportStatistics(
   let r = headerRowIdx + 1;
   for (const rec of result.records) {
     const row = sheet.getRow(r);
-    row.values = statisticsRecordRow(rec);
+    row.values = statisticsRecordRow(rec, tz);
     r++;
   }
 
@@ -277,8 +278,11 @@ export async function exportStatistics(
   return toBuffer(await workbook.xlsx.writeBuffer());
 }
 
-/** 单条业务记录 → 行数组。金额字符串(2 位小数),业务/完成日期 ISO,录入时间本地时分秒。 */
-function statisticsRecordRow(rec: CustomStatisticsResult['records'][number]): (string | number)[] {
+/** 单条业务记录 → 行数组。金额字符串(2 位小数),业务/完成日期 ISO,录入时间按用户时区。 */
+function statisticsRecordRow(
+  rec: CustomStatisticsResult['records'][number],
+  tz?: { enteredAtOffsetMinutes?: number },
+): (string | number)[] {
   return [
     toIsoDate(rec.businessDate),
     rec.project?.code ?? '',
@@ -295,7 +299,7 @@ function statisticsRecordRow(rec: CustomStatisticsResult['records'][number]): (s
     rec.completedDate ? toIsoDate(rec.completedDate) : '',
     rec.docNo ?? '',
     rec.remark ?? '',
-    toIsoDateTime(rec.enteredAt),
+    toIsoDateTime(rec.enteredAt, tz?.enteredAtOffsetMinutes),
     rec.creatorName ?? '',
     rec.attachmentCount,
   ];
@@ -325,10 +329,22 @@ function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Date → 本地时区 yyyy-MM-dd HH:mm:ss(录入时间等瞬间字段)。 */
-function toIsoDateTime(d: Date): string {
+/**
+ * Date → yyyy-MM-dd HH:mm:ss。
+ * 给定 offsetMinutes(浏览器 Date#getTimezoneOffset 值,UTC+8 = -480)时,
+ * 用 UTC 刻度平移取墙面时间,按用户时区渲染(codex P2:与页面显示一致,不随服务器时区漂移);
+ * 未给定时按服务器本地时区(formatNow 元信息沿用)。
+ */
+function toIsoDateTime(d: Date, offsetMinutes?: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const fmt = (t: Date, utc: boolean) =>
+    utc
+      ? `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())}`
+      : `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+  if (typeof offsetMinutes === 'number' && Number.isFinite(offsetMinutes)) {
+    return fmt(new Date(d.getTime() - offsetMinutes * 60_000), true);
+  }
+  return fmt(d, false);
 }
 
 /** 当前时间 → yyyy-MM-dd HH:MM:SS(本地时区描述,导出时刻)。 */

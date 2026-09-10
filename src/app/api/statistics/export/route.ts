@@ -87,7 +87,14 @@ export const GET = withRoute(async (req: NextRequest) => {
     filters.includeVoid = true;
   }
 
-  const buffer = await exportStatistics(filters, user);
+  // 用户时区偏移(浏览器 Date#getTimezoneOffset 分钟,UTC+8 = -480):
+  // 导出的「录入时间」按用户时区渲染,与页面显示一致(codex P2);非法值忽略,回落服务器时区。
+  const tzParam = sp.get('tzOffset');
+  const tzOffset = tzParam === null ? NaN : Number(tzParam);
+  const enteredAtOffsetMinutes =
+    Number.isInteger(tzOffset) && Math.abs(tzOffset) <= 840 ? tzOffset : undefined;
+
+  const buffer = await exportStatistics(filters, user, { enteredAtOffsetMinutes });
   return new NextResponse(buffer as unknown as BodyInit, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

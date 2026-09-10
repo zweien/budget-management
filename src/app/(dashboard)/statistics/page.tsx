@@ -358,12 +358,14 @@ function CustomStatisticsTab() {
     void runQuery(appliedFilters, 1, ps);
   };
 
-  /** 用已应用筛选导出 xlsx(§10.5,所见即所导);不带分页参数,导出筛选全集。 */
+  /** 用已应用筛选导出 xlsx(§10.5,所见即所导);不带分页参数,导出筛选全集。
+   *  附带浏览器时区偏移:导出的「录入时间」按用户时区渲染,与页面一致(codex P2)。 */
   const handleExport = async () => {
     setExporting(true);
     try {
-      const suffix = buildCustomQuery(appliedFilters);
-      await downloadFile(`/api/statistics/export${suffix ? `?${suffix}` : ''}`, 'statistics.xlsx');
+      const qs = new URLSearchParams(buildCustomQuery(appliedFilters));
+      qs.set('tzOffset', String(new Date().getTimezoneOffset()));
+      await downloadFile(`/api/statistics/export?${qs.toString()}`, 'statistics.xlsx');
       toast.success('已开始导出');
     } catch (e) {
       if (e instanceof Error) toast.error(e.message);

@@ -140,6 +140,13 @@ describe('project purge (integration, real PG)', () => {
     await expect(
       purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN }, `wrong-${code}`),
     ).rejects.toMatchObject({ status: 422 });
+    // 编号双侧归一化(codex P2):库内编号未 trim 时,输入带空白仍应通过确认。
+    const purgeResult = await purgeArchivedProject(
+      project.id,
+      { id: adminId, role: UserRole.ADMIN },
+      `  ${code}  `,
+    );
+    expect(purgeResult.recordCount).toBe(1);
   });
 
   it('purge: 归档项目 → 子数据物理删除 + 审计留痕(projectId SetNull)+ 预览数字正确', async () => {

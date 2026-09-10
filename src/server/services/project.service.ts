@@ -565,7 +565,9 @@ export async function purgeArchivedProject(
   confirmCode: string | undefined,
 ): Promise<ProjectPurgePreview> {
   const project = await loadPurgeTarget(id, actor);
-  if (!confirmCode || confirmCode.trim() !== project.code) {
+  // 确认编号双侧归一化比对(codex P2):建项目入口未 trim 编号,若只 trim 输入侧,
+  // 库内带空白的编号将永远无法通过确认。
+  if (!confirmCode || confirmCode.trim() !== project.code.trim()) {
     throw new HTTPError(422, '项目编号确认不一致;请在确认弹窗中输入项目编号后再执行彻底删除');
   }
   const preview = await buildPurgePreview(project);
