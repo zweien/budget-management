@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { Download, Paperclip, RotateCcw, Search } from 'lucide-react';
 import Link from 'next/link';
@@ -266,6 +266,11 @@ function CustomStatisticsTab() {
   // 服务端分页(§11.3 接口已支持 page/pageSize,total 为筛选全集行数)。
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  // 已应用的筛选快照:翻页/每页条数/导出都用它,与当前展示结果同源
+  // (codex P2:直接用草稿 filters 会在改完条件未点查询时翻页漂移到另一组数据的第 N 页)。
+  const [appliedFilters, setAppliedFilters] = useState<CustomFilters>({});
+  // 请求序号:仅最新请求可落结果(codex P2:慢的旧响应不得覆盖新结果)。
+  const reqSeqRef = useRef(0);
 
   // 列显隐偏好(localStorage 持久化,与录入页/项目列表页同款交互)。
   const [columnVisibility, toggleColumn] = useStoredColumnVisibility('ui.statistics.columns');
@@ -285,32 +290,36 @@ function CustomStatisticsTab() {
 
   // setLoading(true) 由调用方(事件处理器 / 初始 state)负责,函数内只做异步落值。
   const runQuery = useCallback(async (f: CustomFilters, p: number, ps: number) => {
+    const seq = ++reqSeqRef.current;
     try {
       const qs = new URLSearchParams(buildCustomQuery(f));
       qs.set('page', String(p));
       qs.set('pageSize', String(ps));
       const data = await apiFetch<CustomResult>(`/api/statistics/custom?${qs.toString()}`);
-      setResult(data);
+      if (seq === reqSeqRef.current) setResult(data);
     } catch (e) {
-      if (e instanceof Error) toast.error(e.message);
+      if (seq === reqSeqRef.current && e instanceof Error) toast.error(e.message);
     } finally {
-      setLoading(false);
-      setHasQueried(true);
+      if (seq === reqSeqRef.current) {
+        setLoading(false);
+        setHasQueried(true);
+      }
     }
   }, []);
 
-  // 首次挂载查询一次(loading 已为 true)。
+  // 首次挂载查询一次(loading 已为 true);同一序号守卫,防慢响应被后续查询乱序覆盖。
   useEffect(() => {
+    const seq = ++reqSeqRef.current;
     let cancelled = false;
     apiFetch<CustomResult>('/api/statistics/custom?page=1&pageSize=50')
       .then((data) => {
-        if (!cancelled) setResult(data);
+        if (!cancelled && seq === reqSeqRef.current) setResult(data);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) toast.error(e.message);
+        if (!cancelled && seq === reqSeqRef.current && e instanceof Error) toast.error(e.message);
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!cancelled && seq === reqSeqRef.current) {
           setLoading(false);
           setHasQueried(true);
         }
@@ -323,35 +332,37 @@ function CustomStatisticsTab() {
   const handleQueryClick = () => {
     setLoading(true);
     setPage(1);
+    setAppliedFilters(filters);
     void runQuery(filters, 1, pageSize);
   };
 
   const handleReset = () => {
     setFilters({});
+    setAppliedFilters({});
     setLoading(true);
     setPage(1);
     void runQuery({}, 1, pageSize);
   };
 
-  /** 翻页/改每页条数:沿用当前筛选。 */
+  /** 翻页/改每页条数:沿用已应用的筛选快照(与展示结果同源)。 */
   const goToPage = (p: number) => {
     setLoading(true);
     setPage(p);
-    void runQuery(filters, p, pageSize);
+    void runQuery(appliedFilters, p, pageSize);
   };
 
   const changePageSize = (ps: number) => {
     setLoading(true);
     setPageSize(ps);
     setPage(1);
-    void runQuery(filters, 1, ps);
+    void runQuery(appliedFilters, 1, ps);
   };
 
-  /** 用当前筛选作为查询参数导出 xlsx(§10.5);不带分页参数,导出筛选全集。 */
+  /** 用已应用筛选导出 xlsx(§10.5,所见即所导);不带分页参数,导出筛选全集。 */
   const handleExport = async () => {
     setExporting(true);
     try {
-      const suffix = buildCustomQuery(filters);
+      const suffix = buildCustomQuery(appliedFilters);
       await downloadFile(`/api/statistics/export${suffix ? `?${suffix}` : ''}`, 'statistics.xlsx');
       toast.success('已开始导出');
     } catch (e) {
@@ -712,6 +723,7 @@ function CustomStatisticsTab() {
                 className="h-8 rounded-md border border-border bg-card px-2 text-sm"
                 value={pageSize}
                 onChange={(e) => changePageSize(Number(e.target.value))}
+                disabled={loading}
                 aria-label="每页条数"
               >
                 {PAGE_SIZES.map((n) => (

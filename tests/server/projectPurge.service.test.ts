@@ -90,26 +90,56 @@ describe('project purge (integration, real PG)', () => {
     return { project, subject, record, code };
   }
 
-  it('purge: 未归档 409;机器凭证 403(含 attended);非管理员 403', async () => {
-    const { project } = await seedProjectWithRecord();
+  it('purge: 未归档 409;机器凭证 403(含 attended,无人值守落被拒审计);非管理员 403;编号不符 422', async () => {
+    const { project, code } = await seedProjectWithRecord();
 
     await expect(
-      purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN }),
+      purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN }, undefined),
     ).rejects.toMatchObject({ status: 409 });
     await expect(
-      purgeArchivedProject(project.id, {
-        id: adminId,
-        role: UserRole.ADMIN,
-        viaApiKey: true,
-      }),
+      purgeArchivedProject(
+        project.id,
+        { id: adminId, role: UserRole.ADMIN, viaApiKey: true },
+        undefined,
+      ),
     ).rejects.toMatchObject({ status: 403 });
+    // 无人值守凭证:403 且经 requirePermission 路径写 unattended.denied 审计(codex P2)。
     await expect(
-      purgeArchivedProject(project.id, { id: outsiderId, role: UserRole.USER }),
+      purgeArchivedProject(
+        project.id,
+        {
+          id: adminId,
+          role: UserRole.ADMIN,
+          viaApiKey: true,
+          unattended: true,
+          apiKeyPrefix: 'bma_test',
+        },
+        undefined,
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    const deniedAudit = await prisma.auditLog.findFirst({
+      where: { operatorId: adminId, action: 'unattended.denied' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect(deniedAudit).not.toBeNull();
+    const deniedAfter = deniedAudit!.afterData as { attemptedAction?: string };
+    expect(deniedAfter?.attemptedAction).toBe('project:delete');
+    await expect(
+      purgeArchivedProject(project.id, { id: outsiderId, role: UserRole.USER }, undefined),
     ).rejects.toMatchObject({ status: 403 });
     // 预览接口同一套前置。
     await expect(
       getPurgePreview(project.id, { id: outsiderId, role: UserRole.USER }),
     ).rejects.toMatchObject({ status: 403 });
+
+    // 已归档但确认编号不符/缺失 → 422(codex P1:编号确认必须服务端强校验)。
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    await expect(
+      purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN }, undefined),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(
+      purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN }, `wrong-${code}`),
+    ).rejects.toMatchObject({ status: 422 });
   });
 
   it('purge: 归档项目 → 子数据物理删除 + 审计留痕(projectId SetNull)+ 预览数字正确', async () => {
@@ -134,10 +164,11 @@ describe('project purge (integration, real PG)', () => {
     expect(preview.totalOccupied).toBe('500.00');
     expect(preview.receiptCount).toBe(1);
 
-    const result = await purgeArchivedProject(project.id, {
-      id: adminId,
-      role: UserRole.ADMIN,
-    });
+    const result = await purgeArchivedProject(
+      project.id,
+      { id: adminId, role: UserRole.ADMIN },
+      code,
+    );
     expect(result.recordCount).toBe(1);
 
     // 数据消失。
@@ -173,7 +204,7 @@ describe('project purge (integration, real PG)', () => {
     expect(explicit.records.some((r) => r.id === record.id)).toBe(true);
 
     // purge 后两条路径都不再有(显式指定已删项目:无 404 语义,但记录为空)。
-    await purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    await purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN }, project.code);
     const crossAfter = await customStatistics({}, outsider);
     expect(crossAfter.records.some((r) => r.id === record.id)).toBe(false);
     const explicitAfter = await customStatistics({ projectId: project.id }, outsider);

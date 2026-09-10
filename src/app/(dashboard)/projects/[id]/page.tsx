@@ -155,7 +155,11 @@ function DangerZoneCard({
     if (!canConfirm || purging) return;
     setPurging(true);
     try {
-      await apiFetch(`/api/projects/${projectId}/purge`, { method: 'POST' });
+      // confirmCode 服务端强校验(codex P1):输入编号确认不能只存在于前端状态。
+      await apiFetch(`/api/projects/${projectId}/purge`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmCode: confirmText.trim() }),
+      });
       toast.success('项目已彻底删除');
       setOpen(false);
       onPurged();
