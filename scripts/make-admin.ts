@@ -1,11 +1,15 @@
 /**
  * 将本地用户提升为 ADMIN(SSO 首个管理员引导用)。
  *
- * 用法: npx tsx scripts/make-admin.ts <用户名或用户ID>
+ * 用法: npx tsx scripts/make-admin.ts <姓名/显示名 或 用户ID 或 SSO sub(UUID)>
  *
  * 场景:SSO 首次登录走 JIT 自动建档(默认 USER)。第一个需要管理员权限的人,
  * 先用 Authentik 账号登录一次系统(完成建档),再运行本脚本提升。
  * 之后即可在「项目详情 → 成员管理」界面内维护各项目负责人。
+ *
+ * 查找键:UUID 输入按 本地id / authSubject(SSO sub) / name 匹配;
+ * 非 UUID 按 name 匹配。回调建档显示名优先(name 优先于 preferred_username)时,
+ * Authentik 登录名不入库——请改用显示名或 sub。
  */
 import { PrismaClient } from '@prisma/client';
 
@@ -20,11 +24,15 @@ async function main() {
 
   // id 是 UUID 列:非 UUID 输入不能只靠 OR 兜底(Prisma 会先在校验阶段报错)。
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
+  // UUID 输入同时匹配 authSubject(SSO sub)——回调显示名优先建档后,sub 是最稳定的机器键。
   const user = await prisma.user.findFirst({
-    where: isUuid ? { OR: [{ id: key }, { name: key }] } : { name: key },
+    where: isUuid ? { OR: [{ id: key }, { authSubject: key }, { name: key }] } : { name: key },
   });
   if (!user) {
-    console.error(`未找到用户: ${key}(请先通过 SSO 登录一次完成自动建档)`);
+    console.error(
+      `未找到用户: ${key}(请先通过 SSO 登录一次完成自动建档;` +
+        '显示名优先建档时 Authentik 登录名不入库,可改传显示名或 SSO sub UUID)',
+    );
     process.exit(1);
   }
   if (user.role === 'ADMIN') {

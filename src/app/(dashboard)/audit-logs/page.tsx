@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Search } from 'lucide-react';
+import { ChevronDown, RotateCcw, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
 
@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TableEmpty, TablePagination } from '@/components/ui/table-pagination';
 import {
   Table,
   TableBody,
@@ -169,46 +170,52 @@ export default function AuditLogsPage() {
     return `/api/audit-logs?${qs.toString()}`;
   }, []);
 
+  // 请求序号:仅最新请求可落结果(与统计页同款守卫,防慢旧响应覆盖新结果)。
+  const reqSeqRef = useRef(0);
   // setLoading 由调用方(初始 state / 事件处理器)负责,函数内只做异步落值。
   const runQuery = useCallback(
     async (filters: FilterValues, p: number, size: number) => {
+      const seq = ++reqSeqRef.current;
       setFatal(null);
       try {
         const data = await apiFetch<AuditLogResponse>(buildQuery(filters, p, size));
+        if (seq !== reqSeqRef.current) return;
         setLogs(data.logs);
         setTotal(data.total);
       } catch (e) {
         const err = e as Error & { status?: number };
+        if (seq !== reqSeqRef.current) return;
         if (err.status === 403) {
           setFatal('无权访问操作日志');
         } else {
           setFatal(err.message || '加载操作日志失败');
         }
       } finally {
-        setLoading(false);
+        if (seq === reqSeqRef.current) setLoading(false);
       }
     },
     [buildQuery],
   );
 
-  // 首次挂载查询一次(loading 已为 true)。
+  // 首次挂载查询一次(loading 已为 true);纳入同一请求序号序列。
   useEffect(() => {
+    const seq = ++reqSeqRef.current;
     let cancelled = false;
     apiFetch<AuditLogResponse>(buildQuery({}, 1, 20))
       .then((data) => {
-        if (!cancelled) {
+        if (!cancelled && seq === reqSeqRef.current) {
           setLogs(data.logs);
           setTotal(data.total);
         }
       })
       .catch((e: unknown) => {
         const err = e as Error & { status?: number };
-        if (!cancelled) {
+        if (!cancelled && seq === reqSeqRef.current) {
           setFatal(err.status === 403 ? '无权访问操作日志' : err.message || '加载操作日志失败');
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && seq === reqSeqRef.current) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -267,8 +274,6 @@ export default function AuditLogsPage() {
       </div>
     );
   }
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const filterSelect = (
     label: string,
@@ -364,11 +369,7 @@ export default function AuditLogsPage() {
                 </TableRow>
               ))
             ) : logs.length === 0 ? (
-              <TableRow className="">
-                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                  暂无操作日志
-                </TableCell>
-              </TableRow>
+              <TableEmpty colSpan={6}>暂无操作日志</TableEmpty>
             ) : (
               logs.map((r) => {
                 const expandable = r.beforeData !== null || r.afterData !== null;
@@ -431,47 +432,16 @@ export default function AuditLogsPage() {
           </TableBody>
         </Table>
 
-        {/* 服务端分页 */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2">
-          <span className="text-xs text-mute tabular-nums">共 {total} 条</span>
-          <div className="flex items-center gap-2">
-            <Select value={String(pageSize)} onValueChange={(v) => goToPage(1, Number(v))}>
-              <SelectTrigger size="sm" aria-label="每页条数">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[10, 20, 50, 100].map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    {n} 条/页
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {page} / {totalPages} 页
-            </span>
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-7"
-              aria-label="上一页"
-              disabled={loading || page <= 1}
-              onClick={() => goToPage(page - 1)}
-            >
-              <ChevronLeft />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-7"
-              aria-label="下一页"
-              disabled={loading || page >= totalPages}
-              onClick={() => goToPage(page + 1)}
-            >
-              <ChevronRight />
-            </Button>
-          </div>
-        </div>
+        {/* 服务端分页(共享组件) */}
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          loading={loading}
+          onPageChange={(p) => goToPage(p)}
+          onPageSizeChange={(n) => goToPage(1, n)}
+          pageSizes={[10, 20, 50, 100]}
+        />
       </div>
     </div>
   );
