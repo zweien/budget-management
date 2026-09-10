@@ -397,7 +397,7 @@ function BusinessRecordsPageInner() {
       budgetYear: new Date().getFullYear(),
       subjectId: undefined,
       amount: undefined,
-      businessDate: new Date(),
+      businessDate: undefined, // 申请日期默认留空,需要时再填;提交留空由服务端默认当天
       completedDate: undefined,
       handler: '',
       summary: '',

@@ -237,7 +237,8 @@ function UnifiedRecordsPageInner() {
       budgetYear: new Date().getFullYear(),
       subjectId: '',
       amount: '',
-      businessDate: new Date(),
+      businessDate: undefined, // 申请日期默认留空,需要时再填;提交留空由服务端默认当天
+
       status: 'PLACEHOLDER',
       handler: '',
       summary: '',
@@ -920,13 +921,13 @@ function UnifiedRecordsPageInner() {
       // 预警合并为一条提示;口径细节在项目记录页的弹窗里列明。
       const overAny = res.overBudget || res.overTotalBudget || res.overSubjectTotal;
       toast.success(overAny ? '已录入(超出预算,请关注)' : '已录入');
-      // 连续录入:清金额/摘要/备注,日期归零到当天,焦点留在表单。
+      // 连续录入:清金额/摘要/备注/日期(留空),焦点留在表单。
       entryForm.reset({
         ...values,
         amount: '',
         summary: '',
         remark: '',
-        businessDate: new Date(),
+        businessDate: undefined,
       });
       void reloadRecords();
     } catch (e) {
