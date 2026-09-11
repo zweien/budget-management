@@ -53,7 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { dateRange, numberRange, textContains } from '@/lib/table/filter-fns';
+import { dateRange, multiSelectStrict, numberRange, textContains } from '@/lib/table/filter-fns';
 
 interface ProjectRow {
   id: string;
@@ -78,13 +78,6 @@ interface ProjectRow {
 }
 
 const formatDate = (d: string | null) => (d ? format(new Date(d), 'yyyy-MM-dd') : '—');
-
-/** 值清单严格语义(与 ValuesFilter 契约一致):undefined=未筛选(全过);
- *  显式数组(含取消全选的空集)按命中判断——空集不显示任何行。 */
-const valuesStrict: FilterFn<ProjectRow> = (row, columnId, filterValue) => {
-  if (filterValue === undefined) return true;
-  return (filterValue as unknown[]).includes(row.getValue(columnId));
-};
 
 /** 负责人列(行值为姓名数组):同上严格语义,任一勾选姓名命中即保留。 */
 const membersFilter: FilterFn<ProjectRow> = (row, columnId, filterValue) => {
@@ -350,7 +343,7 @@ export default function ProjectsPage() {
             valueLabels={{ GENERAL: '一般', LUMP_SUM: '包干制' }}
           />
         ),
-        filterFn: valuesStrict,
+        filterFn: multiSelectStrict<ProjectRow>(),
         cell: ({ row }) =>
           row.original.budgetMode === 'LUMP_SUM' ? (
             <Badge variant="outline">包干制</Badge>
@@ -388,7 +381,7 @@ export default function ProjectsPage() {
         header: ({ column }) => (
           <ValuesHeader column={column} title="级别" options={levelOptions} />
         ),
-        filterFn: valuesStrict,
+        filterFn: multiSelectStrict<ProjectRow>(),
         cell: ({ row }) => row.original.level ?? '—',
       },
       {
@@ -397,7 +390,7 @@ export default function ProjectsPage() {
         header: ({ column }) => (
           <ValuesHeader column={column} title="项目类型" options={projectTypeOptions} />
         ),
-        filterFn: valuesStrict,
+        filterFn: multiSelectStrict<ProjectRow>(),
         cell: ({ row }) => (
           <span className="block max-w-28 truncate" title={row.original.projectType ?? undefined}>
             {row.original.projectType || '—'}
@@ -410,7 +403,7 @@ export default function ProjectsPage() {
         header: ({ column }) => (
           <ValuesHeader column={column} title="承担单位" options={undertakingUnitOptions} />
         ),
-        filterFn: valuesStrict,
+        filterFn: multiSelectStrict<ProjectRow>(),
         cell: ({ row }) => (
           <span
             className="block max-w-32 truncate"

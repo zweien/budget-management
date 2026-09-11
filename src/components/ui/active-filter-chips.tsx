@@ -40,7 +40,9 @@ export function ActiveFilterChips({
           )}
         >
           <span className="text-mute">{labels[f.id] ?? f.id}:</span>
-          <span className="max-w-72 truncate font-medium">{describe(f.id, f.value)}</span>
+          <span className="max-w-72 truncate font-medium">
+            {describe(f.id, f.value) || '无匹配项'}
+          </span>
           <button
             type="button"
             aria-label={`移除筛选:${labels[f.id] ?? f.id}`}

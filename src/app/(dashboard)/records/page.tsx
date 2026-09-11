@@ -19,6 +19,7 @@ import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
 import type { DateRangeFilterValue } from '@/lib/table/filter-fns';
 import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
+import { VALUES_FILTER_NONE } from '@/lib/table/filter-fns';
 import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -291,34 +292,63 @@ function UnifiedRecordsPageInner() {
       const projectIds: string[] = [];
       for (const f of columnFilters) {
         const v = f.value as unknown;
+        // 值清单哨兵:取消全选 = 显式空集(契约=零行)。空数组发 __none__,
+        // 服务端归一化为该维度匹配零行;未筛选(undefined)不发参数。
         switch (f.id) {
           case 'project': {
-            for (const label of v as string[]) {
+            const labels = v as string[];
+            if (labels.length === 0) {
+              projectIds.push(VALUES_FILTER_NONE);
+              break;
+            }
+            for (const label of labels) {
               const id = idByLabel.get(label);
               if (id) projectIds.push(id);
             }
             break;
           }
-          case 'budgetYear':
-            for (const y of v as number[]) sp.append('budgetYears', String(y));
+          case 'budgetYear': {
+            const years = v as number[];
+            if (years.length === 0) {
+              sp.append('budgetYears', VALUES_FILTER_NONE);
+              break;
+            }
+            for (const y of years) sp.append('budgetYears', String(y));
             break;
-          case 'subject':
-            for (const n of v as string[]) sp.append('subjectNames', n);
+          }
+          case 'subject': {
+            const names = v as string[];
+            if (names.length === 0) {
+              sp.append('subjectNames', VALUES_FILTER_NONE);
+              break;
+            }
+            for (const n of names) sp.append('subjectNames', n);
             break;
+          }
           case 'status': {
             // 勾选 __void__ = 作废可见:statuses + includeVoid(OR isVoid);
-            // 仅勾 __void__ = voidOnly。不勾任何 = 默认排除作废(服务端 isVoid=false)。
+            // 仅勾 __void__ = voidOnly;全部取消(空集) = statuses 哨兵(零行)。
             const arr = v as string[];
             const statuses = arr.filter((st) => st !== '__void__');
             const hasVoid = arr.length !== statuses.length;
+            if (arr.length === 0) {
+              sp.append('statuses', VALUES_FILTER_NONE);
+              break;
+            }
             for (const st of statuses) sp.append('statuses', st);
             if (hasVoid) sp.set('includeVoid', '1');
             if (statuses.length === 0 && hasVoid) sp.set('voidOnly', '1');
             break;
           }
-          case 'handler':
-            for (const h of v as string[]) sp.append('handlers', h);
+          case 'handler': {
+            const hs = v as string[];
+            if (hs.length === 0) {
+              sp.append('handlers', VALUES_FILTER_NONE);
+              break;
+            }
+            for (const h of hs) sp.append('handlers', h);
             break;
+          }
           case 'summary':
             sp.set('summary', String(v));
             break;
@@ -355,13 +385,20 @@ function UnifiedRecordsPageInner() {
             if (r.to) sp.set('completedDateTo', format(new Date(r.to), 'yyyy-MM-dd'));
             break;
           }
-          case 'creatorName':
-            for (const c of v as string[]) sp.append('creatorNames', c);
+          case 'creatorName': {
+            const cs = v as string[];
+            if (cs.length === 0) {
+              sp.append('creatorNames', VALUES_FILTER_NONE);
+              break;
+            }
+            for (const c of cs) sp.append('creatorNames', c);
             break;
+          }
         }
       }
       // 权限范围(writable)转服务端项目过滤;显式项目筛选与可写集取交集(范围语义不放大)。
-      if (scope === 'writable') {
+      // 哨兵(取消全选)不受交集影响,原样穿透。
+      if (scope === 'writable' && !projectIds.includes(VALUES_FILTER_NONE)) {
         const allowed = projectIds.length
           ? projectIds.filter((id) => writableIds.has(id))
           : Array.from(writableIds);

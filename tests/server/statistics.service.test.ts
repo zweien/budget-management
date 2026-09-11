@@ -18,6 +18,8 @@ import {
   customStatisticsFacets,
   monthlyHistory,
   riskSummary,
+  VALUES_FILTER_NONE,
+  type CustomStatisticsFilters,
 } from '@/server/services/statistics.service';
 
 // 集成测试直连真实 PG(:5434)。建项目 + 编制 + 业务记录,需级联清理。
@@ -209,6 +211,50 @@ describe('statistics.service (integration, real PG)', () => {
     for (const r of result.records) {
       expect(r.creatorName).toBe('admin-stat');
     }
+  });
+
+  it('customStatistics: 值清单哨兵 __none__(取消全选)= 该维度匹配零行', async () => {
+    const { project, leafA } = await seedApprovedProject('NONE');
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '50.00',
+        businessDate: '2026-06-01',
+        handler: '经办人N',
+        summary: 'none-rec',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    const none = VALUES_FILTER_NONE;
+    // 各维度单独哨兵 → 0 行、0 占用(显式空集 = 取消全选)。
+    for (const filters of [
+      { projectIds: [none] },
+      { budgetYears: [none] },
+      { subjectNames: [none] },
+      { statuses: [none] },
+      { handlers: [none] },
+      { creatorNames: [none] },
+    ] as CustomStatisticsFilters[]) {
+      const r = await customStatistics({ ...filters, projectId: project.id }, adminUser());
+      expect(r.records).toHaveLength(0);
+      expect(r.total).toBe(0);
+      expect(r.summary.totalOccupied).toBe('0.00');
+    }
+
+    // 哨兵与真实值混排:哨兵剥离,真实值正常生效。
+    const mixed = await customStatistics(
+      { projectId: project.id, statuses: [none, BusinessStatus.PAID] },
+      adminUser(),
+    );
+    expect(mixed.records).toHaveLength(1);
+
+    // 不发哨兵(undefined)= 不过滤,记录可见。
+    const clean = await customStatistics({ projectId: project.id }, adminUser());
+    expect(clean.records).toHaveLength(1);
   });
 
   it('customStatistics: 跨项目(无 projectId)普通用户可查(v0.3.0 全局只读)', async () => {

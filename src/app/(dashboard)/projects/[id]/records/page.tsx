@@ -38,7 +38,7 @@ import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/u
 import type { VisibilityState } from '@tanstack/react-table';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { PackageAttachmentsDialog } from '@/components/records/PackageAttachmentsDialog';
-import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
+import { dateRange, multiSelectStrict, numberRange, textContains } from '@/lib/table/filter-fns';
 import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
 import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
@@ -819,7 +819,7 @@ function BusinessRecordsPageInner() {
           <HeaderFilter column={column} title="年度" type="values" options={yearOptions} sortable />
         ),
         cell: ({ row }) => <span className="tabular-nums">{row.original.budgetYear}</span>,
-        filterFn: multiSelect<BusinessRecordRow>(),
+        filterFn: multiSelectStrict<BusinessRecordRow>(),
       },
       {
         id: 'subjectId',
@@ -849,7 +849,7 @@ function BusinessRecordsPageInner() {
             subjectMap.get(b.getValue<string>(id))?.name ?? '',
             'zh-Hans-CN',
           ),
-        filterFn: multiSelect<BusinessRecordRow>(),
+        filterFn: multiSelectStrict<BusinessRecordRow>(),
       },
       {
         id: 'amount',
@@ -923,7 +923,7 @@ function BusinessRecordsPageInner() {
             'zh-Hans-CN',
           );
         },
-        filterFn: multiSelect<BusinessRecordRow>(),
+        filterFn: multiSelectStrict<BusinessRecordRow>(),
       },
       {
         id: 'handler',
@@ -931,7 +931,7 @@ function BusinessRecordsPageInner() {
         header: ({ column }) => (
           <HeaderFilter column={column} title="经办人" type="values" sortable />
         ),
-        filterFn: multiSelect<BusinessRecordRow>(),
+        filterFn: multiSelectStrict<BusinessRecordRow>(),
       },
       {
         id: 'docNo',
@@ -1008,7 +1008,7 @@ function BusinessRecordsPageInner() {
             sortable
           />
         ),
-        filterFn: multiSelect<BusinessRecordRow>(),
+        filterFn: multiSelectStrict<BusinessRecordRow>(),
       },
       {
         id: 'attachments',

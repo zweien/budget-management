@@ -55,7 +55,7 @@ interface HeaderFilterProps<TData> {
 
 function isFilterActive(type: ColumnFilterType, value: unknown): boolean {
   if (value === undefined || value === null) return false;
-  if (type === 'values') return Array.isArray(value) && value.length > 0;
+  if (type === 'values') return Array.isArray(value); // 显式空集(取消全选)也是激活态:零行匹配
   if (type === 'text') return String(value).trim() !== '';
   if (type === 'range') {
     const v = value as NumberRangeValue;

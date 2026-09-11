@@ -6,6 +6,7 @@ import { requireUser } from '@/lib/auth/session';
 import {
   customStatistics,
   CUSTOM_SORT_FIELDS,
+  VALUES_FILTER_NONE,
   type CustomSortField,
   type CustomStatisticsFilters,
 } from '@/server/services/statistics.service';
@@ -65,13 +66,22 @@ export const GET = withRoute(async (req: NextRequest) => {
     const values = sp.getAll(key).filter(Boolean);
     if (values.length > 0) filters[key] = values;
   }
-  const budgetYears = sp
-    .getAll('budgetYears')
-    .map((v) => Number.parseInt(v, 10))
-    .filter((v) => Number.isInteger(v) && v >= 1900 && v <= 9999);
-  if (budgetYears.length > 0) filters.budgetYears = budgetYears;
-  const statuses = sp.getAll('statuses').filter((v) => STATUS_SET.has(v));
-  if (statuses.length > 0) filters.statuses = statuses as BusinessStatus[];
+  // 取消全选哨兵:显式空集 → 维度匹配零行(优先于数值/枚举白名单解析)。
+  if (sp.getAll('budgetYears').includes(VALUES_FILTER_NONE)) {
+    filters.budgetYears = [VALUES_FILTER_NONE];
+  } else {
+    const budgetYears = sp
+      .getAll('budgetYears')
+      .map((v) => Number.parseInt(v, 10))
+      .filter((v) => Number.isInteger(v) && v >= 1900 && v <= 9999);
+    if (budgetYears.length > 0) filters.budgetYears = budgetYears;
+  }
+  if (sp.getAll('statuses').includes(VALUES_FILTER_NONE)) {
+    filters.statuses = [VALUES_FILTER_NONE];
+  } else {
+    const statuses = sp.getAll('statuses').filter((v) => STATUS_SET.has(v));
+    if (statuses.length > 0) filters.statuses = statuses as BusinessStatus[];
+  }
   if (sp.get('voidOnly') === '1') filters.voidOnly = true;
 
   const remark = sp.get('remark');

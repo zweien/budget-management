@@ -1,15 +1,37 @@
 import type { FilterFn } from '@tanstack/react-table';
 
 /**
+ * 值清单「显式空集」哨兵:表头筛选取消全选时,客户端把它作为该维度的唯一值发往服务端,
+ * 服务端归一化为「该维度匹配零行」(与 ValuesFilter 契约一致:取消全选=不显示任何行)。
+ */
+export const VALUES_FILTER_NONE = '__none__';
+
+/**
  * TanStack Table 列筛选函数集(Excel 式表头筛选)。
- * 约定:空筛选值(undefined / 空数组 / 空串 / 空范围)一律视为不过滤。
+ * 约定:undefined / 空串 / 空范围视为不过滤;
+ * 值清单的 undefined=不过滤、显式空集=零行(见 multiSelectStrict 与 VALUES_FILTER_NONE)。
  */
 
-/** 值清单多选:行值 ∈ 选中集合(空数组=不过滤)。 */
+/**
+ * 值清单多选(旧语义:空数组=不过滤)。
+ * ⚠️ 与 ValuesFilter「取消全选=显式空集→零行」的契约不一致,勿在新代码使用;
+ * 新代码用 multiSelectStrict。
+ */
 export function multiSelect<T>(): FilterFn<T> {
   return (row, columnId, filterValue) => {
     if (!Array.isArray(filterValue) || filterValue.length === 0) return true;
     return filterValue.includes(row.getValue(columnId));
+  };
+}
+
+/**
+ * 值清单多选(严格语义,与 ValuesFilter 契约一致):
+ * undefined=未筛选(全过);显式数组按成员命中判断——取消全选的空集不显示任何行。
+ */
+export function multiSelectStrict<T>(): FilterFn<T> {
+  return (row, columnId, filterValue) => {
+    if (filterValue === undefined) return true;
+    return (filterValue as unknown[]).includes(row.getValue(columnId));
   };
 }
 

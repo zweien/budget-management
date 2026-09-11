@@ -46,11 +46,12 @@ export interface CustomStatisticsFilters {
 
   // ---- v0.15 扩展:全局录入页服务端筛选/分页(量级语义在实现内,页面只渲染) ----
   /** 项目集合(in;与 projectId 叠加取并集语义)。 */
+  /** 值清单哨兵 VALUES_FILTER_NONE('__none__')= 取消全选的显式空集 → 维度匹配零行。 */
   projectIds?: string[];
   /** 年度集合(in)。 */
-  budgetYears?: number[];
+  budgetYears?: Array<number | typeof VALUES_FILTER_NONE>;
   /** 状态集合(in;与 status 叠加)。 */
-  statuses?: BusinessStatus[];
+  statuses?: Array<BusinessStatus | typeof VALUES_FILTER_NONE>;
   /** 仅看作废(isVoid=true)。 */
   voidOnly?: boolean;
   /** 经办人集合(in;与 handler 模糊叠加)。 */
@@ -106,6 +107,21 @@ export const CUSTOM_SORT_FIELDS = {
 export type CustomSortField = keyof typeof CUSTOM_SORT_FIELDS;
 
 /** 筛选集合计数(总计行/分页器)。 */
+/** 值清单「显式空集」哨兵(与 src/lib/table/filter-fns.ts 的 VALUES_FILTER_NONE 同值,取消全选语义)。 */
+export const VALUES_FILTER_NONE = '__none__';
+
+/** 拆出值清单中的哨兵:none=显式空集(该维度匹配零行);values=去掉哨兵后的真实选中值。 */
+function splitValuesNone<T>(arr: Array<T | typeof VALUES_FILTER_NONE> | undefined): {
+  none: boolean;
+  values: T[];
+} {
+  const raw = (arr ?? []) as Array<T | typeof VALUES_FILTER_NONE>;
+  return {
+    none: raw.includes(VALUES_FILTER_NONE),
+    values: raw.filter((v) => v !== VALUES_FILTER_NONE) as T[],
+  };
+}
+
 export interface CustomStatisticsStats {
   /** 筛选结果总行数(含作废)。 */
   totalCount: number;
@@ -207,11 +223,18 @@ export async function customStatistics(
 
   // 3) 构建 business_records 查询条件(筛选全部在 SQL 侧,页面只渲染)。
   const where: Prisma.BusinessRecordWhereInput = {};
-  const projectIdIn = [
-    ...(filters.projectIds ?? []),
-    ...(filters.projectId ? [filters.projectId] : []),
-  ];
-  if (projectIdIn.length > 0) {
+  // 值清单哨兵归一化('__none__'=取消全选的显式空集 → 该维度匹配零行)。
+  const projectVals = splitValuesNone(filters.projectIds);
+  const yearVals = splitValuesNone(filters.budgetYears);
+  const subjectVals = splitValuesNone(filters.subjectNames);
+  const handlerVals = splitValuesNone(filters.handlers);
+  const creatorVals = splitValuesNone(filters.creatorNames);
+  const statusVals = splitValuesNone(filters.statuses);
+
+  const projectIdIn = [...projectVals.values, ...(filters.projectId ? [filters.projectId] : [])];
+  if (projectVals.none && projectVals.values.length === 0) {
+    where.projectId = { in: [] };
+  } else if (projectIdIn.length > 0) {
     where.projectId = { in: projectIdIn };
   } else {
     // 跨项目分支排除已归档项目(与 cross-project/balance/risk 口径对齐);
@@ -219,36 +242,46 @@ export async function customStatistics(
     where.project = { archivedAt: null };
   }
   const yearsIn = [
-    ...(filters.budgetYears ?? []),
+    ...yearVals.values,
     ...(filters.budgetYear !== undefined ? [filters.budgetYear] : []),
   ];
-  if (yearsIn.length > 0) where.budgetYear = { in: yearsIn };
+  if (yearVals.none && yearsIn.length === 0) where.budgetYear = { in: [] };
+  else if (yearsIn.length > 0) where.budgetYear = { in: yearsIn };
   if (subjectLeafIds) where.subjectId = { in: [...subjectLeafIds] };
   // voidOnly:仅看作废;statuses 与 includeVoid 并存 = status IN … OR isVoid(作废不改 status)。
-  const statusesIn = [...(filters.statuses ?? []), ...(filters.status ? [filters.status] : [])];
+  const statusesIn = [...statusVals.values, ...(filters.status ? [filters.status] : [])];
   if (filters.voidOnly) {
     where.isVoid = true;
   } else if (!filters.includeVoid) {
     where.isVoid = false;
   }
-  if (statusesIn.length > 0) {
+  if (statusVals.none && statusesIn.length === 0) {
+    // 取消全选:显式空集 → 无任何状态命中(作废可见性维持上方 isVoid 规则)。
+    where.status = { in: [] };
+  } else if (statusesIn.length > 0) {
     if (filters.includeVoid) {
       where.OR = [{ isVoid: true }, { status: { in: statusesIn } }];
     } else {
       where.status = { in: statusesIn };
     }
   }
-  if (filters.handlers?.length) {
-    where.handler = { in: filters.handlers };
+  if (handlerVals.none && handlerVals.values.length === 0) {
+    where.handler = { in: [] };
+  } else if (handlerVals.values.length > 0) {
+    where.handler = { in: handlerVals.values };
   } else if (filters.handler) {
     where.handler = { contains: filters.handler, mode: 'insensitive' };
   }
-  if (filters.subjectNames?.length) {
+  if (subjectVals.none && subjectVals.values.length === 0) {
     // subjectNames 精确 in 与科目模糊检索叠加(and)。
-    where.AND = [{ subject: { name: { in: filters.subjectNames } } }];
+    where.AND = [{ subject: { name: { in: [] } } }];
+  } else if (subjectVals.values.length > 0) {
+    where.AND = [{ subject: { name: { in: subjectVals.values } } }];
   }
-  if (filters.creatorNames?.length) {
-    where.createdBy = { name: { in: filters.creatorNames } };
+  if (creatorVals.none && creatorVals.values.length === 0) {
+    where.createdBy = { name: { in: [] } };
+  } else if (creatorVals.values.length > 0) {
+    where.createdBy = { name: { in: creatorVals.values } };
   }
   if (filters.remark) where.remark = { contains: filters.remark, mode: 'insensitive' };
   if (filters.summary) where.summary = { contains: filters.summary, mode: 'insensitive' };
