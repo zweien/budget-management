@@ -1,11 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { Archive, FolderKanban, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type Column,
+  type ColumnFiltersState,
+  type FilterFn,
+  type SortingState,
+} from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
 import {
@@ -26,6 +38,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
+import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { Button } from '@/components/ui/button';
 import { TableEmpty } from '@/components/ui/table-pagination';
 import { Input } from '@/components/ui/input';
@@ -40,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { dateRange, numberRange, textContains } from '@/lib/table/filter-fns';
 
 interface ProjectRow {
   id: string;
@@ -65,6 +79,61 @@ interface ProjectRow {
 
 const formatDate = (d: string | null) => (d ? format(new Date(d), 'yyyy-MM-dd') : '—');
 
+/** 值清单严格语义(与 ValuesFilter 契约一致):undefined=未筛选(全过);
+ *  显式数组(含取消全选的空集)按命中判断——空集不显示任何行。 */
+const valuesStrict: FilterFn<ProjectRow> = (row, columnId, filterValue) => {
+  if (filterValue === undefined) return true;
+  return (filterValue as unknown[]).includes(row.getValue(columnId));
+};
+
+/** 负责人列(行值为姓名数组):同上严格语义,任一勾选姓名命中即保留。 */
+const membersFilter: FilterFn<ProjectRow> = (row, columnId, filterValue) => {
+  if (filterValue === undefined) return true;
+  const names = row.getValue<string[]>(columnId);
+  return (filterValue as unknown[]).some((v) => names.includes(v as string));
+};
+
+/** 值清单表头(命名组件:values 筛选共用,选项经 props 注入)。 */
+function ValuesHeader({
+  column,
+  title,
+  options,
+  valueLabels,
+}: {
+  column: Column<ProjectRow, unknown>;
+  title: string;
+  options: string[];
+  valueLabels?: Record<string, string>;
+}) {
+  return (
+    <HeaderFilter
+      column={column}
+      title={title}
+      type="values"
+      options={options}
+      valueLabels={valueLabels}
+    />
+  );
+}
+
+/** 表头宽度/对齐(与旧手写表一致)。 */
+const HEAD_CLASS: Record<string, string> = {
+  code: 'w-40',
+  members: 'w-28',
+  budgetMode: 'w-24',
+  projectBudget: 'w-36 text-right',
+  level: 'w-20',
+  projectType: 'w-28',
+  undertakingUnit: 'w-36',
+  startDate: 'w-56',
+  remark: 'max-w-40',
+  createdAt: 'w-28',
+  actions: 'w-64',
+};
+
+const distinctSorted = (vals: (string | null | undefined)[]): string[] =>
+  [...new Set(vals.map((v) => v?.trim()).filter((v): v is string => !!v))].sort();
+
 export default function ProjectsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<ProjectRow[]>([]);
@@ -73,11 +142,13 @@ export default function ProjectsPage() {
   const [keyword, setKeyword] = useState('');
   /** 是否包含已归档项目(项目管理:归档可恢复,开关切换查看)。 */
   const [showArchived, setShowArchived] = useState(false);
-  // 列显隐偏好(localStorage 持久化,与记录页同款交互)。
+  // 列显隐偏好(cookie 持久化,与录入页同款交互);TanStack 受控 state 驱动。
   const [columnVisibility, toggleColumnVisibility] =
     useStoredColumnVisibility('ui.projects.columns');
-  /** 手写表格的列显隐:未出现在偏好里的列默认显示。 */
-  const colVisible = (id: string) => columnVisibility[id] !== false;
+
+  // 表头筛选(客户端组合)与排序。
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [sorting, setSorting] = useState<SortingState>([]);
 
   // 新建/编辑共用弹窗;editing = null 表示新建。
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -92,6 +163,8 @@ export default function ProjectsPage() {
   // 归档/恢复等动作完成后 bump,触发下方唯一加载点重拉(§codex P2:
   // 手动 reload 不参与 effect 的取消守卫,与开关切换并发时会互相覆盖)。
   const [listVersion, setListVersion] = useState(0);
+  // 请求序号:仅最新请求可落结果(与统计页同款守卫)。
+  const reqSeqRef = useRef(0);
 
   useEffect(() => {
     // 当前用户(新建入口门控);管理员顺带预拉负责人候选(仅 ADMIN 可调 /api/users)。
@@ -111,17 +184,20 @@ export default function ProjectsPage() {
   // 项目列表唯一加载点:首拉 + 「显示已归档」切换 + 动作后重拉
   // (loading 初始 true,首拉完成后关闭;setState 全在 await 之后)。
   useEffect(() => {
+    const seq = ++reqSeqRef.current;
     let cancelled = false;
     const load = async () => {
       try {
         const data = await apiFetch<ProjectRow[]>(
           `/api/projects${showArchived ? '?includeArchived=1' : ''}`,
         );
-        if (!cancelled) setRows(data);
+        if (!cancelled && seq === reqSeqRef.current) setRows(data);
       } catch (e) {
-        if (!cancelled) toast.error(e instanceof Error ? e.message : '加载项目失败');
+        if (!cancelled && seq === reqSeqRef.current) {
+          toast.error(e instanceof Error ? e.message : '加载项目失败');
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && seq === reqSeqRef.current) setLoading(false);
       }
     };
     void load();
@@ -130,13 +206,26 @@ export default function ProjectsPage() {
     };
   }, [showArchived, listVersion]);
 
-  const filtered = useMemo(() => {
+  // 顶部关键词:编号/名称包含(与列头筛选叠加,先过关键词再进 TanStack)。
+  const keywordFiltered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
     if (!kw) return rows;
     return rows.filter(
       (r) => r.code.toLowerCase().includes(kw) || r.name.toLowerCase().includes(kw),
     );
   }, [rows, keyword]);
+
+  // 值清单候选:从当前列表数据动态去重(Excel 行为,零后端改动)。
+  const memberOptions = useMemo(
+    () => distinctSorted(rows.flatMap((r) => r.members.map((m) => m.user.name))),
+    [rows],
+  );
+  const levelOptions = useMemo(() => distinctSorted(rows.map((r) => r.level)), [rows]);
+  const projectTypeOptions = useMemo(() => distinctSorted(rows.map((r) => r.projectType)), [rows]);
+  const undertakingUnitOptions = useMemo(
+    () => distinctSorted(rows.map((r) => r.undertakingUnit)),
+    [rows],
+  );
 
   const openCreateDialog = () => {
     setEditing(null);
@@ -213,6 +302,226 @@ export default function ProjectsPage() {
     }
   };
 
+  // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
+  const columns = useMemo<ColumnDef<ProjectRow>[]>(() => {
+    return [
+      {
+        accessorKey: 'code',
+        header: '项目编号',
+        cell: ({ row }) => (
+          // 编号属技术标识,用 mono(DESIGN.md code 字体)
+          <span className="font-mono text-[13px]">{row.original.code}</span>
+        ),
+      },
+      {
+        accessorKey: 'name',
+        header: '项目名称',
+        cell: ({ row }) => (
+          <span className="flex items-center gap-2 font-medium">
+            <Link
+              href={`/projects/${row.original.id}`}
+              className="text-link underline-offset-4 transition-colors hover:text-link-deep hover:underline"
+            >
+              {row.original.name}
+            </Link>
+            {row.original.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
+          </span>
+        ),
+      },
+      {
+        id: 'members',
+        accessorFn: (r) => r.members.map((m) => m.user.name),
+        header: ({ column }) => (
+          <ValuesHeader column={column} title="负责人" options={memberOptions} />
+        ),
+        filterFn: membersFilter,
+        cell: ({ row }) =>
+          row.original.members?.length
+            ? row.original.members.map((m) => m.user.name).join('/')
+            : '—',
+      },
+      {
+        accessorKey: 'budgetMode',
+        header: ({ column }) => (
+          <ValuesHeader
+            column={column}
+            title="预算类型"
+            options={['GENERAL', 'LUMP_SUM']}
+            valueLabels={{ GENERAL: '一般', LUMP_SUM: '包干制' }}
+          />
+        ),
+        filterFn: valuesStrict,
+        cell: ({ row }) =>
+          row.original.budgetMode === 'LUMP_SUM' ? (
+            <Badge variant="outline">包干制</Badge>
+          ) : (
+            <Badge variant="secondary">一般</Badge>
+          ),
+      },
+      {
+        id: 'projectBudget',
+        // 未编制(null)取 undefined:金额区间筛选时被排除(Number(undefined)=NaN 非有限),
+        // 排序经 sortUndefined 沉底(basic 比较器遇 NaN 顺序不稳定,codex P2)。
+        accessorFn: (r) => (r.projectBudget ? Number(r.projectBudget.currentAmount) : undefined),
+        sortUndefined: 'last',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="总经费" type="range" sortable />
+        ),
+        filterFn: numberRange<ProjectRow>(),
+        sortingFn: 'basic',
+        cell: ({ row }) => (
+          <span className="block text-right tabular-nums">
+            {(() => {
+              // 仅「无 projectBudget」(未编制)留空;编制为 0 也如实渲染 0.00(codex P2)。
+              if (!row.original.projectBudget) return '';
+              return Number(row.original.projectBudget.currentAmount).toLocaleString('zh-CN', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              });
+            })()}
+          </span>
+        ),
+      },
+      {
+        accessorFn: (r) => r.level ?? '',
+        id: 'level',
+        header: ({ column }) => (
+          <ValuesHeader column={column} title="级别" options={levelOptions} />
+        ),
+        filterFn: valuesStrict,
+        cell: ({ row }) => row.original.level ?? '—',
+      },
+      {
+        accessorFn: (r) => r.projectType ?? '',
+        id: 'projectType',
+        header: ({ column }) => (
+          <ValuesHeader column={column} title="项目类型" options={projectTypeOptions} />
+        ),
+        filterFn: valuesStrict,
+        cell: ({ row }) => (
+          <span className="block max-w-28 truncate" title={row.original.projectType ?? undefined}>
+            {row.original.projectType || '—'}
+          </span>
+        ),
+      },
+      {
+        accessorFn: (r) => r.undertakingUnit ?? '',
+        id: 'undertakingUnit',
+        header: ({ column }) => (
+          <ValuesHeader column={column} title="承担单位" options={undertakingUnitOptions} />
+        ),
+        filterFn: valuesStrict,
+        cell: ({ row }) => (
+          <span
+            className="block max-w-32 truncate"
+            title={row.original.undertakingUnit ?? undefined}
+          >
+            {row.original.undertakingUnit || '—'}
+          </span>
+        ),
+      },
+      {
+        // 起止时间列:筛选/排序按开始日期,展示保留起~止全区间。
+        id: 'startDate',
+        accessorFn: (r) => r.startDate ?? undefined,
+        sortUndefined: 'last',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="起止时间" type="dateRange" sortable />
+        ),
+        filterFn: dateRange<ProjectRow>(),
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {formatDate(row.original.startDate)} ~ {formatDate(row.original.endDate)}
+          </span>
+        ),
+      },
+      {
+        accessorFn: (r) => r.remark ?? '',
+        id: 'remark',
+        header: ({ column }) => <HeaderFilter column={column} title="备注" type="text" />,
+        filterFn: textContains<ProjectRow>(),
+        cell: ({ row }) => (
+          <span className="block max-w-40 truncate" title={row.original.remark ?? undefined}>
+            {row.original.remark || '—'}
+          </span>
+        ),
+      },
+      {
+        accessorKey: 'createdAt',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="创建时间" type="dateRange" sortable />
+        ),
+        filterFn: dateRange<ProjectRow>(),
+        sortingFn: 'basic',
+        cell: ({ row }) => (
+          <span className="tabular-nums text-muted-foreground">
+            {new Date(row.original.createdAt).toLocaleDateString('zh-CN')}
+          </span>
+        ),
+      },
+      {
+        id: 'actions',
+        header: '操作',
+        enableSorting: false,
+        cell: ({ row }) => {
+          const r = row.original;
+          return (
+            <div className="flex flex-wrap gap-1">
+              <Button
+                variant="link"
+                size="sm"
+                className="px-0"
+                onClick={() => router.push(`/projects/${r.id}`)}
+              >
+                查看详情
+              </Button>
+              {r.canEdit && !r.archivedAt ? (
+                <>
+                  <Button variant="ghost" size="sm" onClick={() => openEditDialog(r)}>
+                    <Pencil className="size-4" />
+                    编辑
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-error-deep hover:bg-error-soft"
+                    onClick={() => setArchiveTarget(r)}
+                  >
+                    <Archive className="size-4" />
+                    归档
+                  </Button>
+                </>
+              ) : null}
+              {r.canEdit && r.archivedAt ? (
+                <Button variant="ghost" size="sm" onClick={() => void restoreProject(r)}>
+                  <RotateCcw className="size-4" />
+                  恢复
+                </Button>
+              ) : null}
+            </div>
+          );
+        },
+      },
+    ];
+  }, [router, memberOptions, levelOptions, projectTypeOptions, undertakingUnitOptions]);
+
+  // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
+  const table = useReactTable({
+    data: keywordFiltered,
+    columns,
+    state: { columnFilters, sorting, columnVisibility },
+    onColumnFiltersChange: setColumnFilters,
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(), // 客户端筛选(项目量级小,数据全量在内存)
+    getSortedRowModel: getSortedRowModel(),
+    enableSortingRemoval: true,
+    enableMultiSort: false,
+  });
+
+  const visibleRows = table.getRowModel().rows;
+  const hasHeaderFilter = columnFilters.length > 0;
+
   return (
     <div className="space-y-6">
       {/* 页头:caption-mono 眉题 + display-md 负字距标题(DESIGN.md) */}
@@ -229,7 +538,7 @@ export default function ProjectsPage() {
         ) : null}
       </div>
 
-      {/* 工具行:搜索 + 显示已归档开关 */}
+      {/* 工具行:搜索 + 显示已归档开关 + 列设置 */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="relative w-full max-w-72">
           <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-mute" />
@@ -300,147 +609,47 @@ export default function ProjectsPage() {
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                {colVisible('code') ? <TableHead className="w-40">项目编号</TableHead> : null}
-                {colVisible('name') ? <TableHead>项目名称</TableHead> : null}
-                {colVisible('members') ? <TableHead className="w-28">负责人</TableHead> : null}
-                {colVisible('budgetMode') ? <TableHead className="w-24">预算类型</TableHead> : null}
-                {colVisible('projectBudget') ? (
-                  <TableHead className="w-36 text-right">总经费</TableHead>
-                ) : null}
-                {colVisible('level') ? <TableHead className="w-20">级别</TableHead> : null}
-                {colVisible('projectType') ? (
-                  <TableHead className="w-28">项目类型</TableHead>
-                ) : null}
-                {colVisible('undertakingUnit') ? (
-                  <TableHead className="w-36">承担单位</TableHead>
-                ) : null}
-                {colVisible('startDate') ? <TableHead className="w-56">起止时间</TableHead> : null}
-                {colVisible('remark') ? <TableHead className="max-w-40">备注</TableHead> : null}
-                {colVisible('createdAt') ? <TableHead className="w-28">创建时间</TableHead> : null}
-                <TableHead className="w-64">操作</TableHead>
-              </TableRow>
+              {table.getHeaderGroups().map((hg) => (
+                <TableRow key={hg.id} className="hover:bg-transparent">
+                  {hg.headers.map((header) => (
+                    <TableHead key={header.id} className={HEAD_CLASS[header.column.id]}>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
-                <TableEmpty colSpan={12}>无匹配「{keyword}」的项目</TableEmpty>
+              {visibleRows.length === 0 ? (
+                <TableEmpty colSpan={table.getVisibleLeafColumns().length}>
+                  {keyword
+                    ? `无匹配「${keyword}」的项目`
+                    : hasHeaderFilter
+                      ? '无匹配的项目,可调整表头筛选'
+                      : '暂无项目'}
+                </TableEmpty>
               ) : (
-                filtered.map((r) => (
-                  <TableRow key={r.id} className={r.archivedAt ? 'opacity-60' : undefined}>
-                    {/* 编号属技术标识,用 mono(DESIGN.md code 字体) */}
-                    {colVisible('code') ? (
-                      <TableCell className="font-mono text-[13px]">{r.code}</TableCell>
-                    ) : null}
-                    {colVisible('name') ? (
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-medium">
-                          <Link
-                            href={`/projects/${r.id}`}
-                            className="text-link underline-offset-4 transition-colors hover:text-link-deep hover:underline"
-                          >
-                            {r.name}
-                          </Link>
-                          {r.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
-                        </span>
+                visibleRows.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    className={row.original.archivedAt ? 'opacity-60' : undefined}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
-                    ) : null}
-                    {colVisible('members') ? (
-                      <TableCell>
-                        {r.members?.length ? r.members.map((m) => m.user.name).join('/') : '—'}
-                      </TableCell>
-                    ) : null}
-                    {colVisible('budgetMode') ? (
-                      <TableCell>
-                        {r.budgetMode === 'LUMP_SUM' ? (
-                          <Badge variant="outline">包干制</Badge>
-                        ) : (
-                          <Badge variant="secondary">一般</Badge>
-                        )}
-                      </TableCell>
-                    ) : null}
-                    {colVisible('projectBudget') ? (
-                      <TableCell className="text-right tabular-nums">
-                        {(() => {
-                          // 仅「无 projectBudget」(未编制)留空;编制为 0 也如实渲染 0.00(codex P2)。
-                          if (!r.projectBudget) return '';
-                          return Number(r.projectBudget.currentAmount).toLocaleString('zh-CN', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          });
-                        })()}
-                      </TableCell>
-                    ) : null}
-                    {colVisible('level') ? <TableCell>{r.level ?? '—'}</TableCell> : null}
-                    {colVisible('projectType') ? (
-                      <TableCell className="max-w-28 truncate" title={r.projectType ?? undefined}>
-                        {r.projectType || '—'}
-                      </TableCell>
-                    ) : null}
-                    {colVisible('undertakingUnit') ? (
-                      <TableCell
-                        className="max-w-32 truncate"
-                        title={r.undertakingUnit ?? undefined}
-                      >
-                        {r.undertakingUnit || '—'}
-                      </TableCell>
-                    ) : null}
-                    {colVisible('startDate') ? (
-                      <TableCell className="tabular-nums">
-                        {formatDate(r.startDate)} ~ {formatDate(r.endDate)}
-                      </TableCell>
-                    ) : null}
-                    {colVisible('remark') ? (
-                      <TableCell className="max-w-40 truncate" title={r.remark ?? undefined}>
-                        {r.remark || '—'}
-                      </TableCell>
-                    ) : null}
-                    {colVisible('createdAt') ? (
-                      <TableCell className="tabular-nums text-muted-foreground">
-                        {new Date(r.createdAt).toLocaleDateString('zh-CN')}
-                      </TableCell>
-                    ) : null}
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="px-0"
-                          onClick={() => router.push(`/projects/${r.id}`)}
-                        >
-                          查看详情
-                        </Button>
-                        {r.canEdit && !r.archivedAt ? (
-                          <>
-                            <Button variant="ghost" size="sm" onClick={() => openEditDialog(r)}>
-                              <Pencil className="size-4" />
-                              编辑
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-error-deep hover:bg-error-soft"
-                              onClick={() => setArchiveTarget(r)}
-                            >
-                              <Archive className="size-4" />
-                              归档
-                            </Button>
-                          </>
-                        ) : null}
-                        {r.canEdit && r.archivedAt ? (
-                          <Button variant="ghost" size="sm" onClick={() => void restoreProject(r)}>
-                            <RotateCcw className="size-4" />
-                            恢复
-                          </Button>
-                        ) : null}
-                      </div>
-                    </TableCell>
+                    ))}
                   </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
           <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-            共 {filtered.length} 个项目{showArchived ? '(含已归档)' : ''}
+            共 {visibleRows.length} 个项目
+            {showArchived ? '(含已归档)' : ''}
+            {hasHeaderFilter ? '(已应用表头筛选)' : ''}
           </div>
         </div>
       )}
