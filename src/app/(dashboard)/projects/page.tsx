@@ -53,7 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { dateRange, multiSelect, numberRange, textContains } from '@/lib/table/filter-fns';
+import { dateRange, numberRange, textContains } from '@/lib/table/filter-fns';
 
 interface ProjectRow {
   id: string;
@@ -79,11 +79,18 @@ interface ProjectRow {
 
 const formatDate = (d: string | null) => (d ? format(new Date(d), 'yyyy-MM-dd') : '—');
 
-/** 负责人列(行值为姓名数组)多选:任一勾选姓名命中即保留(OR 语义;空勾选=不过滤)。 */
+/** 值清单严格语义(与 ValuesFilter 契约一致):undefined=未筛选(全过);
+ *  显式数组(含取消全选的空集)按命中判断——空集不显示任何行。 */
+const valuesStrict: FilterFn<ProjectRow> = (row, columnId, filterValue) => {
+  if (filterValue === undefined) return true;
+  return (filterValue as unknown[]).includes(row.getValue(columnId));
+};
+
+/** 负责人列(行值为姓名数组):同上严格语义,任一勾选姓名命中即保留。 */
 const membersFilter: FilterFn<ProjectRow> = (row, columnId, filterValue) => {
-  if (!Array.isArray(filterValue) || filterValue.length === 0) return true;
+  if (filterValue === undefined) return true;
   const names = row.getValue<string[]>(columnId);
-  return filterValue.some((v) => names.includes(v));
+  return (filterValue as unknown[]).some((v) => names.includes(v as string));
 };
 
 /** 值清单表头(命名组件:values 筛选共用,选项经 props 注入)。 */
@@ -343,7 +350,7 @@ export default function ProjectsPage() {
             valueLabels={{ GENERAL: '一般', LUMP_SUM: '包干制' }}
           />
         ),
-        filterFn: multiSelect<ProjectRow>(),
+        filterFn: valuesStrict,
         cell: ({ row }) =>
           row.original.budgetMode === 'LUMP_SUM' ? (
             <Badge variant="outline">包干制</Badge>
@@ -353,8 +360,10 @@ export default function ProjectsPage() {
       },
       {
         id: 'projectBudget',
-        // 未编制(null)取 NaN:金额区间筛选时被排除;排序同样沉底。
-        accessorFn: (r) => (r.projectBudget ? Number(r.projectBudget.currentAmount) : NaN),
+        // 未编制(null)取 undefined:金额区间筛选时被排除(Number(undefined)=NaN 非有限),
+        // 排序经 sortUndefined 沉底(basic 比较器遇 NaN 顺序不稳定,codex P2)。
+        accessorFn: (r) => (r.projectBudget ? Number(r.projectBudget.currentAmount) : undefined),
+        sortUndefined: 'last',
         header: ({ column }) => (
           <HeaderFilter column={column} title="总经费" type="range" sortable />
         ),
@@ -379,7 +388,7 @@ export default function ProjectsPage() {
         header: ({ column }) => (
           <ValuesHeader column={column} title="级别" options={levelOptions} />
         ),
-        filterFn: multiSelect<ProjectRow>(),
+        filterFn: valuesStrict,
         cell: ({ row }) => row.original.level ?? '—',
       },
       {
@@ -388,7 +397,7 @@ export default function ProjectsPage() {
         header: ({ column }) => (
           <ValuesHeader column={column} title="项目类型" options={projectTypeOptions} />
         ),
-        filterFn: multiSelect<ProjectRow>(),
+        filterFn: valuesStrict,
         cell: ({ row }) => (
           <span className="block max-w-28 truncate" title={row.original.projectType ?? undefined}>
             {row.original.projectType || '—'}
@@ -401,7 +410,7 @@ export default function ProjectsPage() {
         header: ({ column }) => (
           <ValuesHeader column={column} title="承担单位" options={undertakingUnitOptions} />
         ),
-        filterFn: multiSelect<ProjectRow>(),
+        filterFn: valuesStrict,
         cell: ({ row }) => (
           <span
             className="block max-w-32 truncate"
