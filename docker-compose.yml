@@ -8,7 +8,9 @@ services:
       POSTGRES_PASSWORD: budget
       POSTGRES_DB: budget
     ports:
-      - '5434:5432'
+      # 安全加固(审计 bm1-sup-compose.postgres-published-guessable-creds):仅绑回环,
+      # 不再向局域网暴露带默认口令的数据库;远端访问走 SSH 隧道。
+      - '127.0.0.1:5434:5432'
     volumes:
       - budget-pgdata:/var/lib/postgresql/data
     healthcheck:
