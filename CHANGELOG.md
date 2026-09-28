@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-09-28
+
+安全审计修复批:全量安全审计(1 项确认漏洞 + 20 项待验证线索)的源码侧修复与加固。审计报告与后续事项清单见 `docs/security-audit-run1-checklist.md`。
+
+### 修复
+
+- **统计越权**:指定项目范围凭证可经多值 `projectIds[]` 参数绕过单值 `projectId` 白名单校验,读取范围外项目(含已归档)全量财务记录——显式请求的每个项目现全量过凭证白名单,越界 403 并写 `apikey.denied` 审计
+- **附件导出丢件**:zip 导出去重后缀不探测占用,jszip 对重名条目静默覆盖,特定重名模式会让附件从导出档案中静默消失(影响证据完整性)——改用与打包路由一致的探测式 `dedupeName`,并加「条目数=选中数」后置不变式
+- **审批竞态**:初始预算编制单与科目变更单的状态迁移为「事务外读状态 + 事务内无条件写」,申请人撤回与管理员审批并发交错可作废已生效审批并重开预算改写——补齐行锁复核 + 条件状态更新(对齐调整单既有模式)
+- **结算导入年度越界**:结算单预算年度由申请日期派生且未校验,可写入 0001~~1899 年度(其余全部写路径均限 1900~~9999)——解析行级校验 + 确认兜底断言
+- **MCP 确认导入工具**:缺少 REST 必需的 `selectedRowIds` 参数,自发布起调用必失败——补参数并改为按行选定语义(skill 文档同步)
+- **MCP 上传导入工具**:任意本机路径读取收窄为仅 `~/budget-inbox/` 目录,并前置文件类型/大小预检
+- **运维脚本歧义绑定**:`make-admin`/`make-agent` 按可重名显示名解析账号、`--revoke` 接受截断前缀,可能绑错账号/撤错凭证——多匹配列出拒绝,前缀要求完整形态
+- **mock 守卫**:`MOCK_AUTH=true` 的拒绝条件从「仅 production」收紧为「凡非 development」,封死 `next start` 携带非生产 NODE_ENV 的绕过;`next dev` 不受影响
+- **登出防跨站**:`/api/auth/logout` 校验 Sec-Fetch-Site,拒绝跨站页面触发的强制登出(会话终止干扰)
+- **导出缓存头**:统计导出/台账导出/调整单 docx 三处私有下载补 `Cache-Control: no-store`(对齐其余下载路由)
+
+### 变更
+
+- CI workflow 显式声明 `permissions: contents: read`(脱离仓库默认 token 作用域,PR 可改脚本不再可能获得读写令牌)
+- docker-compose 数据库端口改绑 `127.0.0.1:5434:5432`,不再向局域网暴露默认口令 PostgreSQL(现有部署需 `docker compose up -d` 重建容器生效)
+- 新增基线安全响应头(`X-Frame-Options: SAMEORIGIN`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: strict-origin-when-cross-origin`)并关闭 `X-Powered-By`
+- `/changelog` 页链接协议白名单(http/https/mailto);mock 用户选择器 storage 监听按 key 过滤
+
 ## [0.17.0] - 2026-09-10
 
 前端体验与性能快赢批 + 归档项目彻底删除。
