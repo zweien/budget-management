@@ -8,6 +8,22 @@ const nextConfig: NextConfig = {
     root: process.cwd(),
   },
   output: 'standalone',
+  // 不对外泄露框架版本指纹(安全加固基线)。
+  poweredByHeader: false,
+  // 安全响应头基线(审计 Web 姿态硬化项):禁止跨站嵌套、禁 MIME 嗅探、
+  // 收敛 Referer 泄露。完整的 CSP 策略另行评估后加入(见 docs/security-audit-run1-checklist.md)。
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
+    ];
+  },
   // 排除 Python venv(.venv,docx 导出依赖),其符号链接会让 Turbopack 文件追踪失败。
   outputFileTracingExcludes: { '/**': ['.venv/**'] },
   // /changelog 页运行时 fs 读取 CHANGELOG.md:standalone 打包需显式追踪该文件。

@@ -46,6 +46,8 @@ export const GET = withRoute(async (req: NextRequest) => {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="balance-statistics.xlsx"',
+        // 私有财务数据下载,禁止任何缓存层/浏览器磁盘缓存保留(与其他下载路由一致)。
+        'Cache-Control': 'no-store',
       },
     });
   }
@@ -99,6 +101,8 @@ export const GET = withRoute(async (req: NextRequest) => {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': 'attachment; filename="statistics.xlsx"',
+      // 私有财务数据下载,禁止任何缓存层/浏览器磁盘缓存保留(与其他下载路由一致)。
+      'Cache-Control': 'no-store',
     },
   });
 });

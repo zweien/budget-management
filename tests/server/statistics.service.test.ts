@@ -104,6 +104,10 @@ describe('statistics.service (integration, real PG)', () => {
     for (const id of createdProjectIds.splice(0)) {
       await cleanupProject(id);
     }
+    // 先清用户审计行(scoped-key 用例会写 apikey.denied,operator 指向测试用户)。
+    await prisma.auditLog
+      .deleteMany({ where: { operatorId: { in: createdUserIds } } })
+      .catch(() => {});
     await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } }).catch(() => {});
     await prisma.$disconnect();
   });
@@ -281,6 +285,91 @@ describe('statistics.service (integration, real PG)', () => {
     expect(result.records.length).toBeGreaterThanOrEqual(1);
     const summaryPaid = Number(result.summary.paid);
     expect(summaryPaid).toBeGreaterThanOrEqual(50);
+  });
+
+  // ---------------- customStatistics 指定项目范围凭证(安全审计回归) ----------------
+
+  it('customStatistics: selected-scope 凭证显式请求的每个项目都必须在白名单内(projectIds[] 不绕过)', async () => {
+    const { project: pIn, leafA: leafIn } = await seedApprovedProject('SCOPEIN');
+    const { project: pOut, leafA: leafOut } = await seedApprovedProject('SCOPEOUT');
+
+    await createRecord(
+      pIn.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafIn.id,
+        amount: '60.00',
+        businessDate: '2026-03-01',
+        handler: '经办S',
+        summary: 'scope-in',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    await createRecord(
+      pOut.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafOut.id,
+        amount: '70.00',
+        businessDate: '2026-03-02',
+        handler: '经办S',
+        summary: 'scope-out',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // selected-scope 只读凭证:白名单仅含 pIn。
+    const scopedId = uuidv7();
+    await prisma.user.create({
+      data: { id: scopedId, name: 'scoped-stat', role: UserRole.USER },
+    });
+    createdUserIds.push(scopedId);
+    const scopedKeyUser = () => ({
+      id: scopedId,
+      role: UserRole.USER,
+      viaApiKey: true,
+      apiKeyPrefix: 'bma_statfix01',
+      keyTier: 'read',
+      keyProjectScope: 'selected',
+      keyProjectIds: [pIn.id],
+    });
+
+    // 白名单内单值:正常返回,且仅含白名单项目记录。
+    const ok = await customStatistics({ projectId: pIn.id }, scopedKeyUser());
+    expect(ok.total).toBe(1);
+    expect(ok.records[0]?.summary).toBe('scope-in');
+
+    // 安全审计回归:projectId(白名单内)+ projectIds[](白名单外)混参——
+    // 修复前多值绕过单值校验泄漏 pOut 记录,修复后 403。
+    await expect(
+      customStatistics(
+        { projectId: pIn.id, projectIds: [pOut.id] } as CustomStatisticsFilters,
+        scopedKeyUser(),
+      ),
+    ).rejects.toMatchObject({ status: 403, message: '凭证未授权访问该项目' });
+
+    // 纯多值且全部在白名单内:放行,且仅返回白名单项目记录。
+    const multiIn = await customStatistics({ projectIds: [pIn.id] }, scopedKeyUser());
+    expect(multiIn.total).toBe(1);
+    expect(multiIn.records.every((r) => r.projectId === pIn.id)).toBe(true);
+
+    // 多值含白名单外:403。
+    await expect(
+      customStatistics(
+        { projectIds: [pIn.id, pOut.id] } as CustomStatisticsFilters,
+        scopedKeyUser(),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+
+    // 无项目上下文:维持跨项目拒绝(codex P1 既有行为)。
+    await expect(customStatistics({}, scopedKeyUser())).rejects.toMatchObject({ status: 403 });
+
+    // 白名单外单值:403(原有行为不变)。
+    await expect(customStatistics({ projectId: pOut.id }, scopedKeyUser())).rejects.toMatchObject({
+      status: 403,
+    });
   });
 
   // ---------------- monthlyHistory(§11.4) ----------------

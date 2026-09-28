@@ -29,10 +29,21 @@ function InlineMd({ text }: { text: string }) {
         }
         const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part);
         if (link) {
+          // 安全加固(审计 bm1 审计 changelog href):scheme 白名单,
+          // 防 javascript:/data: 等可执行协议进入 href(当前输入仅仓库内 CHANGELOG,
+          // 此为对未来内容源变化的纵深防御)。
+          const href = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(link[2])
+            ? /^(https?:|mailto:)/i.test(link[2])
+              ? link[2]
+              : null
+            : link[2]; // 相对/锚点链接放行
+          if (href === null) {
+            return <React.Fragment key={i}>{link[1]}</React.Fragment>;
+          }
           return (
             <a
               key={i}
-              href={link[2]}
+              href={href}
               target="_blank"
               rel="noreferrer"
               className="text-link underline-offset-4 hover:underline"

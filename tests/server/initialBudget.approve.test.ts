@@ -284,4 +284,37 @@ describe('initialBudget approve/reject/withdraw (integration, real PG)', () => {
       approveApplication(uuidv7(), { id: adminId, role: UserRole.ADMIN }, '同意'),
     ).rejects.toMatchObject({ status: 404 });
   });
+
+  it('并发交错:withdraw 持锁改写后 approve 必须锁内 409,不得覆盖 WITHDRAWN 或应用金额(竞态回归)', async () => {
+    const { project, appId } = await seedPendingApp('RACE');
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    // T1:先锁住编制单行,改写状态为 WITHDRAWN(模拟 withdraw 已提交),再提交。
+    // approveApplication 在 T1 持锁期间启动:事务外预检读到 PENDING,进入事务后
+    // 等待行锁;T1 提交后锁内重读必须看到 WITHDRAWN → 409。
+    // (修复前:事务内无条件 update 会把 WITHDRAWN 覆盖为 APPROVED 并应用金额,
+    //  随后 updateDraft 还能以 DRAFT 名义整单重写。)
+    const t1 = prisma.$transaction(async (tx1) => {
+      await tx1.$queryRaw`SELECT status FROM initial_budget_applications WHERE id = ${appId}::uuid FOR UPDATE`;
+      await delay(80); // 让 approve 的事务外预检先完成(读到 PENDING),再改写并提交
+      await tx1.initialBudgetApplication.update({
+        where: { id: appId },
+        data: { status: ApprovalStatus.WITHDRAWN, submittedAt: null },
+      });
+    });
+    await delay(30); // approve 启动,预检执行
+    const approvePromise = approveApplication(appId, { id: adminId, role: UserRole.ADMIN });
+    await expect(t1).resolves.toBeUndefined();
+    await expect(approvePromise).rejects.toMatchObject({ status: 409 });
+
+    // 终态不变式:状态保持 WITHDRAWN;三层 current 保持 0(approve 未生效)。
+    const app = await prisma.initialBudgetApplication.findUniqueOrThrow({
+      where: { id: appId },
+    });
+    expect(app.status).toBe(ApprovalStatus.WITHDRAWN);
+    const pb = await prisma.projectBudget.findUniqueOrThrow({
+      where: { projectId: project.id },
+    });
+    expect(pb.currentAmount.toFixed(2)).toBe('0.00');
+  });
 });

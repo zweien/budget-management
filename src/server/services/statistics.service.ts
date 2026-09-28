@@ -2,7 +2,11 @@ import { BusinessStatus, Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
-import { requirePermission, denyApiKeyCrossProject } from '@/lib/auth/permissions';
+import {
+  requirePermission,
+  denyApiKeyCrossProject,
+  assertApiKeyProjectsInScope,
+} from '@/lib/auth/permissions';
 import { D, ZERO, fromStored, sumAmounts } from '@/lib/decimal';
 import { computeOccupancy, executionRate } from '@/lib/budget';
 
@@ -189,8 +193,20 @@ export async function customStatistics(
 ): Promise<CustomStatisticsResult> {
   // 1) 权限:v0.3.0 起普通用户全局只读,跨项目查询对所有登录用户开放;
   //    指定项目范围的凭证无 projectId 时拒绝(codex P1)。
-  if (filters.projectId) {
-    await requirePermission(user, 'project:view', filters.projectId);
+  //    安全修复(审计 bm1-stat-custom-projectids-scope-bypass):projectId 与多值
+  //    projectIds[] 一并纳入范围校验——显式请求的每个项目都必须在凭证白名单内,
+  //    防止「单值过检 + 多值并集入查询」绕过 scope;完全不带项目上下文仍走
+  //    denyApiKeyCrossProject。值清单哨兵('__none__'=显式空集)匹配零行、
+  //    不构成跨项目上下文,维持原放行逻辑。
+  const projectVals = splitValuesNone(filters.projectIds);
+  const requestedProjectIds = [
+    ...new Set([...projectVals.values, ...(filters.projectId ? [filters.projectId] : [])]),
+  ];
+  if (requestedProjectIds.length > 0) {
+    await assertApiKeyProjectsInScope(user, requestedProjectIds);
+    if (filters.projectId) {
+      await requirePermission(user, 'project:view', filters.projectId);
+    }
   } else {
     await denyApiKeyCrossProject(user, 'project:view');
   }
@@ -223,8 +239,8 @@ export async function customStatistics(
 
   // 3) 构建 business_records 查询条件(筛选全部在 SQL 侧,页面只渲染)。
   const where: Prisma.BusinessRecordWhereInput = {};
-  // 值清单哨兵归一化('__none__'=取消全选的显式空集 → 该维度匹配零行)。
-  const projectVals = splitValuesNone(filters.projectIds);
+  // 值清单哨兵归一化(projectVals 已在权限门处计算;其余维度在此归一化,
+  // '__none__'=取消全选的显式空集 → 该维度匹配零行)。
   const yearVals = splitValuesNone(filters.budgetYears);
   const subjectVals = splitValuesNone(filters.subjectNames);
   const handlerVals = splitValuesNone(filters.handlers);

@@ -357,6 +357,16 @@ export async function parseSettlement(
       });
     }
 
+    // 预算年度 = 申请日期派生;与手动/标准模板导入同规则校验 1900~9999
+    // (安全审计 bm1-imp:settlement-budgetyear-bypass:防 0001~1899 年度入库)。
+    const budgetYear = date ? Number(date.slice(0, 4)) : 0;
+    if (date && (budgetYear < 1900 || budgetYear > 9999)) {
+      errors.push({
+        field: 'budgetYear',
+        message: `申请日期年度必须是 1900~9999 的正整数(当前 ${budgetYear})`,
+      });
+    }
+
     parsedRows.push({
       rowNo: rowNumber,
       data: {
@@ -366,7 +376,7 @@ export async function parseSettlement(
         status: (mapped ?? 'PAID') as BusinessStatus,
         businessDate: date ?? dateRaw ?? '',
         completedDate,
-        budgetYear: date ? Number(date.slice(0, 4)) : 0,
+        budgetYear,
         summary: summary ?? '',
         amount: amountRaw ?? '',
         handler: handler ?? '',
@@ -873,6 +883,15 @@ export async function confirmSettlementImport(
         const date = normalizeDate(data.businessDate);
         if (!date) {
           throw new HTTPError(422, `第 ${row.rowNo} 行填制日期无效`);
+        }
+        // 兜底断言(安全审计 bm1-imp:settlement-budgetyear-bypass):与所有写路径
+        // 同规则——历史遗留的越界年度行(校验前入库)不得经确认写入业务记录。
+        if (
+          !Number.isInteger(data.budgetYear) ||
+          data.budgetYear < 1900 ||
+          data.budgetYear > 9999
+        ) {
+          throw new HTTPError(422, `第 ${row.rowNo} 行预算年度必须是 1900~9999 的正整数`);
         }
 
         const recordId = uuidv7();

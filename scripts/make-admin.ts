@@ -25,16 +25,30 @@ async function main() {
   // id 是 UUID 列:非 UUID 输入不能只靠 OR 兜底(Prisma 会先在校验阶段报错)。
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
   // UUID 输入同时匹配 authSubject(SSO sub)——回调显示名优先建档后,sub 是最稳定的机器键。
-  const user = await prisma.user.findFirst({
+  // 安全审计修复(bm1-adm-cli-name-keyed-resolution):User.name 无唯一约束(SSO JIT 显示名
+  // 可重名),findFirst 在同名多行时选中行不确定,可能把 ADMIN 提到错误的账号上——
+  // 改为 findMany,命中多行时列出并拒绝,要求改用 id / SSO sub 精确指定。
+  const users = await prisma.user.findMany({
     where: isUuid ? { OR: [{ id: key }, { authSubject: key }, { name: key }] } : { name: key },
+    orderBy: { createdAt: 'asc' },
   });
-  if (!user) {
+  if (users.length === 0) {
     console.error(
       `未找到用户: ${key}(请先通过 SSO 登录一次完成自动建档;` +
         '显示名优先建档时 Authentik 登录名不入库,可改传显示名或 SSO sub UUID)',
     );
     process.exit(1);
   }
+  if (users.length > 1) {
+    console.error(
+      `匹配到 ${users.length} 个用户,拒绝歧义提升(防绑错账号)。请改用用户 id 或 SSO sub UUID 精确指定:`,
+    );
+    for (const u of users) {
+      console.error(`  - ${u.name} (${u.id}) 角色=${u.role} 状态=${u.status}`);
+    }
+    process.exit(1);
+  }
+  const user = users[0];
   if (user.role === 'ADMIN') {
     console.log(`已是管理员,无需变更: ${user.name} (${user.id})`);
     return;

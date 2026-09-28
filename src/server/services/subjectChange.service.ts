@@ -28,6 +28,28 @@ const OP_TYPES: ReadonlySet<SubjectChangeOpType> = new Set<SubjectChangeOpType>(
   'move',
 ]);
 
+/**
+ * 锁定科目变更单行并复核状态(并发迁移竞态防护,镜像 adjustment.service lockAndRecheckStatus):
+ * 事务内 FOR UPDATE 行锁串行化并发请求,锁内重读状态——第二个请求会看到
+ * 第一个已提交的状态变化并 409,而不是基于事务前读取的旧状态重复应用快照。
+ * (安全审计 bm1-bud-initialbudget-state-race:approve/reject/submit 此前均为
+ * 「事务外读状态 + 事务内无条件写」,并发交错可在 REJECTED 状态下应用快照。)
+ */
+async function lockAndRecheckStatus(
+  tx: Prisma.TransactionClient,
+  appId: string,
+  expected: ApprovalStatus,
+): Promise<void> {
+  await tx.$queryRaw`SELECT status FROM subject_change_applications WHERE id = ${appId}::uuid FOR UPDATE`;
+  const fresh = await tx.subjectChangeApplication.findUniqueOrThrow({
+    where: { id: appId },
+    select: { status: true },
+  });
+  if (fresh.status !== expected) {
+    throw new HTTPError(409, `当前状态 ${fresh.status} 与预期 ${expected} 不符(已被并发操作处理)`);
+  }
+}
+
 /** §5.3 单条结构变更操作(payload)。 */
 export interface SubjectChangeOperation {
   type: SubjectChangeOpType;
@@ -445,9 +467,17 @@ export async function submitSubjectChange(
   }
 
   return prisma.$transaction(async (tx) => {
-    const updated = await tx.subjectChangeApplication.update({
-      where: { id: appId },
+    // 并发防护:锁定并复核 DRAFT(与 approve/reject 交错时 409)。
+    await lockAndRecheckStatus(tx, appId, ApprovalStatus.DRAFT);
+    const upd = await tx.subjectChangeApplication.updateMany({
+      where: { id: appId, status: ApprovalStatus.DRAFT },
       data: { status: ApprovalStatus.PENDING },
+    });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '科目变更单状态已变化,提交未生效');
+    }
+    const updated = await tx.subjectChangeApplication.findUniqueOrThrow({
+      where: { id: appId },
     });
     await recordAudit(tx, {
       projectId: app.projectId,
@@ -584,6 +614,10 @@ export async function approveSubjectChange(
   // 从快照反推 operations 不现实;改为直接对 before/after 做 diff,校验"每个被删除/移动
   // 的科目仍未被使用"。
   return prisma.$transaction(async (tx) => {
+    // 并发防护:先锁行复核 PENDING,再复跑结构保护/应用快照—— reject 与 approve
+    // 交错时后者基于锁内新状态 409,不会在 REJECTED 状态下应用树变更。
+    await lockAndRecheckStatus(tx, appId, ApprovalStatus.PENDING);
+
     // §5.4 复跑结构保护:对 before 中存在、after 中消失或 parent/isLeaf 变化的科目,
     // 重新检查是否被使用。
     const beforeById = new Map(beforeSnapshot.map((n) => [n.id, n]));
@@ -610,12 +644,19 @@ export async function approveSubjectChange(
     // 应用 afterSnapshot。
     await applyAfterSnapshot(tx, app.projectId, beforeSnapshot, afterSnapshot);
 
-    const updated = await tx.subjectChangeApplication.update({
-      where: { id: appId },
+    // 条件化迁移:仅 PENDING → APPROVED(行锁持有期间本不会变化,恒等保护)。
+    const upd = await tx.subjectChangeApplication.updateMany({
+      where: { id: appId, status: ApprovalStatus.PENDING },
       data: {
         status: ApprovalStatus.APPROVED,
         approverId: user.id,
       },
+    });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '科目变更单状态已变化,审批未生效');
+    }
+    const updated = await tx.subjectChangeApplication.findUniqueOrThrow({
+      where: { id: appId },
     });
 
     const trimmedOpinion = opinion?.trim() ? opinion.trim() : null;
@@ -652,12 +693,20 @@ export async function rejectSubjectChange(
   const trimmedOpinion = opinion?.trim() ? opinion.trim() : null;
 
   return prisma.$transaction(async (tx) => {
-    const updated = await tx.subjectChangeApplication.update({
-      where: { id: appId },
+    // 并发防护:锁定并复核 PENDING(与 approve 交错时 409,不会在应用快照后停留 REJECTED)。
+    await lockAndRecheckStatus(tx, appId, ApprovalStatus.PENDING);
+    const upd = await tx.subjectChangeApplication.updateMany({
+      where: { id: appId, status: ApprovalStatus.PENDING },
       data: {
         status: ApprovalStatus.REJECTED,
         approverId: user.id,
       },
+    });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '科目变更单状态已变化,驳回未生效');
+    }
+    const updated = await tx.subjectChangeApplication.findUniqueOrThrow({
+      where: { id: appId },
     });
     await recordAudit(tx, {
       projectId: app.projectId,

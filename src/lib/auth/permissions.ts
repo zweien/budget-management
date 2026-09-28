@@ -147,6 +147,32 @@ export async function denyApiKeyCrossProject(
   throw new HTTPError(403, '指定项目范围的凭证禁止访问跨项目接口');
 }
 
+/**
+ * 指定项目范围凭证的多项目校验:显式请求的每一个项目都必须在白名单内。
+ * (安全审计 bm1-stat-custom-projectids-scope-bypass:防止多值参数绕过单值 projectId 校验。)
+ * 命中白名单外项目时写 apikey.denied 审计并 403;非凭证调用或 all 范围恒放行。
+ */
+export async function assertApiKeyProjectsInScope(
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    apiKeyPrefix?: string;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
+  projectIds: string[],
+): Promise<void> {
+  if (!(user.viaApiKey && (user.keyProjectScope ?? 'all') === 'selected')) return;
+  const allowlist = user.keyProjectIds ?? [];
+  const outside = projectIds.find((id) => !allowlist.includes(id));
+  if (outside === undefined) return;
+  await auditMachineDenied(user, 'project:view', outside, 'apikey.denied', {
+    reason: '凭证未授权访问该项目',
+    keyProjectScope: 'selected',
+    requestedCount: projectIds.length,
+  });
+  throw new HTTPError(403, '凭证未授权访问该项目');
+}
+
 /** 机器凭证被拒审计:operator=凭证所属用户,失败不掩盖随后的 403。
  *  projectId 仅在真实存在时落库(外键约束);否则置 null,原始值进 afterData。 */
 async function auditMachineDenied(

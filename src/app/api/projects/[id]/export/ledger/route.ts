@@ -23,6 +23,8 @@ export const GET = withRoute(
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="ledger-${year}.xlsx"`,
+        // 私有财务数据下载,禁止任何缓存层/浏览器磁盘缓存保留(与其他下载路由一致)。
+        'Cache-Control': 'no-store',
       },
     });
   },

@@ -39,13 +39,33 @@ function usage(): never {
   process.exit(1);
 }
 
-async function findUserByName(name: string) {
-  return prisma.user.findFirst({ where: { name } });
+/**
+ * 按 name 精确查找用户;同名多行时列出并拒绝。
+ * (安全审计修复 bm1-adm-cli-name-keyed-resolution:User.name 无唯一约束,
+ *  findFirst 在同名多行时选中行不确定,可能把全量无人值守 key 发到错误账号。)
+ */
+async function findUserByNameStrict(name: string) {
+  const users = await prisma.user.findMany({ where: { name }, orderBy: { createdAt: 'asc' } });
+  if (users.length > 1) {
+    console.error(
+      `匹配到 ${users.length} 个同名用户「${name}」,拒绝歧义操作(防绑错账号)。请改传用户 id,或先重命名去重:`,
+    );
+    for (const u of users) {
+      console.error(`  - ${u.name} (${u.id}) 角色=${u.role} 状态=${u.status}`);
+    }
+    process.exit(1);
+  }
+  return users[0] ?? null;
 }
 
 async function ensureUser(name: string) {
-  const existing = await findUserByName(name);
-  if (existing) return existing;
+  const existing = await findUserByNameStrict(name);
+  if (existing) {
+    console.log(
+      `⚠️ 复用既有账号: ${existing.name} (${existing.id}),角色=${existing.role} 状态=${existing.status}`,
+    );
+    return existing;
+  }
   const { randomUUID } = await import('node:crypto');
   const user = await prisma.user.create({
     data: { id: randomUUID(), name, role: 'USER', status: 'active' },
@@ -111,7 +131,7 @@ async function resolveActor(nameOrId: string | undefined) {
   if (!nameOrId) return undefined;
   const user = UUID_RE.test(nameOrId)
     ? await prisma.user.findUnique({ where: { id: nameOrId } })
-    : await findUserByName(nameOrId);
+    : await findUserByNameStrict(nameOrId);
   if (!user) {
     console.error(`未找到操作者用户: ${nameOrId}`);
     process.exit(1);
@@ -141,7 +161,7 @@ async function main() {
 
   if (first === '--attended' || first === '--key') {
     if (!second) usage();
-    const user = await findUserByName(second);
+    const user = await findUserByNameStrict(second);
     if (!user) {
       console.error(`未找到用户: ${second}(先运行 npm run make-agent -- ${second})`);
       process.exit(1);
@@ -182,13 +202,45 @@ async function main() {
 
   if (first === '--revoke') {
     if (!second) usage();
-    const rec = await prisma.apiKey.findFirst({
-      where: UUID_RE.test(second) ? { id: second } : { prefix: { startsWith: second } },
+    // 安全审计修复(bm1 审计 make-agent --revoke 弱选择器):撤销按 UUID 或「完整前缀」
+    // 精确解析;前缀短于完整形态(bma_+6 hex=10 字符)或命中多把凭证时列出并拒绝,
+    // 防止截断输入匹配到任意凭证、撤错对象而泄露的 key 继续有效。
+    if (UUID_RE.test(second)) {
+      const rec = await prisma.apiKey.findUnique({ where: { id: second } });
+      if (!rec) {
+        console.error(`未找到凭证: ${second}(用 --list 查看前缀)`);
+        process.exit(1);
+      }
+      await revokeApiKey(rec.userId, rec.id, { actorId: actor?.id, via: 'make-agent' });
+      console.log(`🚫 已撤销凭证: ${rec.prefix}… (${rec.id})`);
+      return;
+    }
+    if (!second.startsWith('bma_') || second.length < 10) {
+      console.error(
+        `凭证前缀不完整: ${second}(完整前缀形如 bma_xxxxxx 共 10 字符,用 --list 查看;或直接传 keyId UUID)`,
+      );
+      process.exit(1);
+    }
+    const matches = await prisma.apiKey.findMany({
+      where: { prefix: { startsWith: second } },
+      orderBy: { createdAt: 'asc' },
     });
-    if (!rec) {
+    if (matches.length === 0) {
       console.error(`未找到凭证: ${second}(用 --list 查看前缀)`);
       process.exit(1);
     }
+    if (matches.length > 1) {
+      console.error(
+        `前缀 ${second} 匹配到 ${matches.length} 把凭证,拒绝歧义撤销。请用更长前缀或 keyId 精确指定:`,
+      );
+      for (const k of matches) {
+        console.error(
+          `  - ${k.prefix}… id=${k.id} 名称=${k.name} ${k.revokedAt ? '🚫已撤销' : '✅有效'}`,
+        );
+      }
+      process.exit(1);
+    }
+    const rec = matches[0];
     await revokeApiKey(rec.userId, rec.id, { actorId: actor?.id, via: 'make-agent' });
     console.log(`🚫 已撤销凭证: ${rec.prefix}… (${rec.id})`);
     return;

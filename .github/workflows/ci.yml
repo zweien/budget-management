@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# 安全加固(审计 bm1-sup-ci.pr-install-code-unscoped-token):workflow 只需 checkout
+# (contents:read),显式声明以脱离仓库默认 token 作用域——防止 PR 可改的 postinstall/
+# lockfile 生命周期脚本在 CI 中拿到读写令牌。
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest

@@ -67,7 +67,7 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 
 | 操作         | 调用                                                                                                                                                                                                                           |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **确认导入** | `POST /projects/$PID/imports/:batchId/confirm`(须全部行已指派叶科目且无阻断错误;返回 422 时按消息处理)                                                                                                                         |
+| **确认导入** | `POST /projects/$PID/imports/:batchId/confirm`,body `{"selectedRowIds":["<rowId>",…]}`(**仅入选定行**;经预览逐行核对后取 rowId;所选行须已指派叶科目且无阻断错误;返回 422 时按消息处理)                                         |
 | 新增记录     | `POST /projects/$PID/records`,body `{budgetYear, subjectId, amount:"1234.56", businessDate:"yyyy-mm-dd", handler, summary, status, docNo?, remark?}`                                                                           |
 | 修改记录     | `PATCH /projects/$PID/records/:recordId`(字段全部可选)                                                                                                                                                                         |
 | 到账登记     | `POST /projects/$PID/receipts`,body `{receiptDate, amount:"…", summary?, remark?}`                                                                                                                                             |
@@ -123,7 +123,7 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 
 定时任务提示词通常是「扫描收件箱并处理」。流程:
 
-1. 扫描 `~/budget-inbox/<项目编号>/*.xlsx`;目录名即项目编号,用项目列表把编号换成 `$PID`。
+1. 扫描 `~/budget-inbox/<项目编号>/*.xlsx`;目录名即项目编号,用项目列表把编号换成 `$PID`。**上传工具只接受收件箱目录内的文件**(服务端与 MCP 侧双重强制;其他路径的文件先移入收件箱再处理)。
 2. 逐文件:上传解析 → `budget_get_import_preview` 查看行/错误/重复。
 3. **科目自动指派**:先查科目映射记忆(整表一次 + 未命中摘要按词补查);命中 → 直接指派;未命中 → 对着科目树语义判断(拿不准就留空);仍不确定的行留空并计入待指派清单。
 4. `PATCH` 暂存全部可确定的行。**确认导入仅当任务指令明确授权时执行**;否则批次留在暂存,汇报里列出待确认批次与待指派行。
