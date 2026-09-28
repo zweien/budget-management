@@ -13,14 +13,17 @@
  * 运行:npm run mcp(= tsx mcp/server.ts);agent 配置示例:
  *   { "command": "npx", "args": ["-y", "tsx", "<repo>/mcp/server.ts"] }
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+
+/** 与服务端 MAX_IMPORT_BYTES 默认一致的本地预检上限(服务端仍会再校验)。 */
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 
 interface AgentConfig {
   baseUrl: string;
@@ -282,17 +285,38 @@ server.tool(
     projectId: z.string().uuid().describe(projectIdDesc),
     filePath: z
       .string()
-      .describe('本机 .xlsx 文件绝对路径(如收件箱 ~/budget-inbox/<项目编号>/ 下)'),
+      .describe('本机 .xlsx 文件绝对路径;仅允许收件箱 ~/budget-inbox/ 目录下的文件'),
   },
   async ({ projectId, filePath }) => {
-    const buf = await readFile(filePath);
+    // 安全审计修复(bm1-mcp-upload-import-local-fileread):文件读取收窄到收件箱目录。
+    // 此前为任意路径读取——被注入的指令可让 agent 把本机任意 .xlsx(如其他项目的
+    // 财务导出)上传为全员可读的待确认批次,形成跨主体披露通道。
+    const inboxRoot = join(homedir(), 'budget-inbox');
+    const resolved = resolve(filePath);
+    if (resolved !== inboxRoot && !resolved.startsWith(inboxRoot + sep)) {
+      throw new Error(
+        `filePath 必须位于收件箱目录 ${inboxRoot} 下(收到:${basename(filePath)});` +
+          `请先把文件放入 ~/budget-inbox/<项目编号>/ 再调用`,
+      );
+    }
+    const st = await stat(resolved);
+    if (!st.isFile()) {
+      throw new Error(`filePath 不是常规文件:${basename(resolved)}`);
+    }
+    if (st.size > MAX_IMPORT_BYTES) {
+      throw new Error(`文件超过导入大小上限(${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB)`);
+    }
+    if (!/\.xlsx$/i.test(basename(resolved))) {
+      throw new Error('仅支持 .xlsx 文件');
+    }
+    const buf = await readFile(resolved);
     const fd = new FormData();
     fd.append(
       'file',
       new Blob([new Uint8Array(buf)], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       }),
-      basename(filePath),
+      basename(resolved),
     );
     return out(await api(`/api/projects/${projectId}/imports`, { method: 'POST', body: fd }));
   },
@@ -300,13 +324,22 @@ server.tool(
 
 server.tool(
   'budget_confirm_import',
-  `确认导入批次入账(生成业务记录,不可靠作废以外的方式回退)。${POLICY_CONFIRM}`,
+  `确认导入批次入账(仅入选定行生成业务记录,不可靠作废以外的方式回退)。${POLICY_CONFIRM}`,
   {
     projectId: z.string().uuid().describe(projectIdDesc),
     batchId: z.string().uuid().describe('导入批次 ID(须已全部指派科目且无阻断错误)'),
+    selectedRowIds: z
+      .array(z.string().uuid())
+      .min(1)
+      .describe('要确认入账的行 ID 列表(经 budget_get_import_preview 逐行核对后选定;仅导入所选行)'),
   },
-  async ({ projectId, batchId }) =>
-    out(await api(`/api/projects/${projectId}/imports/${batchId}/confirm`, { method: 'POST' })),
+  async ({ projectId, batchId, selectedRowIds }) =>
+    out(
+      await api(`/api/projects/${projectId}/imports/${batchId}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({ selectedRowIds }),
+      }),
+    ),
 );
 
 server.tool(
