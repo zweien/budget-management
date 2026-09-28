@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
+import { dedupeName } from '@/lib/attachments/packagePath';
 import { countForExport, listForExport } from '@/server/services/recordAttachment.service';
 
 /**
@@ -53,7 +54,7 @@ export const GET = withRoute(
     });
 
     const zip = new JSZip();
-    const used = new Map<string, number>(); // 去重计数
+    const used = new Map<string, number>(); // 去重计数(dedupeName 语义:登记原名与选中候选名)
     for (const r of rows) {
       const date = r.record.businessDate.toISOString().slice(0, 10); // yyyy-mm-dd
       const safeSummary = (r.record.summary || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
@@ -61,14 +62,18 @@ export const GET = withRoute(
       // 防止 ../evil.pdf 之类的 zip-slip(部分解压器会按条目相对路径写出工作目录之外)。
       const safeName = r.attachment.fileName.replace(/[\\/:*?"<>|\0]/g, '_');
       const base = `${date}_${safeSummary}_${safeName}`.replace(/\s+/g, '_');
-      let name = base;
-      const count = used.get(base) ?? 0;
-      if (count > 0) {
-        const dot = base.lastIndexOf('.');
-        name = dot > 0 ? `${base.slice(0, dot)}(${count})${base.slice(dot)}` : `${base}(${count})`;
-      }
-      used.set(base, count + 1);
+      // 安全审计修复(bm1-att-export-dedup-collision-drops-attachment):改用探测式
+      // dedupeName——此前手写后缀不检查候选名是否已被真实文件名占用,JSZip 对重复
+      // 条目名静默覆盖,会从导出档案中丢附件。与 package 路由同一实现。
+      const name = dedupeName(base, used);
       zip.file(name, r.data);
+    }
+    // 后置不变式:档案条目数必须等于选中行数(覆盖即丢件,直接失败而非静默缺件)。
+    if (Object.keys(zip.files).length !== rows.length) {
+      return NextResponse.json(
+        { error: '导出归档条目数与选中附件数不一致,已中止(请重试或联系管理员)' },
+        { status: 500 },
+      );
     }
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });

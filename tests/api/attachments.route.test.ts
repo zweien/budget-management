@@ -291,4 +291,45 @@ describe('attachments API routes (integration)', () => {
       }
     }
   });
+
+  it('导出:重复名 + 天然 (N) 名混排 → 三个附件全部在档(去重碰撞回归,jszip 不再静默覆盖)', async () => {
+    const { GET: exportGet } = await import('@/app/api/projects/[id]/attachments/export/route');
+    // 同一记录(同日期同摘要)上传 a.pdf、a.pdf、a(1).pdf——
+    // 修复前:手写去重生成的 a(1).pdf 与天然 a(1).pdf 撞名,jszip 静默覆盖,导出只剩 2 个条目;
+    // 修复后:探测式 dedupeName 让天然名让位为 a(2).pdf,3 个附件字节全部在档。
+    const b1 = Buffer.from('DEDUP-B1');
+    const b2 = Buffer.from('DEDUP-B2');
+    const b3 = Buffer.from('DEDUP-B3');
+    for (const [name, bytes] of [
+      ['a.pdf', b1],
+      ['a.pdf', b2],
+      ['a(1).pdf', b3],
+    ] as const) {
+      const up = await uploadPost(makeUploadReq({ name, type: 'application/pdf', bytes }), {
+        params: Promise.resolve({ id: projectId, recordId }),
+      } as never);
+      expect(up.status).toBe(201);
+    }
+
+    const res = await exportGet(
+      new Request(
+        `http://localhost/api/projects/${projectId}/attachments/export?budgetYear=2026`,
+      ) as never,
+      { params: Promise.resolve({ id: projectId }) } as never,
+    );
+    expect(res.status).toBe(200);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const zip = await JSZip.loadAsync(buf);
+
+    const findEntry = async (suffix: string) => {
+      const name = Object.keys(zip.files).find((n) => n.endsWith(suffix));
+      expect(name, `缺少条目 *${suffix}`).toBeDefined();
+      return Buffer.from(await zip.files[name!].async('arraybuffer'));
+    };
+    // 三个条目都在档,字节与各自上传一一对应(B2 未被 B3 覆盖)。
+    // 天然 a(1).pdf 与已生成候选 a(1).pdf 同名时,后到的天然名探测让位为 a(1)(1).pdf。
+    expect((await findEntry('2026-08-05_route_a.pdf')).equals(b1)).toBe(true);
+    expect((await findEntry('2026-08-05_route_a(1).pdf')).equals(b2)).toBe(true);
+    expect((await findEntry('2026-08-05_route_a(1)(1).pdf')).equals(b3)).toBe(true);
+  });
 });
