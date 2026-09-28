@@ -9,11 +9,15 @@ import { env } from '@/lib/env';
  */
 export async function runBootGuard(): Promise<void> {
   try {
-    if (env.NODE_ENV === 'production' && env.MOCK_AUTH) {
+    // 安全加固(审计 bm1-web-mock-auth-nodeenv-guard):守卫从「仅 production」收紧为
+    // 「凡非 development 一律拒绝」。原先 `next start` 显式携带 NODE_ENV=development/test
+    // 或未设 NODE_ENV 直接 node server.js 时守卫不生效,免认证的模拟身份接口随之暴露;
+    // 只有真正的开发模式(next dev 强制 NODE_ENV=development)保留 mock 便利性。
+    if (env.MOCK_AUTH && env.NODE_ENV !== 'development') {
       console.error(
-        '❌ 生产环境禁止 MOCK_AUTH=true(mock 模式下 x-mock-user-id 可冒充任意用户)。' +
-          '请设置 MOCK_AUTH=false 并配置 AUTHENTIK_ISSUER / AUTHENTIK_CLIENT_ID / ' +
-          'AUTHENTIK_CLIENT_SECRET / AUTH_SECRET / APP_BASE_URL。',
+        `❌ 非开发环境(NODE_ENV=${env.NODE_ENV})禁止 MOCK_AUTH=true(mock 模式下 x-mock-user-id 可冒充任意用户)。` +
+          '本地开发请用 npm run dev;部署请设置 MOCK_AUTH=false 并配置 AUTHENTIK_ISSUER / ' +
+          'AUTHENTIK_CLIENT_ID / AUTHENTIK_CLIENT_SECRET / AUTH_SECRET / APP_BASE_URL。',
       );
       process.exit(1);
     }
