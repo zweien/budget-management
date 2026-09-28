@@ -363,6 +363,59 @@ describe('settlementImport.service (integration, real PG)', () => {
     expect(list.map((b) => b.batchId)).toContain(batchId2);
   });
 
+  it('parse/confirm:申请日期派生年度越界(0001-1899)→ 行错误;历史遗留越界行 confirm 兜底 422(安全审计回归)', async () => {
+    // 1) 解析侧:1899-01-01 是合法日期但年度越界 → 行级错误,不入 pending。
+    const buf = await buildSettlementXlsx([
+      {
+        docNo: 'YEAR-OK',
+        docStatus: '完成记账',
+        fillDate: '2026-08-25',
+        subject: '正常年度',
+        amount: '100',
+        handler: '甲',
+      },
+      {
+        docNo: 'YEAR-BAD',
+        docStatus: '完成记账',
+        fillDate: '1899-01-01',
+        subject: '越界年度',
+        amount: '200',
+        handler: '乙',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    const batchId = await parseSettlement(wb!, projectId, adminUser(), 'year.xlsx');
+    const preview = await getSettlementBatch(batchId, adminUser());
+    expect(preview.pending.map((r) => r.parsedData.docNo)).toEqual(['YEAR-OK']);
+    const badRow = preview.errors.find((r) => r.parsedData.docNo === 'YEAR-BAD');
+    expect(badRow).toBeDefined();
+    expect(badRow!.errors.map((e) => e.field)).toContain('budgetYear');
+
+    // 2) confirm 兜底:模拟修复前遗留的越界年度行(直接改写暂存 parsedData),
+    //    确认时必须 422,不得写入业务记录。
+    await updateSettlementRows(
+      batchId,
+      [{ rowId: preview.pending[0].rowId, subjectId: leafId }],
+      adminUser(),
+    );
+    const legacyRow = await prisma.importRow.findFirstOrThrow({
+      where: { batchId, rowNo: preview.pending[0].rowNo },
+    });
+    await prisma.importRow.update({
+      where: { id: legacyRow.id },
+      data: {
+        parsedData: { ...(legacyRow.parsedData as object), budgetYear: 1899 },
+      },
+    });
+    await expect(
+      confirmSettlementImport(batchId, [preview.pending[0].rowId], adminUser()),
+    ).rejects.toMatchObject({ status: 422 });
+    const after = await prisma.businessRecord.count({
+      where: { projectId, docNo: 'YEAR-OK' },
+    });
+    expect(after).toBe(0);
+  });
+
   it('parse:docNo 命中既有记录 → 疑似重复;无 docNo 退回指纹', async () => {
     // 既有记录:docNo EXIST-1;以及一条供指纹匹配的(2026-03-03/88/指纹摘要)。
     await prisma.businessRecord.create({
