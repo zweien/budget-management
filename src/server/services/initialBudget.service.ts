@@ -509,6 +509,28 @@ export async function createDraft(
 }
 
 /**
+ * 锁定编制单行并复核状态(并发迁移竞态防护,镜像 adjustment.service lockAndRecheckStatus):
+ * 事务内 FOR UPDATE 行锁串行化并发请求,锁内重读状态——第二个请求会看到
+ * 第一个已提交的状态变化并 409,而不是基于事务前读取的旧状态重复应用金额。
+ * (安全审计 bm1-bud-initialbudget-state-race:withdraw/approve/submit/reject/updateDraft
+ * 此前均为「事务外读状态 + 事务内无条件写」,并发交错可作废已生效审批。)
+ */
+async function lockAndRecheckStatus(
+  tx: Prisma.TransactionClient,
+  appId: string,
+  expected: ApprovalStatus,
+): Promise<void> {
+  await tx.$queryRaw`SELECT status FROM initial_budget_applications WHERE id = ${appId}::uuid FOR UPDATE`;
+  const fresh = await tx.initialBudgetApplication.findUniqueOrThrow({
+    where: { id: appId },
+    select: { status: true },
+  });
+  if (fresh.status !== expected) {
+    throw new HTTPError(409, `当前状态 ${fresh.status} 与预期 ${expected} 不符(已被并发操作处理)`);
+  }
+}
+
+/**
  * §6.2 修改编制草稿(驳回/撤回后回到可编辑态,或 DRAFT 直接改)。
  * 仅当 application 处于 DRAFT/REJECTED/WITHDRAWN 时允许;PENDING/APPROVED 不可改(409)。
  * 实现等同 createDraft 的写入逻辑,但在同一事务内先清空旧 subjects/budgets 再重建。
@@ -548,6 +570,16 @@ export async function updateDraft(
   const levels = computeLevels(payload);
 
   await prisma.$transaction(async (tx) => {
+    // 并发防护:锁定编制单行并复核可编辑状态(approve/withdraw 与 updateDraft 竞态)。
+    await tx.$queryRaw`SELECT status FROM initial_budget_applications WHERE id = ${appId}::uuid FOR UPDATE`;
+    const fresh = await tx.initialBudgetApplication.findUniqueOrThrow({
+      where: { id: appId },
+      select: { status: true },
+    });
+    if (!editable.includes(fresh.status)) {
+      throw new HTTPError(409, `当前状态 ${fresh.status} 不可修改`);
+    }
+
     // 清空旧编制数据(subjects 级联带走 subject_budgets / subject_total_budgets;
     // 同时清 annual_budgets 草稿值)。
     await tx.subjectTotalBudget.deleteMany({ where: { projectId } });
@@ -637,10 +669,14 @@ export async function updateDraft(
       data: { initialAmount: toStored(projectTotal) },
     });
 
-    await tx.initialBudgetApplication.update({
-      where: { id: appId },
+    // 条件化状态迁移:行锁持有期间状态不会变化,updateMany 仅作恒等保护。
+    const upd = await tx.initialBudgetApplication.updateMany({
+      where: { id: appId, status: fresh.status },
       data: { status: ApprovalStatus.DRAFT, applicantId: user.id },
     });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '编制单状态已变化,修改未生效');
+    }
 
     await recordAudit(tx, {
       projectId,
@@ -758,10 +794,15 @@ export async function submitDraft(
 
   const now = new Date();
   await prisma.$transaction(async (tx) => {
-    await tx.initialBudgetApplication.update({
-      where: { id: appId },
+    // 并发防护:锁定并复核 DRAFT(与 approve/withdraw/updateDraft 交错时 409)。
+    await lockAndRecheckStatus(tx, appId, ApprovalStatus.DRAFT);
+    const upd = await tx.initialBudgetApplication.updateMany({
+      where: { id: appId, status: ApprovalStatus.DRAFT },
       data: { status: ApprovalStatus.PENDING, submittedAt: now },
     });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '编制单状态已变化,提交未生效');
+    }
     await recordAudit(tx, {
       projectId: app.projectId,
       objectType: 'initial_budget_applications',
@@ -878,6 +919,10 @@ export async function approveApplication(
   const now = new Date();
 
   const updated = await prisma.$transaction(async (tx) => {
+    // 并发防护:先锁行复核 PENDING,再复跑校验/应用金额—— withdraw 与 approve
+    // 交错时后者基于锁内新状态 409,不会把已生效审批覆盖回 DRAFT。
+    await lockAndRecheckStatus(tx, appId, ApprovalStatus.PENDING);
+
     // §6.4 复跑:数据落库后可能被改,生效前再校验一次,失败抛 422(整体事务回滚)。
     const payload = await rebuildPayloadFromStored(tx, app.projectId);
     // §包干制:按项目预算类型跳过科目总预算规则(LUMP_SUM 本就不落该层,防御性兜底)。
@@ -933,15 +978,21 @@ export async function approveApplication(
       });
     }
 
-    // 5) application 状态流转 + 审批人/时间/意见。
-    const after = await tx.initialBudgetApplication.update({
-      where: { id: appId },
+    // 5) application 状态流转 + 审批人/时间/意见。条件化迁移:仅 PENDING → APPROVED。
+    const upd = await tx.initialBudgetApplication.updateMany({
+      where: { id: appId, status: ApprovalStatus.PENDING },
       data: {
         status: ApprovalStatus.APPROVED,
         approverId: user.id,
         approvedAt: now,
         opinion: opinion ?? null,
       },
+    });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '编制单状态已变化,审批未生效');
+    }
+    const after = await tx.initialBudgetApplication.findUniqueOrThrow({
+      where: { id: appId },
     });
 
     await recordAudit(tx, {
@@ -997,14 +1048,22 @@ export async function rejectApplication(
 
   const now = new Date();
   const updated = await prisma.$transaction(async (tx) => {
-    const after = await tx.initialBudgetApplication.update({
-      where: { id: appId },
+    // 并发防护:锁定并复核 PENDING(与 withdraw/approve 交错时 409)。
+    await lockAndRecheckStatus(tx, appId, ApprovalStatus.PENDING);
+    const upd = await tx.initialBudgetApplication.updateMany({
+      where: { id: appId, status: ApprovalStatus.PENDING },
       data: {
         status: ApprovalStatus.REJECTED,
         approverId: user.id,
         approvedAt: now,
         opinion,
       },
+    });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '编制单状态已变化,驳回未生效');
+    }
+    const after = await tx.initialBudgetApplication.findUniqueOrThrow({
+      where: { id: appId },
     });
     await recordAudit(tx, {
       projectId: app.projectId,
@@ -1051,9 +1110,17 @@ export async function withdrawApplication(
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    const after = await tx.initialBudgetApplication.update({
-      where: { id: appId },
+    // 并发防护:锁定并复核 PENDING(与 approve 交错时 409,不会把 APPROVED 覆盖回 DRAFT)。
+    await lockAndRecheckStatus(tx, appId, ApprovalStatus.PENDING);
+    const upd = await tx.initialBudgetApplication.updateMany({
+      where: { id: appId, status: ApprovalStatus.PENDING },
       data: { status: ApprovalStatus.DRAFT, submittedAt: null },
+    });
+    if (upd.count !== 1) {
+      throw new HTTPError(409, '编制单状态已变化,撤回未生效');
+    }
+    const after = await tx.initialBudgetApplication.findUniqueOrThrow({
+      where: { id: appId },
     });
     await recordAudit(tx, {
       projectId: app.projectId,
