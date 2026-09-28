@@ -78,10 +78,16 @@ export function MockUserSelector() {
   useEffect(() => {
     const sync = () => setCurrent(getMockUserId());
     window.addEventListener('mock-user-change', sync);
-    window.addEventListener('storage', sync);
+    // storage 事件带 key 过滤:其他 localStorage 键的写入(如列偏好迁移)与本组件无关,
+    // 不应触发身份重读(审计 bm1 审计 Cross-context storage 硬化项)。
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === 'mock-user-id') sync();
+    };
+    window.addEventListener('mock-user-change', sync);
+    window.addEventListener('storage', onStorage);
     return () => {
       window.removeEventListener('mock-user-change', sync);
-      window.removeEventListener('storage', sync);
+      window.removeEventListener('storage', onStorage);
     };
   }, []);
 
