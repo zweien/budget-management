@@ -138,14 +138,38 @@ export async function createReceipt(
 /**
  * §9 列出到账记录 + 到账累计。
  * - 权限:project:view + 项目范围。
- * - 累计 = 全部记录金额之和(到账不区分年度/状态,统一求和)。
- * - 返回 { records, cumulative }。
+ * - 累计 = 全部记录金额之和(到账不区分年度/状态,统一求和;分页时经 SQL 聚合,
+ *   口径不变)。
+ * - 可选分页(安全审计 bm1-rec-unbounded-project-list-materialization):paging 成对
+ *   提供时 skip/take 并附 total;缺省 = 全量(既有 UI 兼容)。
+ * - 返回 { records, cumulative, total? }。
  */
 export async function listReceipts(
   projectId: string,
   user: Pick<User, 'id' | 'role'>,
-): Promise<ReceiptListResult> {
+  paging?: { page: number; pageSize: number },
+): Promise<ReceiptListResult & { total?: number }> {
   await requirePermission(user, 'project:view', projectId);
+
+  if (paging) {
+    // 分页:记录取当页;累计/总数走 SQL 聚合(累计是全集口径,与分页无关)。
+    const [records, agg] = await Promise.all([
+      prisma.receiptRecord.findMany({
+        where: { projectId },
+        orderBy: [{ receiptDate: 'desc' }, { createdAt: 'desc' }],
+        include: { creator: { select: { id: true, name: true } } },
+        skip: (paging.page - 1) * paging.pageSize,
+        take: paging.pageSize,
+      }),
+      prisma.receiptRecord.aggregate({
+        where: { projectId },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+    ]);
+    const cumulative = agg._sum.amount ? fromStored(agg._sum.amount).toFixed(2) : '0.00';
+    return { records, cumulative, total: agg._count._all };
+  }
 
   const records = await prisma.receiptRecord.findMany({
     where: { projectId },

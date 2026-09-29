@@ -12,6 +12,7 @@ import {
 import { createProject } from '@/server/services/project.service';
 import { getProjectLedger } from '@/server/services/ledger.service';
 import {
+  countRecords,
   createRecord,
   listRecords,
   updateRecord,
@@ -851,6 +852,29 @@ describe('businessRecord.service (integration, real PG)', () => {
       adminUser(),
     );
     expect(combo.length).toBe(0);
+
+    // 安全审计 bm1-rec-unbounded-project-list-materialization:可选分页
+    // (page/pageSize 生效,不提供时全量——既有 UI 兼容)。
+    const allForPaging = await listRecords(project.id, {}, adminUser());
+    expect(allForPaging.length).toBe(2);
+    const page1 = await listRecords(project.id, { page: 1, pageSize: 1 }, adminUser());
+    expect(page1.length).toBe(1);
+    const page2 = await listRecords(project.id, { page: 2, pageSize: 1 }, adminUser());
+    expect(page2.length).toBe(1);
+    // 分页切片不重叠(排序 businessDate desc 稳定)。
+    expect(page1[0].id).not.toBe(page2[0].id);
+    // 越界页:空数组而非报错。
+    const page9 = await listRecords(project.id, { page: 9, pageSize: 1 }, adminUser());
+    expect(page9.length).toBe(0);
+    // countRecords 与全量口径一致;带筛选时同步收敛。
+    expect(await countRecords(project.id, {}, adminUser())).toBe(2);
+    expect(
+      await countRecords(
+        project.id,
+        { businessDateFrom: '2026-03-01', businessDateTo: '2026-03-31' },
+        adminUser(),
+      ),
+    ).toBe(1);
   });
   it('完成日期:创建写入;早于申请日期 → 422;更新可设置/清空,只改申请日期时合并校验', async () => {
     const { project, leafA } = await seedApprovedProject('CMPL');

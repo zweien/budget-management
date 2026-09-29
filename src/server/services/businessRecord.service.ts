@@ -70,6 +70,12 @@ export interface ListRecordsFilters {
   /** 业务发生日期范围(yyyy-mm-dd,闭区间)。 */
   businessDateFrom?: string;
   businessDateTo?: string;
+  /**
+   * 可选分页(安全审计 bm1-rec-unbounded-project-list-materialization):
+   * 须与 pageSize 成对提供;缺省 = 全量(既有 UI 兼容)。pageSize 上限 500。
+   */
+  page?: number;
+  pageSize?: number;
 }
 
 /** §8.4 超预算预警的返回结构:createRecord 与 updateRecord 均带 overBudget 标志。 */
@@ -395,17 +401,11 @@ export async function createRecord(
 }
 
 /**
- * §8 列出业务记录(组合筛选)。
- * - 权限:project:view + 项目范围(查看记录归入"查看获授权项目",§2.2)。
- * - 默认不含作废(includeVoid=false)。
- */
-export async function listRecords(
+/** 列表筛选 → Prisma where(listRecords 与 countRecords 共享同一过滤口径)。 */
+function buildListRecordsWhere(
   projectId: string,
   filters: ListRecordsFilters,
-  user: Pick<User, 'id' | 'role'>,
-): Promise<BusinessRecordWithName[]> {
-  await requirePermission(user, 'project:view', projectId);
-
+): Prisma.BusinessRecordWhereInput {
   const where: Prisma.BusinessRecordWhereInput = { projectId };
   if (filters.year !== undefined) {
     where.budgetYear = filters.year;
@@ -434,14 +434,54 @@ export async function listRecords(
       where.businessDate.lte = parseBusinessDate(filters.businessDateTo);
     }
   }
+  return where;
+}
+
+/**
+ * §8 列出业务记录(组合筛选)。
+ * - 权限:project:view + 项目范围(查看记录归入"查看获授权项目",§2.2)。
+ * - 默认不含作废(includeVoid=false)。
+ * - 可选分页(filters.page/pageSize 成对提供时 skip/take;安全审计
+ *   bm1-rec-unbounded-project-list-materialization:全量 findMany 的内存/序列化成本
+ *   随存量行数线性增长,调用方应尽量分页拉取;配 countRecords 取总数)。
+ */
+export async function listRecords(
+  projectId: string,
+  filters: ListRecordsFilters,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<BusinessRecordWithName[]> {
+  await requirePermission(user, 'project:view', projectId);
+
+  const where = buildListRecordsWhere(projectId, filters);
+  const paging: { skip?: number; take?: number } =
+    filters.page !== undefined && filters.pageSize !== undefined
+      ? {
+          skip: (Math.trunc(filters.page) - 1) * Math.trunc(filters.pageSize),
+          take: Math.trunc(filters.pageSize),
+        }
+      : {};
 
   const rows = await prisma.businessRecord.findMany({
     where,
     orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }],
     include: { createdBy: { select: { name: true } } },
+    ...paging,
   });
   // creatorName(0.14 筛选扩展):录入人展示/筛选直接用名字,前端不必再查用户表。
   return rows.map(({ createdBy, ...r }) => ({ ...r, creatorName: createdBy?.name ?? null }));
+}
+
+/**
+ * §8 记录计数(与 listRecords 同一过滤口径,分页时的总数来源)。
+ * 权限:project:view + 项目范围。
+ */
+export async function countRecords(
+  projectId: string,
+  filters: ListRecordsFilters,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<number> {
+  await requirePermission(user, 'project:view', projectId);
+  return prisma.businessRecord.count({ where: buildListRecordsWhere(projectId, filters) });
 }
 
 /**

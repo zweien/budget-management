@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BusinessStatus } from '@prisma/client';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { updateRecord, type UpdateRecordInput } from '@/server/services/businessRecord.service';
 
@@ -16,7 +16,7 @@ export const PATCH = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { recordId } = await params;
-    const body = (await req.json()) as UpdateRecordInput;
+    const body = (await readJson(req)) as UpdateRecordInput;
 
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: '请求体无效' }, { status: 400 });

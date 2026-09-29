@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BusinessStatus } from '@prisma/client';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import {
+  countRecords,
   createRecord,
   listRecords,
   type CreateRecordInput,
@@ -69,6 +70,37 @@ export const GET = withRoute(
       filters.businessDateTo = dateTo;
     }
 
+    // 可选分页(安全审计 bm1-rec-unbounded-project-list-materialization):
+    // page/pageSize 须成对提供;缺省 = 全量(既有 UI 兼容)。分页时附 total。
+    let paging: { page: number; pageSize: number } | undefined;
+    const pageParam = sp.get('page');
+    const pageSizeParam = sp.get('pageSize');
+    if (pageParam !== null || pageSizeParam !== null) {
+      const page = Number(pageParam);
+      const pageSize = Number(pageSizeParam);
+      if (
+        !Number.isInteger(page) ||
+        page < 1 ||
+        !Number.isInteger(pageSize) ||
+        pageSize < 1 ||
+        pageSize > 500
+      ) {
+        return NextResponse.json(
+          { error: '分页参数无效:page ≥ 1,pageSize 1~500(两者须成对提供)' },
+          { status: 400 },
+        );
+      }
+      paging = { page, pageSize };
+    }
+
+    const pagedFilters: ListRecordsFilters = { ...filters, ...paging };
+    if (paging) {
+      const [records, total] = await Promise.all([
+        listRecords(id, pagedFilters, user),
+        countRecords(id, filters, user),
+      ]);
+      return NextResponse.json({ records, total });
+    }
     const records = await listRecords(id, filters, user);
     return NextResponse.json({ records });
   },
@@ -83,7 +115,7 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
-    const body = (await req.json()) as CreateRecordInput;
+    const body = (await readJson(req)) as CreateRecordInput;
 
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: '请求体无效' }, { status: 400 });

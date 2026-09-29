@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { createProject, listProjects } from '@/server/services/project.service';
 
@@ -16,7 +16,7 @@ export const GET = withRoute(async (req: NextRequest) => {
 /** POST /api/projects — 新建项目。 */
 export const POST = withRoute(async (req: NextRequest) => {
   const user = await requireUser();
-  const body = await req.json();
+  const body = (await readJson(req)) as never;
   const project = await createProject(body, user);
   return NextResponse.json(project, { status: 201 });
 });

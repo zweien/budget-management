@@ -225,6 +225,26 @@ export async function countForExport(
 }
 
 /**
+ * 计数 + 字节总量:按项目(+可选年度/科目)聚合,不加载 bytea data。
+ * 权限:project:view。字节门是真正的 OOM 防线(安全审计 bm1-att-zip-export-byte-unbounded):
+ * 附件单文件 50MB × 条数上限 500 = 25GB 仍能通过纯条数门,而 zip 生成是全量内存物化
+ * (峰值约 2× 附件字节总量)——没有字节上限,条数上限防不住它自己注释里写的威胁。
+ */
+export async function countAndBytesForExport(
+  projectId: string,
+  filters: { budgetYear?: number; subjectId?: string },
+  user: Pick<User, 'id' | 'role'>,
+): Promise<{ count: number; totalBytes: number }> {
+  await requirePermission(user, 'project:view', projectId);
+  const agg = await prisma.recordAttachment.aggregate({
+    where: buildExportWhere(projectId, filters),
+    _count: { _all: true },
+    _sum: { sizeBytes: true },
+  });
+  return { count: agg._count._all, totalBytes: agg._sum.sizeBytes ?? 0 };
+}
+
+/**
  * 批量导出:按项目(+可选年度/科目)取全部附件 + 关联业务上下文。
  * 权限:project:view。
  * 用于 zip 打包(路由层)。返回每项含 data 二进制。

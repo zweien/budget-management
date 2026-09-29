@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { withdrawAdjustment } from '@/server/services/adjustment.service';
 
@@ -16,7 +16,7 @@ export const POST = withRoute(
     // 操作人所见版本的提交代(§版本绑定),body 可空。
     let submittedAt: string | undefined;
     try {
-      const body = (await req.json()) as { submittedAt?: unknown };
+      const body = (await readJson(req)) as { submittedAt?: unknown };
       if (body && typeof body.submittedAt === 'string') {
         submittedAt = body.submittedAt;
       }

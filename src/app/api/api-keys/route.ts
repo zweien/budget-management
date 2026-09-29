@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import {
   assertInteractiveSession,
@@ -27,7 +27,7 @@ export const GET = withRoute(async () => {
 export const POST = withRoute(async (req: NextRequest) => {
   const user = await requireUser();
   assertInteractiveSession(user);
-  const body = (await req.json().catch(() => null)) as Partial<CreateApiKeyInput> | null;
+  const body = (await readJson(req).catch(() => null)) as Partial<CreateApiKeyInput> | null;
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: '请求体无效' }, { status: 400 });
   }

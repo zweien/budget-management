@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BusinessStatus } from '@prisma/client';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { switchStatus } from '@/server/services/businessRecord.service';
 
@@ -15,7 +15,7 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { recordId } = await params;
-    const body = (await req.json().catch(() => ({}))) as { status?: BusinessStatus };
+    const body = (await readJson(req).catch(() => ({}))) as { status?: BusinessStatus };
 
     if (!body.status || !STATUS_SET.has(body.status)) {
       return NextResponse.json(

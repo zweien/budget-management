@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { archiveProject, getProject, updateProject } from '@/server/services/project.service';
 
@@ -19,7 +19,7 @@ export const PATCH = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
-    const body = await req.json();
+    const body = (await readJson(req)) as never;
     const project = await updateProject(id, body, user);
     return NextResponse.json(project);
   },

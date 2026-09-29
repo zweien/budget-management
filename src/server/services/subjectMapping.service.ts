@@ -38,9 +38,19 @@ export async function getSubjectMappings(
   projectId: string,
   options: SubjectMappingOptions = {},
 ): Promise<SubjectMapping[]> {
+  // q 下推(安全审计 bm1-smap-groupby-unbounded-aggregation):归一化摘要只折叠空白,
+  // 因此「无空白的词根」在原始摘要上的不区分大小写包含匹配与内存里的归一化匹配
+  // 语义严格等价,可安全下推到 groupBy where,避免每请求聚合全项目全部记录;
+  // 含空白的 q 下推会漏行(归一化把多空白折叠成单空格),维持全量聚合 + 内存过滤。
+  const needle = options.q?.trim().toLowerCase();
+  const pushdown = needle && needle.length > 0 && !/\s/.test(needle) ? needle : null;
   const groups = await prisma.businessRecord.groupBy({
     by: ['summary', 'subjectId'],
-    where: { projectId, isVoid: false },
+    where: {
+      projectId,
+      isVoid: false,
+      ...(pushdown ? { summary: { contains: pushdown, mode: 'insensitive' } } : {}),
+    },
     _count: { _all: true },
     _max: { createdAt: true },
   });
@@ -52,7 +62,6 @@ export async function getSubjectMappings(
   }
   // 归一化摘要 → 科目 → 累计(原始摘要写法差异在此合并)。
   const merged = new Map<string, Map<string, Acc>>();
-  const needle = options.q?.trim().toLowerCase();
   for (const g of groups) {
     const key = normalizeSummary(g.summary);
     if (!key) continue;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { getPurgePreview, purgeArchivedProject } from '@/server/services/project.service';
 
@@ -19,7 +19,7 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
-    const body = (await req.json().catch(() => null)) as { confirmCode?: string } | null;
+    const body = (await readJson(req).catch(() => null)) as { confirmCode?: string } | null;
     const preview = await purgeArchivedProject(id, user, body?.confirmCode);
     return NextResponse.json(preview);
   },

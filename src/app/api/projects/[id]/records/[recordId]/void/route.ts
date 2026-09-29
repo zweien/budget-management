@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { voidRecord } from '@/server/services/businessRecord.service';
 
@@ -12,7 +12,7 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { recordId } = await params;
-    const body = (await req.json().catch(() => ({}))) as { reason?: string };
+    const body = (await readJson(req).catch(() => ({}))) as { reason?: string };
 
     const record = await voidRecord(recordId, body.reason ?? '', user);
     return NextResponse.json({ record });

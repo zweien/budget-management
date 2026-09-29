@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { voidRecordsBatch } from '@/server/services/businessRecord.service';
 
@@ -14,7 +14,7 @@ export const POST = withRoute(
     const user = await requireUser();
     const { id } = await params;
 
-    const body = (await req.json().catch(() => null)) as {
+    const body = (await readJson(req).catch(() => null)) as {
       recordIds?: unknown;
       reason?: unknown;
     } | null;

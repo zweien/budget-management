@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { MemberRole } from '@prisma/client';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { HTTPError, requireUser } from '@/lib/auth/session';
 import { addMember, listMembers } from '@/server/services/member.service';
 
@@ -22,7 +22,7 @@ export const GET = withRoute(async (_req: NextRequest, ctx: Ctx) => {
 export const POST = withRoute(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireUser();
   const { id } = await ctx.params;
-  const body = (await req.json().catch(() => null)) as {
+  const body = (await readJson(req).catch(() => null)) as {
     userId?: string;
     memberRole?: string;
   } | null;

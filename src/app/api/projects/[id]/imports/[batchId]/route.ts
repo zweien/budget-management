@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
 import { getImportBatch } from '@/server/services/excelImport.service';
@@ -45,7 +45,7 @@ export const PATCH = withRoute(
     const user = await requireUser();
     const { batchId } = await params;
 
-    const body = (await req.json().catch(() => null)) as { updates?: unknown } | null;
+    const body = (await readJson(req).catch(() => null)) as { updates?: unknown } | null;
     if (!body || !Array.isArray(body.updates)) {
       return NextResponse.json({ error: '请求体无效:需要 updates 数组' }, { status: 400 });
     }

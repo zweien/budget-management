@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { assertContentLengthBelow, withRoute } from '@/lib/api/withRoute';
 import { env } from '@/lib/env';
 import { HTTPError, requireUser } from '@/lib/auth/session';
+import { requirePermission } from '@/lib/auth/permissions';
 import { parseAndValidate } from '@/server/services/excelImport.service';
 import {
   listImportBatches,
-  loadSettlementWorkbookIfMatch,
+  loadWorkbookWithFormatDetection,
   parseSettlement,
 } from '@/server/services/settlementImport.service';
 
@@ -22,6 +23,12 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
+
+    // 安全审计 bm1-att-upload-body-buffer-unbounded / bm1-imp:xlsx-decompress-preauthz-parse:
+    // 闸门按成本升序——① 声明长度预检(零成本,缓冲前拦明显超限)→ ② formData 缓冲后的
+    // 文件形态/大小校验 → ③ 权限校验(触碰 DB)→ ④ 解析(最重,严格置于授权之后)。
+    // 最低档凭证不再能借上传通道触发解压解析成本(服务层仍会复核权限)。
+    assertContentLengthBelow(req, env.MAX_IMPORT_BYTES);
 
     const form = await req.formData();
     const file = form.get('file');
@@ -41,12 +48,16 @@ export const POST = withRoute(
       );
     }
 
+    // 权限闸:解析前最后一道(服务层复核;审计要求解析成本只发生在已授权之后)。
+    await requirePermission(user, 'record:import', id);
+
     const arrayBuffer = await file.arrayBuffer();
     // 格式自动识别:命中个人结算单表头(单据编号+单据状态)走结算单解析,否则标准模板。
-    const settlementWb = await loadSettlementWorkbookIfMatch(arrayBuffer);
-    const batchId = settlementWb
-      ? await parseSettlement(settlementWb, id, user, name)
-      : await parseAndValidate(arrayBuffer, id, user, name);
+    // 整个 workbook 只 load 一次,探测与解析复用同一对象(此前标准模板被解析两遍)。
+    const { workbook, isSettlement } = await loadWorkbookWithFormatDetection(arrayBuffer);
+    const batchId = isSettlement
+      ? await parseSettlement(workbook, id, user, name)
+      : await parseAndValidate(arrayBuffer, id, user, name, workbook);
     return NextResponse.json({ batchId }, { status: 201 });
   },
 );

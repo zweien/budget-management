@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import {
   createDraft,
@@ -23,7 +23,7 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
-    const body = (await req.json()) as InitialBudgetPayload;
+    const body = (await readJson(req)) as InitialBudgetPayload;
     const { appId } = await createDraft(id, body, user);
     return NextResponse.json({ appId }, { status: 201 });
   },
