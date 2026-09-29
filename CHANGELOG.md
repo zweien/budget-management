@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-29
+
+资源上限族(P2):安全审计bm1 资源耗尽家族的系统性收口——授权前的无界缓冲、全量物化读取、无界导出全部加上限;另含导入闸门排序与解析去重。遗留项(ledger 聚合下推、流式 zip、解压预算等)见 `docs/security-audit-run1-checklist.md` 第 1 节。
+
+### 新增
+
+- **列表可选分页**:records/receipts 端点支持 `page/pageSize`(成对提供,pageSize 1~500;缺省全量,既有 UI 兼容);records 分页响应附 `total`,receipts 累计恒为全集口径(SQL 聚合)
+- 新增环境变量:`MAX_BODY_BYTES`(默认 1MB)、`MAX_EXPORT_TOTAL_BYTES`(默认 512MB)、`MAX_EXPORT_ROWS`(默认 10 万)
+
+### 变更
+
+- **JSON 请求体上限**:全部 28 处写路由的 `req.json()` 替换为流式计数的 `readJson`(Content-Length 预检 + 逐块计数,超限 413)——此前任何已认证凭证可在授权前让共享进程预授权缓冲任意大小数据
+- **multipart 上传预检**:附件/导入上传在缓冲前做声明长度检查(chunked 绕过由代理层兜底)
+- **附件 zip 导出双闸**:条数门之外新增字节门(`SUM(size_bytes)` 聚合,超 `MAX_EXPORT_TOTAL_BYTES` 413;载入后复查条数)——纯条数门挡不住 500×50MB
+- **统计自定义导出行数门**:超 `MAX_EXPORT_ROWS` 413 提示加筛选(明细全量写内存 workbook 不再无界)
+- **subject-mappings 查询下推**:无空白词根的 `q` 下推到 groupBy where(与归一化语义严格等价),不再每请求聚合全项目记录;含空白的 q 维持原路径
+- **导入闸门按成本升序**:声明长度预检 → 表单校验 → 权限校验 → 解析(此前解析发生在授权判定之前);格式探测与解析复用同一 workbook,标准模板不再解析两遍
+
 ## [0.17.1] - 2026-09-28
 
 安全审计修复批:全量安全审计(1 项确认漏洞 + 20 项待验证线索)的源码侧修复与加固。审计报告与后续事项清单见 `docs/security-audit-run1-checklist.md`。
