@@ -158,6 +158,19 @@ describe('subjectMapping.service (integration, real PG)', () => {
     expect(hit[0].summary).toBe('Testdata 数据费');
     const none = await getSubjectMappings(project.id, { q: '不存在的摘要' });
     expect(none).toHaveLength(0);
+
+    // 安全审计 bm1-smap-groupby-unbounded-aggregation:无空白词根走 DB pushdown
+    // (大小写不敏感、命中原始摘要的空白折叠区之外也可),结果与内存口径一致。
+    const viaPushdown = await getSubjectMappings(project.id, { q: 'DATA' });
+    expect(viaPushdown).toHaveLength(1);
+    expect(viaPushdown[0].summary).toBe('Testdata 数据费');
+
+    // 含空白的 q 不下推(归一化折叠空白的语义差异),走全量聚合 + 内存过滤:
+    // raw 原始摘要带双空格、q 用单空格——只有归一化口径能命中。
+    await seedRecord(project.id, l1, 'Testdata  双空格费');
+    const multiWord = await getSubjectMappings(project.id, { q: 'testdata 双空格' });
+    expect(multiWord).toHaveLength(1);
+    expect(multiWord[0].summary).toBe('Testdata 双空格费');
   });
 
   it('normalizeSummary:去首尾空白 + 压缩连续空白', () => {

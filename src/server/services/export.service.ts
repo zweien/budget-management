@@ -2,6 +2,8 @@ import ExcelJS from 'exceljs';
 import { UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
+import { env } from '@/lib/env';
+import { HTTPError } from '@/lib/auth/session';
 import { fromStored } from '@/lib/decimal';
 import { getProjectLedger, type LedgerNode } from '@/server/services/ledger.service';
 import {
@@ -179,6 +181,16 @@ export async function exportStatistics(
 ): Promise<Buffer> {
   // 1) 复用 statistics service(内部已做权限 + 占用计算)。
   const result = await customStatistics(filters, user);
+
+  // 行数门(安全审计 bm1-sxp-statexport-unpaged-full-record-xlsx):custom 导出走
+  // 「缺省全量」语义,导出前不设行数上限——明细行逐行写 workbook 且整个 xlsx 在内存
+  // 物化,行数无界时单次请求即可耗尽共享进程堆。超限 413,提示加筛选缩小范围。
+  if (result.total > env.MAX_EXPORT_ROWS) {
+    throw new HTTPError(
+      413,
+      `导出行数(${result.total})超过上限 ${env.MAX_EXPORT_ROWS},请增加筛选条件缩小范围`,
+    );
+  }
 
   // 2) 元信息:操作人姓名 + 项目编号/名称(筛选描述用,避免打印 UUID)。
   const [operator, project] = await Promise.all([
