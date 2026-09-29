@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import JSZip from 'jszip';
 
 import { withRoute } from '@/lib/api/withRoute';
+import { env } from '@/lib/env';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
-import { countForExport, listForExport } from '@/server/services/recordAttachment.service';
+import { countAndBytesForExport, listForExport } from '@/server/services/recordAttachment.service';
 import {
   buildFolderPath,
   dedupeName,
@@ -30,11 +31,25 @@ export const GET = withRoute(
     const year = sp.get('year') ? Number(sp.get('year')) : undefined;
     const template = sp.get('template') || DEFAULT_TEMPLATE;
 
-    // 堆保护:count 前置,超上限直接 413。
-    const count = await countForExport(projectId, { budgetYear: year }, user);
+    // 堆保护:条数门 + 字节门双闸(安全审计 bm1-att-zip-export-byte-unbounded,同 export 路由)。
+    const { count, totalBytes } = await countAndBytesForExport(
+      projectId,
+      { budgetYear: year },
+      user,
+    );
     if (count > PACKAGE_MAX_ATTACHMENTS) {
       return NextResponse.json(
         { error: `打包附件过多(上限 ${PACKAGE_MAX_ATTACHMENTS} 个),请按年度缩小范围` },
+        { status: 413 },
+      );
+    }
+    if (totalBytes > env.MAX_EXPORT_TOTAL_BYTES) {
+      return NextResponse.json(
+        {
+          error: `打包附件总大小 ${Math.round(totalBytes / 1024 / 1024)}MB 超过上限 ${Math.round(
+            env.MAX_EXPORT_TOTAL_BYTES / 1024 / 1024,
+          )}MB,请按年度缩小范围`,
+        },
         { status: 413 },
       );
     }

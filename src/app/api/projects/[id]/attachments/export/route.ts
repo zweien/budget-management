@@ -5,7 +5,9 @@ import { withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
 import { dedupeName } from '@/lib/attachments/packagePath';
-import { countForExport, listForExport } from '@/server/services/recordAttachment.service';
+import { countAndBytesForExport, listForExport } from '@/server/services/recordAttachment.service';
+
+import { env } from '@/lib/env';
 
 /**
  * 导出附件数量硬上限:防止 listForExport 把全部 bytea 读进内存 + zip.generateAsync
@@ -31,21 +33,41 @@ export const GET = withRoute(
     const budgetYear = sp.get('budgetYear') ? Number(sp.get('budgetYear')) : undefined;
     const subjectId = sp.get('subjectId') || undefined;
 
-    // 堆保护(前置):先用廉价 count() 校验数量上限,再决定是否 materialize bytea。
-    // count() 不加载 data 二进制,只统计行数;超上限即 413,避免 listForExport 的
-    // findMany 把全部附件 bytea 读进堆导致 OOM。
-    const count = await countForExport(projectId, { budgetYear, subjectId }, user);
+    // 堆保护(前置):条数门 + 字节门双闸(安全审计 bm1-att-zip-export-byte-unbounded)。
+    // 纯条数门挡不住「500 × 50MB」——zip 生成全量内存物化,峰值约 2× 附件字节总量,
+    // 字节门才是与该威胁对齐的防线。聚合查询不加载 bytea data。
+    const { count, totalBytes } = await countAndBytesForExport(
+      projectId,
+      { budgetYear, subjectId },
+      user,
+    );
     if (count > EXPORT_MAX_ATTACHMENTS) {
       return NextResponse.json(
         { error: `导出附件过多(上限 ${EXPORT_MAX_ATTACHMENTS} 个),请缩小筛选范围` },
         { status: 413 },
       );
     }
+    if (totalBytes > env.MAX_EXPORT_TOTAL_BYTES) {
+      return NextResponse.json(
+        {
+          error: `导出附件总大小 ${Math.round(totalBytes / 1024 / 1024)}MB 超过上限 ${Math.round(
+            env.MAX_EXPORT_TOTAL_BYTES / 1024 / 1024,
+          )}MB,请缩小筛选范围`,
+        },
+        { status: 413 },
+      );
+    }
 
-    // count ≤ 上限,加载安全。
+    // 双门通过,加载安全;载入后复查条数(count 与 load 之间有并发上传窗口)。
     const rows = await listForExport(projectId, { budgetYear, subjectId }, user);
     if (rows.length === 0) {
       return NextResponse.json({ error: '所选范围内无附件' }, { status: 404 });
+    }
+    if (rows.length > EXPORT_MAX_ATTACHMENTS) {
+      return NextResponse.json(
+        { error: `导出附件过多(上限 ${EXPORT_MAX_ATTACHMENTS} 个),请缩小筛选范围` },
+        { status: 413 },
+      );
     }
 
     const project = await prisma.project.findUnique({
