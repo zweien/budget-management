@@ -206,6 +206,9 @@ export async function parseAndValidate(
   projectId: string,
   user: Pick<User, 'id' | 'role'>,
   fileName = 'upload.xlsx',
+  /** 预载 workbook(安全审计 bm1-imp:xlsx-decompress-preauthz-parse):路由的格式探测
+   * 已完整 load 过同一文件,传入此处复用,标准模板不再被解压解析两遍。 */
+  preloadedWorkbook?: ExcelJS.Workbook,
 ): Promise<string> {
   await requirePermission(user, 'record:import', projectId);
 
@@ -222,12 +225,14 @@ export async function parseAndValidate(
   // ---- 解析 xlsx ----
   // exceljs.xlsx.load 期望 Buffer;统一转换(ArrayBuffer / Buffer 均可入参)。
   // 经 unknown 转换到 load 的形参类型,规避 @types/node Buffer 泛型与 exceljs 声明的类型噪声。
-  const buf = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
-  const workbook = new ExcelJS.Workbook();
-  try {
-    await workbook.xlsx.load(buf as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  } catch {
-    throw new HTTPError(422, '无法解析 Excel 文件:格式损坏或非 .xlsx');
+  const workbook = preloadedWorkbook ?? new ExcelJS.Workbook();
+  if (!preloadedWorkbook) {
+    const buf = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
+    try {
+      await workbook.xlsx.load(buf as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    } catch {
+      throw new HTTPError(422, '无法解析 Excel 文件:格式损坏或非 .xlsx');
+    }
   }
   const sheet = workbook.getWorksheet(TEMPLATE_SHEET_NAME) ?? workbook.worksheets[0];
   if (!sheet) {

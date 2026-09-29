@@ -135,17 +135,8 @@ export interface SettlementRowUpdate {
   forcedImport?: boolean;
 }
 
-/** 加载 workbook 并判断是否个人结算单格式;非本格式返回 null。 */
-export async function loadSettlementWorkbookIfMatch(
-  fileBuffer: ArrayBuffer | Buffer,
-): Promise<ExcelJS.Workbook | null> {
-  const buf = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
-  const workbook = new ExcelJS.Workbook();
-  try {
-    await workbook.xlsx.load(buf as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  } catch {
-    throw new HTTPError(422, '无法解析 Excel 文件:格式损坏或非 .xlsx');
-  }
+/** 扫描每表前 N 行,判断是否个人结算单格式(表头含 单据编号+单据状态)。 */
+function detectSettlementFormat(workbook: ExcelJS.Workbook): boolean {
   for (const sheet of workbook.worksheets) {
     for (let r = 1; r <= Math.min(sheet.rowCount, SETTLEMENT_HEADER_SCAN_ROWS); r++) {
       const row = sheet.getRow(r);
@@ -158,11 +149,37 @@ export async function loadSettlementWorkbookIfMatch(
         headerVals.has(SETTLEMENT_HEADERS.docNo) &&
         headerVals.has(SETTLEMENT_HEADERS.docStatus)
       ) {
-        return workbook;
+        return true;
       }
     }
   }
-  return null;
+  return false;
+}
+
+/**
+ * 加载 workbook 并识别格式(安全审计 bm1-imp:xlsx-decompress-preauthz-parse):
+ * 探测与后续解析复用同一 workbook 对象——此前「探测 load 一遍 + 解析再 load 一遍」
+ * 让标准模板文件被完整解压解析两次,双倍放大上传请求的内存/CPU 成本。
+ */
+export async function loadWorkbookWithFormatDetection(
+  fileBuffer: ArrayBuffer | Buffer,
+): Promise<{ workbook: ExcelJS.Workbook; isSettlement: boolean }> {
+  const buf = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(buf as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  } catch {
+    throw new HTTPError(422, '无法解析 Excel 文件:格式损坏或非 .xlsx');
+  }
+  return { workbook, isSettlement: detectSettlementFormat(workbook) };
+}
+
+/** 加载 workbook 并判断是否个人结算单格式;非本格式返回 null。 */
+export async function loadSettlementWorkbookIfMatch(
+  fileBuffer: ArrayBuffer | Buffer,
+): Promise<ExcelJS.Workbook | null> {
+  const { workbook, isSettlement } = await loadWorkbookWithFormatDetection(fileBuffer);
+  return isSettlement ? workbook : null;
 }
 
 /**
