@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { rejectApplication } from '@/server/services/initialBudget.service';
 
@@ -14,7 +14,7 @@ export const POST = withRoute(
     const { appId } = await params;
     let opinion = '';
     try {
-      const body = await req.json();
+      const body = (await readJson(req)) as { opinion?: unknown } | null;
       opinion = typeof body?.opinion === 'string' ? body.opinion : '';
     } catch {
       // body 缺失时默认空意见。

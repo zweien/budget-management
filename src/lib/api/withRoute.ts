@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 
+import { env } from '@/lib/env';
 import { HTTPError } from '@/lib/auth/session';
 
 /**
@@ -89,6 +90,63 @@ function writeLog(info: RequestLogInfo): void {
     console.error(line);
   } else {
     console.log(line);
+  }
+}
+
+/** MIME 长度预检的可读上限文案。 */
+function capLabel(cap: number): string {
+  return cap % (1024 * 1024) === 0 ? `${Math.floor(cap / 1024 / 1024)}MB` : `${cap} 字节`;
+}
+
+/**
+ * 带字节上限的 JSON 请求体读取(安全审计 bm1-plat-json-body-nocap):
+ * 裸 `req.json()` 会把整个 body 无界缓冲进堆,而授权(requirePermission)在服务层
+ * 才执行——最低档凭证也能借此让共享进程预授权缓冲任意大小数据。本助手先做
+ * Content-Length 预检,再流式读取并逐块计数,超限即 413,堆上永不出现超过
+ * 上限的缓冲。JSON 文法检查仍交给 JSON.parse(SyntaxError → 400,与原
+ * `req.json()` 行为一致;空 body 同样以 400 报错)。
+ */
+export async function readJson<T = unknown>(req: Request, cap = env.MAX_BODY_BYTES): Promise<T> {
+  const declared = Number(req.headers.get('content-length') ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > cap) {
+    throw new HTTPError(413, `请求体过大(上限 ${capLabel(cap)})`);
+  }
+  const reader = req.body?.getReader();
+  if (!reader) {
+    throw new HTTPError(400, '请求体不是有效 JSON');
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      await reader.cancel().catch(() => {});
+      throw new HTTPError(413, `请求体过大(上限 ${capLabel(cap)})`);
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(body)) as T;
+}
+
+/**
+ * multipart 请求的长度预检(安全审计 bm1-att-upload-body-buffer-unbounded):
+ * `req.formData()` 由运行时整体缓冲后才轮到应用层的文件大小/权限校验,本检查在
+ * 缓冲开始前用声明长度(含 multipart 编码开销,留 1KB 余量)切断明显超限的请求。
+ * 局限:chunked(无 Content-Length)请求绕过此检查——完整防护需流式解析,部署侧
+ * 由反向代理 body 上限兜底(见 docs/security-audit-run1-checklist.md)。
+ */
+export function assertContentLengthBelow(req: Request, cap: number): void {
+  const declared = Number(req.headers.get('content-length') ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > cap + 1024) {
+    throw new HTTPError(413, `上传内容过大(上限 ${capLabel(cap)})`);
   }
 }
 

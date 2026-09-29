@@ -34,6 +34,20 @@ const envSchema = z
       .default(10 * 1024 * 1024),
     /** 导入数据行数上限(默认 2000;确认事务的最坏耗时随行数线性可控)。 */
     MAX_IMPORT_ROWS: z.coerce.number().int().positive().default(2000),
+    /** JSON 请求体上限(字节,默认 1MB;授权在服务层执行,须限制预授权缓冲)。 */
+    MAX_BODY_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(1024 * 1024),
+    /** 附件批量导出字节上限(字节,默认 512MB;zip 全量内存物化,峰值约 2×)。 */
+    MAX_EXPORT_TOTAL_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(512 * 1024 * 1024),
+    /** 统计自定义导出行数上限(默认 100000;超限 413 提示加筛选)。 */
+    MAX_EXPORT_ROWS: z.coerce.number().int().positive().default(100_000),
   })
   .superRefine((data, ctx) => {
     if (data.MOCK_AUTH) return;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { assertContentLengthBelow, withRoute } from '@/lib/api/withRoute';
+import { env } from '@/lib/env';
 import { requireUser } from '@/lib/auth/session';
 import { createAttachment, listAttachments } from '@/server/services/recordAttachment.service';
 
@@ -13,6 +14,10 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
     const user = await requireUser();
     const { recordId } = await params;
+
+    // 安全审计 bm1-att-upload-body-buffer-unbounded:formData() 会先整体缓冲,
+    // 大小/权限校验都在其后——用声明长度在缓冲前切断明显超限的上传。
+    assertContentLengthBelow(req, env.MAX_ATTACHMENT_BYTES);
 
     const form = await req.formData();
     const file = form.get('file');

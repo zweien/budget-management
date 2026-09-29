@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import { approveAdjustment } from '@/server/services/adjustment.service';
 
@@ -16,7 +16,7 @@ export const POST = withRoute(
     let opinion: string | undefined;
     let submittedAt: string | undefined;
     try {
-      const body = (await req.json()) as { opinion?: unknown; submittedAt?: unknown };
+      const body = (await readJson(req)) as { opinion?: unknown; submittedAt?: unknown };
       if (body && typeof body.opinion === 'string') {
         opinion = body.opinion;
       }

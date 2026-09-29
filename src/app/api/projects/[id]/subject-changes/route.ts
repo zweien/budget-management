@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { requireUser } from '@/lib/auth/session';
 import {
   createSubjectChange,
@@ -28,7 +28,7 @@ export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const user = await requireUser();
     const { id } = await params;
-    const body = (await req.json()) as SubjectChangePayload;
+    const body = (await readJson(req)) as SubjectChangePayload;
 
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: '请求体无效' }, { status: 400 });

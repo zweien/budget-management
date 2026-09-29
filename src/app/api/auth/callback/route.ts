@@ -57,8 +57,8 @@ export async function GET(req: NextRequest) {
 
     // JIT 建档:首次登录自动建本地账号(默认普通用户;管理员用 scripts/make-admin.ts 提升)。
     const displayName =
-      (claims.preferred_username as string | undefined) ??
       (claims.name as string | undefined) ??
+      (claims.preferred_username as string | undefined) ??
       claims.sub;
     const user = await prisma.user.upsert({
       where: { authSubject: claims.sub },

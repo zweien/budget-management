@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { MemberRole } from '@prisma/client';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { HTTPError, requireUser } from '@/lib/auth/session';
 import { removeMember, updateMemberRole } from '@/server/services/member.service';
 
@@ -15,7 +15,7 @@ type Ctx = { params: Promise<{ id: string; userId: string }> };
 export const PATCH = withRoute(async (req: NextRequest, ctx: Ctx) => {
   const user = await requireUser();
   const { id, userId } = await ctx.params;
-  const body = (await req.json().catch(() => null)) as { memberRole?: string } | null;
+  const body = (await readJson(req).catch(() => null)) as { memberRole?: string } | null;
   if (!body?.memberRole) {
     throw new HTTPError(400, '缺少必填字段:memberRole');
   }

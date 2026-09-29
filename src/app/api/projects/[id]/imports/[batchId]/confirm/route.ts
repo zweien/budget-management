@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
 import { confirmImport } from '@/server/services/excelImport.service';
@@ -17,7 +17,7 @@ export const POST = withRoute(
     const user = await requireUser();
     const { batchId } = await params;
 
-    const body = (await req.json().catch(() => null)) as { selectedRowIds?: unknown } | null;
+    const body = (await readJson(req).catch(() => null)) as { selectedRowIds?: unknown } | null;
     if (!body || !Array.isArray(body.selectedRowIds)) {
       return NextResponse.json({ error: '请求体无效:需要 selectedRowIds 数组' }, { status: 400 });
     }

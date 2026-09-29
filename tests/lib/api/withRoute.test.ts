@@ -4,7 +4,8 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
 import { HTTPError } from '@/lib/auth/session';
-import { withRoute } from '@/lib/api/withRoute';
+import { assertContentLengthBelow, readJson, withRoute } from '@/lib/api/withRoute';
+import { env } from '@/lib/env';
 
 /**
  * withRoute(HTTP 边缘深模块)单元测试:直调返回的函数,不启 HTTP。
@@ -132,5 +133,90 @@ describe('withRoute(HTTP 边缘)', () => {
     expect(log.status).toBe(200);
     expect(log.requestId).toBeTruthy();
     expect(typeof log.durationMs).toBe('number');
+  });
+});
+
+describe('readJson / assertContentLengthBelow(资源上限,P2)', () => {
+  it('readJson:正常解析 JSON;非法 JSON → SyntaxError(400 路径)', async () => {
+    const ok = await readJson(
+      new Request('http://localhost/x', {
+        method: 'POST',
+        body: JSON.stringify({ a: 1, b: 'x' }),
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    expect(ok).toEqual({ a: 1, b: 'x' });
+
+    await expect(
+      readJson(
+        new Request('http://localhost/x', {
+          method: 'POST',
+          body: 'not-json',
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(SyntaxError);
+  });
+
+  it('readJson:流式计数超上限 → 413', async () => {
+    const big = 'x'.repeat(env.MAX_BODY_BYTES + 1);
+    await expect(
+      readJson(
+        new Request('http://localhost/x', {
+          method: 'POST',
+          body: JSON.stringify({ big }),
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 413 });
+  });
+
+  it('readJson:声明长度(Content-Length)超限 → 413 预检先拦', async () => {
+    // undici 会自行计算 content-length,手工头不可控——用鸭子类型桩精确控制声明长度。
+    const fakeReq = {
+      headers: {
+        get: (k: string) =>
+          k.toLowerCase() === 'content-length' ? String(env.MAX_BODY_BYTES + 1) : null,
+      },
+      body: null,
+    } as unknown as Request;
+    await expect(readJson(fakeReq)).rejects.toMatchObject({ status: 413 });
+  });
+
+  it('readJson:自定义上限生效', async () => {
+    await expect(
+      readJson(
+        new Request('http://localhost/x', {
+          method: 'POST',
+          body: JSON.stringify({ pad: 'y'.repeat(100) }),
+        }),
+        64,
+      ),
+    ).rejects.toMatchObject({ status: 413 });
+  });
+
+  it('assertContentLengthBelow:超声明上限 → 413;无 Content-Length(chunked)放行', () => {
+    const fakeReq = {
+      headers: {
+        get: (k: string) =>
+          k.toLowerCase() === 'content-length' ? String(env.MAX_ATTACHMENT_BYTES + 4096) : null,
+      },
+    } as unknown as Request;
+    expect(() => assertContentLengthBelow(fakeReq, env.MAX_ATTACHMENT_BYTES)).toThrowError(
+      HTTPError,
+    );
+    try {
+      assertContentLengthBelow(fakeReq, env.MAX_ATTACHMENT_BYTES);
+    } catch (e) {
+      expect((e as HTTPError).status).toBe(413);
+    }
+
+    // 无声明长度:交给后续应用层校验,不在此拦。
+    expect(() =>
+      assertContentLengthBelow(
+        new Request('http://localhost/x', { method: 'POST' }),
+        env.MAX_ATTACHMENT_BYTES,
+      ),
+    ).not.toThrow();
   });
 });

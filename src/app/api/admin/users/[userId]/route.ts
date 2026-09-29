@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { withRoute } from '@/lib/api/withRoute';
+import { readJson, withRoute } from '@/lib/api/withRoute';
 import { HTTPError, requireUser } from '@/lib/auth/session';
 import { updateUserAccount } from '@/server/services/adminUser.service';
 
@@ -13,7 +13,7 @@ export const PATCH = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ userId: string }> }) => {
     const user = await requireUser();
     const { userId } = await params;
-    const body = (await req.json().catch(() => null)) as {
+    const body = (await readJson(req).catch(() => null)) as {
       status?: string;
       role?: string;
       name?: string;
