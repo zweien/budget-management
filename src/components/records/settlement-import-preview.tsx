@@ -15,6 +15,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Combobox } from '@/components/ui/combobox';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -55,7 +62,7 @@ export interface SettlementRow {
     detailPath?: string | null;
     finCode?: string | null;
     fileProjectName?: string | null;
-    fileProjectMismatch?: boolean;
+    targetProjectId?: string | null;
     sourceRows?: number[];
   };
   validationStatus: 'valid' | 'error' | 'skipped';
@@ -82,6 +89,8 @@ export interface SettlementBatchData {
   skippedCount: number;
   skippedReasons: Record<string, number>;
   projectName?: string | null;
+  projectMappings?: Array<{ fileProjectName: string; targetProjectId: string | null }>;
+  mappableProjects?: Array<{ id: string; name: string }>;
   leafSubjects: Array<{ id: string; code: string; name: string }>;
 }
 
@@ -136,10 +145,11 @@ export function SettlementImportPreview({
   const confirmed = data.status === 'confirmed';
   const readOnly = confirmed || !canEdit;
   // v3(财务结算单 2025 导出):行上展示 开支细项/科目代码,顶部做项目名核对警告。
+  // v3(财务结算单 2025 导出):行上展示 开支细项/科目代码,顶部做项目映射。
   const isV3 = data.templateVersion === 'settlement-2.0';
-  const projectMismatch = [...data.pending, ...data.duplicates, ...data.errors].some(
-    (r) => r.parsedData.fileProjectMismatch,
-  );
+  const projectMappings = data.projectMappings ?? [];
+  const mappableProjects = data.mappableProjects ?? [];
+  const [remapping, setRemapping] = useState(false);
 
   const subjectOptions = useMemo(() => {
     const nameCount = new Map<string, number>();
@@ -192,6 +202,40 @@ export function SettlementImportPreview({
     const name = subjectName(subjectId);
     applyLocal(rowId, { subjectId, subjectName: name });
     patchRows([{ rowId, subjectId }]);
+  };
+
+  /** 项目映射(v3):对同名科研项目名称的全部行设置目标项目,服务端重算后重拉预览。 */
+  const applyProjectMapping = async (fileProjectName: string, targetProjectId: string) => {
+    setRemapping(true);
+    try {
+      const rows = [...data.pending, ...data.duplicates, ...data.errors].filter(
+        (r) => r.parsedData.fileProjectName === fileProjectName,
+      );
+      await apiFetch(`/api/projects/${projectId}/imports/${data.batchId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          updates: rows.map((r) => ({ rowId: r.rowId, targetProjectId })),
+        }),
+      });
+      const fresh = await apiFetch<SettlementBatchData>(
+        `/api/projects/${projectId}/imports/${data.batchId}`,
+      );
+      setData(fresh);
+      setSelected(() => {
+        const sel = new Set<string>();
+        fresh.pending.forEach((r) => sel.add(r.rowId));
+        fresh.duplicates.forEach((r) => {
+          if (r.duplicateLevel === 'refresh') sel.add(r.rowId);
+          else if (r.forcedImport && r.duplicateLevel !== 'hard') sel.add(r.rowId);
+        });
+        return sel;
+      });
+      toast.success('已映射目标项目');
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setRemapping(false);
+    }
   };
 
   const handleYearChange = (
@@ -485,14 +529,52 @@ export function SettlementImportPreview({
         </Button>
       </div>
 
-      {projectMismatch ? (
-        <Alert variant="warning">
-          <AlertTitle>文件「科研项目名称」与本项目名称不一致</AlertTitle>
-          <AlertDescription>
-            文件内的项目名称不包含当前项目「{data.projectName ?? ''}
-            」,请核对是否上传到了错误的项目(不阻断导入)。
-          </AlertDescription>
-        </Alert>
+      {isV3 && projectMappings.length > 0 ? (
+        <Card className="p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="caption-mono">项目映射</p>
+            {remapping ? <span className="text-xs text-mute">映射保存中…</span> : null}
+          </div>
+          <div className="space-y-2">
+            {projectMappings.map((m) => {
+              const mapped = m.targetProjectId
+                ? mappableProjects.find((p) => p.id === m.targetProjectId)
+                : null;
+              const rowCount = [...data.pending, ...data.duplicates, ...data.errors].filter(
+                (r) => r.parsedData.fileProjectName === m.fileProjectName,
+              ).length;
+              return (
+                <div key={m.fileProjectName} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="max-w-[22rem] truncate font-medium" title={m.fileProjectName}>
+                    {m.fileProjectName}
+                  </span>
+                  <span className="text-mute">({rowCount} 行)→</span>
+                  {readOnly ? (
+                    <span>{mapped?.name ?? '未映射'}</span>
+                  ) : (
+                    <Select
+                      value={m.targetProjectId ?? undefined}
+                      disabled={remapping}
+                      onValueChange={(v) => void applyProjectMapping(m.fileProjectName, v)}
+                    >
+                      <SelectTrigger className="w-72">
+                        <SelectValue placeholder="选择目标项目…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {mappableProjects.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {!mapped ? <Badge variant="error">未映射</Badge> : null}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
       ) : null}
 
       <Alert variant="info">

@@ -28,7 +28,11 @@ import {
   normalizeDate,
   type DuplicateLevel,
 } from '@/server/services/excelImport.service';
-import { checkDuplicates, hardDupReason } from '@/server/services/duplicateCheck.service';
+import {
+  checkDuplicates,
+  hardDupReason,
+  type DuplicateRowVerdict,
+} from '@/server/services/duplicateCheck.service';
 
 /**
  * 个人结算单查询 Excel 导入(财务系统导出格式,与标准模板 §10 并存)。
@@ -79,10 +83,10 @@ export interface SettlementParsedRow {
   detailPath?: string | null;
   /** 财务系统预算科目代码(与本地科目树编码无关,仅指派辅助)。 */
   finCode?: string | null;
-  /** 文件「科研项目名称」原值(用于与上传项目的非阻断核对)。 */
+  /** 文件「科研项目名称」原值(项目映射的键)。 */
   fileProjectName?: string | null;
-  /** 文件项目名不含本项目名 → 预览页顶部警告(传错项目防护,非阻断)。 */
-  fileProjectMismatch?: boolean;
+  /** 目标项目(v3 项目映射结果;未映射为 null → 行不可确认)。 */
+  targetProjectId?: string | null;
   /** 组内源行号(明细分组合并前的原始行)。 */
   sourceRows?: number[];
 }
@@ -124,8 +128,12 @@ export interface SettlementBatchPreview {
   skippedCount: number;
   /** 行被跳过的原因 → 条数(业务退单/纯冲账净额非正等)。 */
   skippedReasons: Record<string, number>;
-  /** 项目名称(v3 预览的项目名核对警告用)。 */
+  /** 项目名称。 */
   projectName: string | null;
+  /** 项目映射(v3):文件中每个 distinct 科研项目名称 → 当前映射的目标项目(未映射 null)。 */
+  projectMappings: Array<{ fileProjectName: string; targetProjectId: string | null }>;
+  /** 映射候选:当前用户有 record:import 的项目(ADMIN 全部;USER 为 OWNER/HANDLER 成员项目)。 */
+  mappableProjects: Array<{ id: string; name: string }>;
   /** 项目叶科目(科目指定下拉数据源)。 */
   leafSubjects: Array<{ id: string; code: string; name: string }>;
 }
@@ -153,6 +161,8 @@ export interface SettlementRowUpdate {
   subjectId?: string | null;
   budgetYear?: number;
   forcedImport?: boolean;
+  /** 目标项目(v3 项目映射;变更后服务端重跑科目预选与按目标查重)。 */
+  targetProjectId?: string | null;
 }
 
 /** 扫描每表前 N 行,判断是否个人结算单格式(表头含 单据编号+单据状态)。 */
@@ -520,6 +530,54 @@ export async function parseSettlement(
   return batchId;
 }
 
+/** 上传者可导入(record:import)的项目候选:ADMIN=全部未归档;USER=OWNER/HANDLER 成员项目(未归档)。 */
+async function importableProjectsFor(
+  user: Pick<User, 'id' | 'role'>,
+): Promise<Array<{ id: string; name: string }>> {
+  if (user.role === 'ADMIN') {
+    return prisma.project.findMany({
+      where: { archivedAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+  const memberships = await prisma.projectMember.findMany({
+    where: {
+      userId: user.id,
+      memberRole: { in: ['OWNER', 'HANDLER'] },
+      project: { archivedAt: null },
+    },
+    select: { project: { select: { id: true, name: true } } },
+  });
+  return memberships
+    .map((m) => m.project)
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+}
+
+/** 「科研项目名称」去财务口径前缀(首个「/」之前)后的可比对名称。 */
+function stripProjectPrefix(fileProjectName: string): string {
+  const i = fileProjectName.indexOf('/');
+  return i >= 0 ? fileProjectName.slice(i + 1) : fileProjectName;
+}
+
+/** 目标项目的叶科目名 → 科目 id 映射(重名叶科目不入映射,预选歧义交人工)。 */
+async function leafNameMapByProject(projectId: string): Promise<Map<string, string>> {
+  const leaves = await prisma.budgetSubject.findMany({
+    where: { projectId, isLeaf: true },
+    select: { id: true, name: true },
+  });
+  const m = new Map<string, string>();
+  for (const l of leaves) {
+    if (m.has(l.name))
+      m.set(l.name, ''); // 歧义标记
+    else m.set(l.name, l.id);
+  }
+  for (const [name, id] of [...m]) {
+    if (id === '') m.delete(name);
+  }
+  return m;
+}
+
 // ---------- v3(2025 财务导出):明细行按单据编号分组合并 ----------
 
 /** 解析金额(允许负数:冲账行);空/非法返回 null。 */
@@ -559,7 +617,7 @@ interface V3RawRow {
  * - 摘要取「摘要」列,空则退「备注」,组内取第一个非空。
  * - 科目自动预选:开支细项末段与本地叶科目名精确相等(且不重名)时预选;
  *   否则留空走预览指派/摘要历史映射。
- * - 「科研项目名称」与上传项目名做包含式核对,不符仅警告不阻断。
+ * - 「科研项目名称」驱动项目映射(自动预映射:去前缀后包含唯一候选项目名;未命中人工映射)。
  */
 async function parseSettlementV3(opts: {
   sheet: ExcelJS.Worksheet;
@@ -593,21 +651,6 @@ async function parseSettlementV3(opts: {
     return idx === undefined ? '' : (cellToString(row.getCell(idx)) ?? '').trim();
   };
 
-  // 科目自动预选:开支细项末段 == 叶科目名;重名叶科目不留预选(歧义交人工)。
-  const leaves = await prisma.budgetSubject.findMany({
-    where: { projectId, isLeaf: true },
-    select: { id: true, name: true },
-  });
-  const leafIdByName = new Map<string, string>();
-  for (const l of leaves) {
-    if (leafIdByName.has(l.name))
-      leafIdByName.set(l.name, ''); // 歧义标记
-    else leafIdByName.set(l.name, l.id);
-  }
-  for (const [name, id] of [...leafIdByName]) {
-    if (id === '') leafIdByName.delete(name);
-  }
-
   // 收集原始明细行(空行跳过;容量闸与 v1/v2 同规则)。
   const rawRows: V3RawRow[] = [];
   sheet.eachRow((row, rowNumber) => {
@@ -636,6 +679,21 @@ async function parseSettlementV3(opts: {
       projectFileName: get(row, SETTLEMENT_HEADERS_V3.projectName),
     });
   });
+
+  // 项目映射(v3):distinct 科研项目名称 → 目标项目。
+  // 自动预映射:去口径前缀后包含唯一可导入项目名 → 自动落;未命中/多命中 → null(人工)。
+  const candidates = await importableProjectsFor(user);
+  const mappingByName = new Map<string, string | null>();
+  for (const name of new Set(rawRows.map((r) => r.projectFileName).filter(Boolean))) {
+    const stripped = stripProjectPrefix(name);
+    const hits = candidates.filter((c) => stripped.includes(c.name));
+    mappingByName.set(name, hits.length === 1 ? hits[0].id : null);
+  }
+  const targetIds = [...new Set([...mappingByName.values()].filter((v): v is string => !!v))];
+  const leafNameByTarget = new Map<string, Map<string, string>>();
+  for (const tid of targetIds) {
+    leafNameByTarget.set(tid, await leafNameMapByProject(tid));
+  }
 
   const parsedRows: Array<{
     rowNo: number;
@@ -816,8 +874,16 @@ async function parseSettlementV3(opts: {
     const summary =
       grp.map((r) => r.summary).find(Boolean) ?? grp.map((r) => r.remark).find(Boolean) ?? '';
 
-    // 科目自动预选:开支细项末段 == 唯一叶科目名。
-    const preselected = detailLeaf ? (leafIdByName.get(detailLeaf) ?? null) : null;
+    // 项目映射:自动预映射结果;未映射 → error(不可确认,预览页映射后恢复)。
+    const targetProjectId = mappingByName.get(first.projectFileName) ?? null;
+    if (!targetProjectId) {
+      errors.push({ field: 'project', message: '未映射项目;请在「项目映射」区选择目标项目' });
+    }
+    // 科目自动预选:开支细项末段 == 目标项目唯一叶科目名。
+    const preselected =
+      targetProjectId && detailLeaf
+        ? (leafNameByTarget.get(targetProjectId)?.get(detailLeaf) ?? null)
+        : null;
 
     const data: SettlementParsedRow = {
       kind: 'settlement',
@@ -832,10 +898,10 @@ async function parseSettlementV3(opts: {
       handler,
       subjectId: preselected,
       subjectName: preselected ? detailLeaf : null,
+      targetProjectId,
       detailPath: detailPath || null,
       finCode: finCode || null,
       fileProjectName: fileProjectName || null,
-      fileProjectMismatch: !!fileProjectName && !fileProjectName.includes(projectName),
       sourceRows: grp.map((r) => r.rowNo),
     };
     parsedRows.push({
@@ -854,25 +920,8 @@ async function parseSettlementV3(opts: {
 
   const validRows = parsedRows.filter((r) => r.validationStatus === 'valid');
 
-  // ---- 重复检测(统一判定器 ADR 0002;金额为组内净额)----
-  const verdicts = await checkDuplicates(
-    projectId,
-    validRows.map((r) => ({
-      rowKey: String(r.rowNo),
-      docNo: r.data.docNo,
-      budgetYear: r.data.budgetYear > 0 ? r.data.budgetYear : null,
-      amount: normalizeAmount(r.data.amount),
-      businessDate: normalizeDate(r.data.businessDate),
-      summary: r.data.summary || null,
-      status: r.data.status,
-      completedDate: r.data.completedDate ?? null,
-    })),
-    { allowRefresh: true },
-  );
-  const verdictByRowNo = new Map(verdicts.map((v) => [v.rowKey, v]));
-  for (const r of validRows) {
-    const v = verdictByRowNo.get(String(r.rowNo));
-    if (!v) continue;
+  // ---- 重复检测:按行目标项目分组跑统一判定器 ADR 0002(金额为组内净额)----
+  const applyVerdict = (r: (typeof validRows)[number], v: DuplicateRowVerdict): void => {
     if (v.hard) {
       r.duplicate = true;
       r.duplicateLevel = 'hard';
@@ -883,6 +932,34 @@ async function parseSettlementV3(opts: {
     } else if (v.suspected) {
       r.duplicate = true;
       r.duplicateLevel = 'suspected';
+    }
+  };
+  const rowsByTarget = new Map<string, typeof validRows>();
+  for (const r of validRows) {
+    const t = r.data.targetProjectId!;
+    const g = rowsByTarget.get(t);
+    if (g) g.push(r);
+    else rowsByTarget.set(t, [r]);
+  }
+  for (const [target, rows] of rowsByTarget) {
+    const verdicts = await checkDuplicates(
+      target,
+      rows.map((r) => ({
+        rowKey: String(r.rowNo),
+        docNo: r.data.docNo,
+        budgetYear: r.data.budgetYear > 0 ? r.data.budgetYear : null,
+        amount: normalizeAmount(r.data.amount),
+        businessDate: normalizeDate(r.data.businessDate),
+        summary: r.data.summary || null,
+        status: r.data.status,
+        completedDate: r.data.completedDate ?? null,
+      })),
+      { allowRefresh: true },
+    );
+    const verdictByRowNo = new Map(verdicts.map((v) => [v.rowKey, v]));
+    for (const r of rows) {
+      const v = verdictByRowNo.get(String(r.rowNo));
+      if (v) applyVerdict(r, v);
     }
   }
 
@@ -997,11 +1074,26 @@ export async function getSettlementBatch(
     }),
   ]);
 
+  // 项目映射(v3):按行数据归纳 distinct 科研项目名称(顺序=行序)。
+  const projectMappings = new Map<string, string | null>();
+  for (const r of [...pending, ...duplicates, ...errors]) {
+    const n = (r.parsedData as SettlementParsedRow).fileProjectName;
+    if (!n || projectMappings.has(n)) continue;
+    projectMappings.set(n, (r.parsedData as SettlementParsedRow).targetProjectId ?? null);
+  }
+
   return {
     batchId: batch.id,
     projectId: batch.projectId,
     fileName: batch.fileName,
     projectName: project?.name ?? null,
+    projectMappings: [...projectMappings].map(([fileProjectName, targetProjectId]) => ({
+      fileProjectName,
+      targetProjectId,
+    })),
+    mappableProjects: isSettlementTemplateVersion(batch.templateVersion)
+      ? await importableProjectsFor(user)
+      : [],
     templateVersion: batch.templateVersion,
     status: batch.status,
     createdAt: batch.createdAt.toISOString(),
@@ -1040,45 +1132,128 @@ export async function updateSettlementRows(
   if (batch.status !== 'pending') {
     throw new HTTPError(409, '该批次已确认,不可再修改');
   }
+  const isV3 = batch.templateVersion === SETTLEMENT_V3_TEMPLATE_VERSION;
+  for (const u of updates) {
+    if (u.targetProjectId !== undefined && !isV3) {
+      throw new HTTPError(422, '仅财务结算单(2025 导出)支持项目映射');
+    }
+  }
 
   const rowById = new Map(batch.rows.map((r) => [r.id, r]));
+  for (const u of updates) {
+    if (!rowById.has(u.rowId)) {
+      throw new HTTPError(404, `导入行不存在:${u.rowId}`);
+    }
+  }
 
-  // 预校验科目(同一批 updates 可能重复引用同一 subjectId)。
-  const requestedSubjectIds = [
+  // 目标项目映射(v3):先逐目标校验导入权限(一次失败整批拒绝,UI 候选已限定)。
+  const targetProjects = [
     ...new Set(
       updates
-        .map((u) => u.subjectId)
-        .filter((s): s is string => typeof s === 'string' && s.length > 0),
+        .map((u) => u.targetProjectId)
+        .filter((t): t is string => typeof t === 'string' && t.length > 0),
     ),
   ];
-  const subjectById = new Map<string, { id: string; name: string; isLeaf: boolean }>();
-  if (requestedSubjectIds.length > 0) {
-    const subjects = await prisma.budgetSubject.findMany({
-      where: { projectId: batch.projectId, id: { in: requestedSubjectIds } },
+  for (const t of targetProjects) {
+    const project = await prisma.project.findUnique({
+      where: { id: t },
+      select: { archivedAt: true },
+    });
+    if (!project) throw new HTTPError(422, `映射的目标项目不存在:${t}`);
+    if (project.archivedAt) throw new HTTPError(422, '映射的目标项目已归档,数据只读');
+    await requirePermission(user, 'record:import', t);
+  }
+
+  // 科目校验池:按 (项目, 科目id) 惰性缓存——v3 行科目须属于其目标项目。
+  const subjectPoolKey = (projectId: string, subjectId: string) => `${projectId}:${subjectId}`;
+  const subjectPool = new Map<string, { id: string; name: string; isLeaf: boolean }>();
+  const getSubject = async (projectId: string, subjectId: string) => {
+    const key = subjectPoolKey(projectId, subjectId);
+    const hit = subjectPool.get(key);
+    if (hit) return hit;
+    const subj = await prisma.budgetSubject.findFirst({
+      where: { projectId, id: subjectId },
       select: { id: true, name: true, isLeaf: true },
     });
-    for (const s of subjects) subjectById.set(s.id, s);
+    if (subj) subjectPool.set(key, subj);
+    return subj ?? null;
+  };
+
+  // v3 目标变更行的重算(预选 + 查重)集中按目标分组执行。
+  interface RemapJob {
+    row: (typeof batch.rows)[number];
+    data: SettlementParsedRow;
+    target: string;
+    baseErrors: SettlementRowError[];
+    nextErrors: SettlementRowError[] | null;
   }
+  const remapJobs: RemapJob[] = [];
 
   await prisma.$transaction(async (tx) => {
     for (const u of updates) {
-      const row = rowById.get(u.rowId);
-      if (!row) {
-        throw new HTTPError(404, `导入行不存在:${u.rowId}`);
+      const row = rowById.get(u.rowId)!;
+      const data = row.parsedData as unknown as SettlementParsedRow;
+      const rowProjectId = data.targetProjectId ?? batch.projectId;
+
+      // 项目映射(v3):允许作用于任意校验态的行(未映射行本身是 error 态)。
+      if (u.targetProjectId !== undefined) {
+        const target = u.targetProjectId && u.targetProjectId.length > 0 ? u.targetProjectId : null;
+        if (target === null) {
+          data.targetProjectId = null;
+          data.subjectId = null;
+          data.subjectName = null;
+          const kept = ((row.errors ?? null) as SettlementRowError[] | null) ?? [];
+          const nextErrors: SettlementRowError[] = [
+            ...kept.filter((e) => e.field !== 'project'),
+            { field: 'project', message: '未映射项目;请在「项目映射」区选择目标项目' },
+          ];
+          await tx.importRow.update({
+            where: { id: row.id },
+            data: {
+              parsedData: data as unknown as Prisma.InputJsonValue,
+              errors: nextErrors as unknown as Prisma.InputJsonValue,
+              validationStatus: 'error',
+              duplicateFlag: false,
+              duplicateLevel: 'none',
+            },
+          });
+          continue;
+        }
+        data.targetProjectId = target;
+        // 重算基准 = 既有错误去掉「未映射项目」(本次映射即消除它);其余真实错误保留。
+        const baseErrors = (((row.errors ?? null) as SettlementRowError[] | null) ?? []).filter(
+          (e) => e.field !== 'project',
+        );
+        remapJobs.push({
+          row,
+          data,
+          target,
+          baseErrors,
+          nextErrors: baseErrors.length > 0 ? baseErrors : null,
+        });
+        // 重算在事务外(查重服务为读路径)——先落 target 与清态,事务外重算后二次落库。
+        await tx.importRow.update({
+          where: { id: row.id },
+          data: {
+            parsedData: data as unknown as Prisma.InputJsonValue,
+          },
+        });
+        continue;
       }
+
+      // 以下为科目/年度/强制导入更新:仅 valid 行(与既有行为一致)。
       if (row.validationStatus !== 'valid') {
         throw new HTTPError(422, `第 ${row.rowNo} 行不是有效行,不可更新`);
       }
-      const data = row.parsedData as unknown as SettlementParsedRow;
 
       if (u.subjectId !== undefined) {
         if (u.subjectId === null) {
           data.subjectId = null;
           data.subjectName = null;
         } else {
-          const subj = subjectById.get(u.subjectId);
+          const subj = await getSubject(rowProjectId, u.subjectId);
           if (!subj) {
-            throw new HTTPError(422, `第 ${row.rowNo} 行科目不属于当前项目`);
+            throw new HTTPError(422, `第 ${row.rowNo} 行科目不属于目标项目`);
           }
           if (!subj.isLeaf) {
             throw new HTTPError(422, `第 ${row.rowNo} 行科目不是叶节点,业务记录只能登记在叶科目`);
@@ -1095,8 +1270,6 @@ export async function updateSettlementRows(
         data.budgetYear = u.budgetYear;
       }
 
-      // 硬重复(单据编号与未作废记录同号/批内同号)不可强制导入(codex 复审 P1 语义,ADR 0002)。
-      // refresh 行不参与强制导入语义(确认即更新既有记录,非新增)。
       const level: DuplicateLevel =
         row.duplicateLevel === 'hard' || row.duplicateLevel === 'refresh'
           ? row.duplicateLevel
@@ -1119,6 +1292,74 @@ export async function updateSettlementRows(
       });
     }
   }, BULK_TX_OPTIONS);
+
+  // v3 映射重算(事务外读路径):按新目标重跑 科目预选 + 查重,二次落库。
+  for (const job of remapJobs) {
+    const leafMap = await leafNameMapByProject(job.target);
+    const detailLeaf = job.data.detailPath
+      ? (job.data.detailPath.split('/').pop() ?? '').trim()
+      : '';
+    const pre = detailLeaf ? (leafMap.get(detailLeaf) ?? null) : null;
+    job.data.subjectId = pre;
+    job.data.subjectName = pre ? detailLeaf : null;
+  }
+  const remapByTarget = new Map<string, RemapJob[]>();
+  for (const job of remapJobs) {
+    const g = remapByTarget.get(job.target);
+    if (g) g.push(job);
+    else remapByTarget.set(job.target, [job]);
+  }
+  for (const [target, jobs] of remapByTarget) {
+    const verdicts = await checkDuplicates(
+      target,
+      jobs.map((j) => ({
+        rowKey: j.row.id,
+        docNo: j.data.docNo,
+        budgetYear: j.data.budgetYear > 0 ? j.data.budgetYear : null,
+        amount: normalizeAmount(j.data.amount),
+        businessDate: normalizeDate(j.data.businessDate),
+        summary: j.data.summary || null,
+        status: j.data.status,
+        completedDate: j.data.completedDate ?? null,
+      })),
+      { allowRefresh: true },
+    );
+    const verdictByRowId = new Map(verdicts.map((v) => [v.rowKey, v]));
+    for (const job of jobs) {
+      const v = verdictByRowId.get(job.row.id);
+      // 与解析期 applyVerdict 同口径:无命中行保持 clean(否则全被误标进重复组)。
+      job.row.duplicateFlag = !!(v?.hard || v?.refresh || v?.suspected);
+      job.row.duplicateLevel = v?.hard
+        ? 'hard'
+        : v?.refresh
+          ? 'refresh'
+          : v?.suspected
+            ? 'suspected'
+            : 'none';
+      if (v?.hard) job.data.dupReason = hardDupReason(v);
+      else job.data.dupReason = null;
+      const nextErrors: SettlementRowError[] | null =
+        job.baseErrors.length > 0 ? job.baseErrors : null;
+      job.nextErrors = nextErrors;
+      job.row.validationStatus = job.baseErrors.length === 0 ? 'valid' : 'error';
+    }
+  }
+  if (remapJobs.length > 0) {
+    await prisma.$transaction(async (tx) => {
+      for (const job of remapJobs) {
+        await tx.importRow.update({
+          where: { id: job.row.id },
+          data: {
+            parsedData: job.data as unknown as Prisma.InputJsonValue,
+            errors: job.nextErrors as unknown as Prisma.InputJsonValue,
+            validationStatus: job.row.validationStatus,
+            duplicateFlag: job.row.duplicateFlag,
+            duplicateLevel: job.row.duplicateLevel,
+          },
+        });
+      }
+    }, BULK_TX_OPTIONS);
+  }
 }
 
 /**
@@ -1159,7 +1400,16 @@ export async function confirmSettlementImport(
     throw new HTTPError(422, '未选中任何可导入的行');
   }
 
-  const subjectIds = new Set<string>();
+  // 行级目标项目(v3 项目映射):v1/v2 行回退批次项目;逐目标项目复核导入权限。
+  const rowProjectId = (row: (typeof batch.rows)[number]): string => {
+    const d = row.parsedData as unknown as SettlementParsedRow;
+    return d.targetProjectId ?? batch.projectId;
+  };
+  for (const pid of new Set(eligibleRows.map(rowProjectId))) {
+    await requirePermission(user, 'record:import', pid);
+  }
+
+  const subjectIdsByProject = new Map<string, Set<string>>();
   const levelOf = (r: (typeof batch.rows)[number]): DuplicateLevel =>
     r.duplicateLevel === 'hard' || r.duplicateLevel === 'refresh'
       ? r.duplicateLevel
@@ -1191,17 +1441,22 @@ export async function confirmSettlementImport(
     if (!data.subjectId) {
       throw new HTTPError(422, `第 ${row.rowNo} 行尚未指定科目,不能导入`);
     }
-    subjectIds.add(data.subjectId);
+    const pid = rowProjectId(row);
+    const set = subjectIdsByProject.get(pid) ?? subjectIdsByProject.set(pid, new Set()).get(pid)!;
+    set.add(data.subjectId);
     createRows.push(row);
   }
-  const subjects = await prisma.budgetSubject.findMany({
-    where: { projectId: batch.projectId, id: { in: [...subjectIds] } },
-    select: { id: true, isLeaf: true },
-  });
-  const leafIds = new Set(subjects.filter((s) => s.isLeaf).map((s) => s.id));
+  const leafIdsByProject = new Map<string, Set<string>>();
+  for (const [pid, ids] of subjectIdsByProject) {
+    const subjects = await prisma.budgetSubject.findMany({
+      where: { projectId: pid, id: { in: [...ids] } },
+      select: { id: true, isLeaf: true },
+    });
+    leafIdsByProject.set(pid, new Set(subjects.filter((s) => s.isLeaf).map((s) => s.id)));
+  }
   for (const row of createRows) {
     const data = row.parsedData as unknown as SettlementParsedRow;
-    if (!leafIds.has(data.subjectId!)) {
+    if (!leafIdsByProject.get(rowProjectId(row))!.has(data.subjectId!)) {
       throw new HTTPError(422, `第 ${row.rowNo} 行科目无效或不是叶节点`);
     }
   }
@@ -1222,22 +1477,31 @@ export async function confirmSettlementImport(
       }
 
       // docNo 兜底复查(解析到确认之间可能已有同单号入库)——仅新增行;refresh 行走下方复核。
-      const checkDocNos = [
-        ...new Set(
-          createRows
-            .map((r) => (r.parsedData as unknown as SettlementParsedRow).docNo)
-            .filter((d): d is string => !!d),
-        ),
-      ];
-      if (checkDocNos.length > 0) {
+      // docNo 兜底复查按行目标项目分组(解析到确认之间可能已有同单号入库)。
+      const createRowsByProject = new Map<string, typeof createRows>();
+      for (const r of createRows) {
+        const pid = rowProjectId(r);
+        const g = createRowsByProject.get(pid);
+        if (g) g.push(r);
+        else createRowsByProject.set(pid, [r]);
+      }
+      for (const [pid, rows] of createRowsByProject) {
+        const checkDocNos = [
+          ...new Set(
+            rows
+              .map((r) => (r.parsedData as unknown as SettlementParsedRow).docNo)
+              .filter((d): d is string => !!d),
+          ),
+        ];
+        if (checkDocNos.length === 0) continue;
         const conflicts = await tx.businessRecord.findMany({
-          where: { projectId: batch.projectId, isVoid: false, docNo: { in: checkDocNos } },
+          where: { projectId: pid, isVoid: false, docNo: { in: checkDocNos } },
           select: { docNo: true },
         });
         if (conflicts.length > 0) {
           // 硬重复无强制通道(ADR 0002):同号已入库一律拒绝,无 forcedImport 豁免。
           const conflictSet = new Set(conflicts.map((c) => c.docNo));
-          const badRows = createRows
+          const badRows = rows
             .filter((r) => {
               const d = (r.parsedData as unknown as SettlementParsedRow).docNo;
               return d && conflictSet.has(d);
@@ -1258,7 +1522,7 @@ export async function confirmSettlementImport(
         const docNo = data.docNo!;
         // 行锁既有记录,与并发导入/编辑串行化。
         const existing = await tx.businessRecord.findFirst({
-          where: { projectId: batch.projectId, isVoid: false, docNo },
+          where: { projectId: rowProjectId(row), isVoid: false, docNo },
         });
         const rowAmount = normalizeAmount(data.amount);
         if (!existing || !rowAmount || rowAmount !== existing.amount.toFixed(2)) {
@@ -1319,7 +1583,7 @@ export async function confirmSettlementImport(
           },
         });
         await recordAudit(tx, {
-          projectId: batch.projectId,
+          projectId: rowProjectId(row),
           objectType: 'business_records',
           objectId: existing.id,
           action: 'import_refresh',
@@ -1360,7 +1624,7 @@ export async function confirmSettlementImport(
         const created = await tx.businessRecord.create({
           data: {
             id: recordId,
-            projectId: batch.projectId,
+            projectId: rowProjectId(row),
             budgetYear: data.budgetYear,
             subjectId: data.subjectId!,
             amount: toStored(fromStored(amount)),
@@ -1392,7 +1656,7 @@ export async function confirmSettlementImport(
         });
 
         await recordAudit(tx, {
-          projectId: batch.projectId,
+          projectId: rowProjectId(row),
           objectType: 'business_records',
           objectId: recordId,
           action: 'import',

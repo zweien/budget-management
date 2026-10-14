@@ -10,6 +10,7 @@ import {
   loadSettlementWorkbookIfMatch,
   parseSettlement,
   getSettlementBatch,
+  updateSettlementRows,
   confirmSettlementImport,
 } from '@/server/services/settlementImport.service';
 
@@ -78,7 +79,7 @@ async function buildV3Xlsx(rows: V3RowData[]): Promise<Buffer> {
       r.remark ?? '',
       '',
       '',
-      r.projectName ?? '其他专项科学技术费/完全无关的另一个项目',
+      r.projectName ?? '其他专项科学技术费/图谱驱动测试专属项目甲',
       r.detailPath ?? '',
       r.finCode ?? '',
       r.summary ?? '',
@@ -88,6 +89,10 @@ async function buildV3Xlsx(rows: V3RowData[]): Promise<Buffer> {
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
 }
+
+/** 预览载荷的映射候选数。 */
+const mappableCount = (p: { mappableProjects?: Array<unknown> }): number =>
+  p.mappableProjects?.length ?? 0;
 
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
@@ -112,6 +117,7 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
   const createdUserIds: string[] = [];
   let adminId: string;
   let projectId = '';
+  let projectIdB = '';
   let leafTravelId = ''; // 叶科目名「差旅费」(开支细项末段可命中)
   let leafTrafficId = ''; // 叶科目名「市内交通费」
   const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
@@ -123,7 +129,10 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     createdUserIds.push(adminId);
 
     const project = await createProject(
-      { code: `V3-${uuidv7().slice(0, 8)}`, name: '知识资源图谱驱动测试项目' },
+      {
+        code: `V3-${uuidv7().slice(0, 8)}-${Math.random().toString(36).slice(2, 6)}`,
+        name: '图谱驱动测试专属项目甲',
+      },
       adminUser(),
     );
     projectId = project.id;
@@ -248,8 +257,8 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     expect(merged.parsedData.completedDate).toBe('2025-02-28');
     // 科目自动预选:开支细项末段「差旅费」== 叶科目名。
     expect(merged.parsedData.subjectId).toBe(leafTravelId);
-    // 项目名不符(文件名不含本项目名)→ 非阻断标记。
-    expect(merged.parsedData.fileProjectMismatch).toBe(true);
+    // 项目自动预映射:文件项目名(去前缀)包含本项目名 → 自动落映射。
+    expect(merged.parsedData.targetProjectId).toBe(projectId);
 
     const single = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-SINGLE-1')!;
     expect(single.parsedData.amount).toBe('68.50');
@@ -286,7 +295,7 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
         handler: '王五',
         detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
         remark: '差旅报销',
-        projectName: '其他专项科学技术费/知识资源图谱驱动测试项目',
+        projectName: '其他专项科学技术费/图谱驱动测试专属项目甲',
       },
     ]);
     const wb = await loadSettlementWorkbookIfMatch(buf);
@@ -301,7 +310,7 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     // 确认:仅选可导入行(预选科目差旅费)。
     const okRow = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-OK-1')!;
     expect(okRow.parsedData.subjectId).toBe(leafTravelId);
-    expect(okRow.parsedData.fileProjectMismatch).toBe(false); // 文件项目名包含本项目名
+    expect(okRow.parsedData.targetProjectId).toBe(projectId); // 自动预映射命中本项目
     const result = await confirmSettlementImport(batchId, [okRow.rowId], {
       id: adminId,
       role: UserRole.ADMIN,
@@ -315,5 +324,158 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     expect(rec!.amount.toFixed(2)).toBe('300.00');
     expect(rec!.status).toBe('PAID');
     expect(rec!.subjectId).toBe(leafTravelId);
+  });
+
+  it('v3 多项目:自动预映射双项目;未命中留人工;确认分别入账到各自项目', async () => {
+    // 第二个目标项目(文件里另一个「科研项目名称」)。
+    const projectB = await createProject(
+      {
+        code: `V3-${uuidv7().slice(0, 8)}-${Math.random().toString(36).slice(2, 6)}`,
+        name: '另一个科研项目B',
+      },
+      adminUser(),
+    );
+    projectIdB = projectB.id;
+    createdProjectIds.push(projectB.id);
+    const rootB = uuidv7();
+    await prisma.budgetSubject.create({
+      data: {
+        id: rootB,
+        projectId: projectB.id,
+        code: 'ROOT',
+        name: '直接费用',
+        level: 1,
+        isLeaf: false,
+      },
+    });
+    await prisma.budgetSubject.create({
+      data: {
+        id: uuidv7(),
+        projectId: projectB.id,
+        parentId: rootB,
+        code: 'B1',
+        name: '专家咨询费',
+        level: 2,
+        isLeaf: true,
+      },
+    });
+
+    // 单文件含两个科研项目名称:
+    // - 名称A 去前缀后包含本项目名 → 自动预映射到 project;
+    // - 名称B 是「无法识别的项目」→ 未命中,留人工。
+    const buf = await buildV3Xlsx([
+      {
+        docNo: 'TYBX-MP-A',
+        applyDate: '2025-07-01',
+        amount: 111,
+        handler: '甲',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+        remark: 'A项目行',
+        projectName: '其他专项科学技术费/图谱驱动测试专属项目甲',
+      },
+      {
+        docNo: 'TYBX-MP-B',
+        applyDate: '2025-07-02',
+        amount: 222,
+        handler: '乙',
+        detailPath: '直接费用/专家咨询费',
+        remark: 'B项目行',
+        projectName: '其他专项科学技术费/完全无关的另一个项目',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    const batchId = await parseSettlement(wb!, projectId, adminUser(), 'multi.xlsx');
+    let preview = await getSettlementBatch(batchId, adminUser());
+
+    expect(preview.templateVersion).toBe(SETTLEMENT_V3_TEMPLATE_VERSION);
+    expect(preview.projectMappings).toHaveLength(2);
+    const mapA = preview.projectMappings.find((m) =>
+      m.fileProjectName.includes('图谱驱动测试专属项目甲'),
+    )!;
+    const mapB = preview.projectMappings.find((m) => m.fileProjectName.includes('完全无关'))!;
+    expect(mapA.targetProjectId).toBe(projectId); // 自动预映射命中
+    expect(mapB.targetProjectId).toBeNull(); // 未命中 → 人工
+    expect(mappableCount(preview)).toBeGreaterThanOrEqual(2);
+
+    // 未映射行:留在 pending 但 error 态「未映射项目」?—— 服务端归 errors 组。
+    const unmapped = preview.errors.find((r) => r.parsedData.docNo === 'TYBX-MP-B');
+    expect(unmapped).toBeTruthy();
+    expect(unmapped!.errors.some((e) => e.message.includes('未映射项目'))).toBe(true);
+
+    // 确认被阻断(有 error 行未选中也不影响;仅选已映射行)。
+    const rowA = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-MP-A')!;
+    expect(rowA.parsedData.targetProjectId).toBe(projectId);
+    expect(rowA.parsedData.subjectId).toBe(leafTravelId); // 按目标项目预选
+
+    // 人工映射:B → projectB(PATCH targetProjectId → 重算科目预选+查重)。
+    await updateSettlementRows(
+      batchId,
+      [{ rowId: unmapped!.rowId, targetProjectId: projectB.id }],
+      adminUser(),
+    );
+    preview = await getSettlementBatch(batchId, adminUser());
+    const rowB = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-MP-B')!;
+    expect(rowB.parsedData.targetProjectId).toBe(projectB.id);
+    // 按新目标项目重跑科目预选:细项末段「专家咨询费」== projectB 的叶科目名。
+    expect(rowB.parsedData.subjectId).not.toBeNull();
+
+    // 确认:两行分别入账到各自项目。
+    const result = await confirmSettlementImport(batchId, [rowA.rowId, rowB.rowId], {
+      id: adminId,
+      role: UserRole.ADMIN,
+    });
+    expect(result.created).toBe(2);
+    const recA = await prisma.businessRecord.findFirst({
+      where: { projectId, docNo: 'TYBX-MP-A' },
+    });
+    const recB = await prisma.businessRecord.findFirst({
+      where: { projectId: projectB.id, docNo: 'TYBX-MP-B' },
+    });
+    expect(recA).not.toBeNull();
+    expect(recB).not.toBeNull();
+  });
+
+  it('v3 多项目权限:映射无导入权限的目标项目 → 403', async () => {
+    // 普通用户:是本项目 HANDLER(可导入本项目),但不是项目 B 成员。
+    const userId = uuidv7();
+    await prisma.user.create({ data: { id: userId, name: 'v3-handler', role: UserRole.USER } });
+    createdUserIds.push(userId);
+    await prisma.projectMember.create({
+      data: {
+        id: uuidv7(),
+        projectId,
+        userId,
+        memberRole: 'OWNER',
+      },
+    });
+    const buf = await buildV3Xlsx([
+      {
+        docNo: 'TYBX-PERM-1',
+        applyDate: '2025-08-01',
+        amount: 10,
+        handler: '丙',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+        remark: '权限行',
+        projectName: '其他专项科学技术费/完全无关的另一个项目',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    const batchId = await parseSettlement(
+      wb!,
+      projectId,
+      { id: userId, role: UserRole.USER },
+      'perm.xlsx',
+    );
+    const preview = await getSettlementBatch(batchId, { id: userId, role: UserRole.USER });
+    // 候选仅含其可导入项目;文件项目名未命中 → 未映射 error。
+    const unmapped = preview.errors.find((r) => r.parsedData.docNo === 'TYBX-PERM-1');
+    expect(unmapped).toBeTruthy();
+    // 人工映射到无权限的项目(projectIdB)→ 403。
+    await expect(
+      updateSettlementRows(batchId, [{ rowId: unmapped!.rowId, targetProjectId: projectIdB }], {
+        id: userId,
+        role: UserRole.USER,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
   });
 });
