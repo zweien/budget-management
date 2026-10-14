@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
-import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
+import { isSettlementTemplateVersion } from '@/lib/excel/settlement';
 import { STATUS_ENUM_TO_CN } from '@/lib/excel/template';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -51,6 +51,12 @@ export interface SettlementRow {
     handler: string;
     subjectId: string | null;
     subjectName: string | null;
+    /** ---- v3(财务结算单 2025 导出)专属 ---- */
+    detailPath?: string | null;
+    finCode?: string | null;
+    fileProjectName?: string | null;
+    fileProjectMismatch?: boolean;
+    sourceRows?: number[];
   };
   validationStatus: 'valid' | 'error' | 'skipped';
   errors: { field: string; message: string }[];
@@ -75,6 +81,7 @@ export interface SettlementBatchData {
   errors: SettlementRow[];
   skippedCount: number;
   skippedReasons: Record<string, number>;
+  projectName?: string | null;
   leafSubjects: Array<{ id: string; code: string; name: string }>;
 }
 
@@ -128,6 +135,11 @@ export function SettlementImportPreview({
 
   const confirmed = data.status === 'confirmed';
   const readOnly = confirmed || !canEdit;
+  // v3(财务结算单 2025 导出):行上展示 开支细项/科目代码,顶部做项目名核对警告。
+  const isV3 = data.templateVersion === 'settlement-2.0';
+  const projectMismatch = [...data.pending, ...data.duplicates, ...data.errors].some(
+    (r) => r.parsedData.fileProjectMismatch,
+  );
 
   const subjectOptions = useMemo(() => {
     const nameCount = new Map<string, number>();
@@ -339,6 +351,29 @@ export function SettlementImportPreview({
         <TableCell className="max-w-56 truncate" title={r.parsedData.summary}>
           {r.parsedData.summary}
         </TableCell>
+        {isV3 ? (
+          <TableCell
+            className="max-w-48 truncate"
+            title={[
+              r.parsedData.detailPath,
+              r.parsedData.finCode ? `科目代码:${r.parsedData.finCode}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n')}
+          >
+            <span className="block truncate">
+              {r.parsedData.detailPath ? (r.parsedData.detailPath.split('/').pop() ?? '') : '—'}
+              {r.parsedData.finCode ? (
+                <span className="ml-1 text-xs text-mute">{r.parsedData.finCode}</span>
+              ) : null}
+              {r.parsedData.sourceRows && r.parsedData.sourceRows.length > 1 ? (
+                <span className="ml-1 text-xs text-mute">
+                  (合并 {r.parsedData.sourceRows.length} 行)
+                </span>
+              ) : null}
+            </span>
+          </TableCell>
+        ) : null}
         <TableCell>
           {r.normalizedAmount ? (
             <MoneyText value={r.normalizedAmount} riskOnNegative={false} />
@@ -403,6 +438,7 @@ export function SettlementImportPreview({
         <TableHead className="w-24">完成日期</TableHead>
         <TableHead className="w-20">年度</TableHead>
         <TableHead>事项(摘要)</TableHead>
+        {isV3 ? <TableHead className="w-56">开支细项 / 科目代码</TableHead> : null}
         <TableHead className="w-24 text-right">金额</TableHead>
         <TableHead className="w-20">经办人</TableHead>
         <TableHead className="w-44">科目</TableHead>
@@ -441,11 +477,23 @@ export function SettlementImportPreview({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold tracking-[-0.3px]">导入预览(个人结算单)</h2>
+        <h2 className="text-base font-semibold tracking-[-0.3px]">
+          导入预览({isV3 ? '财务结算单' : '个人结算单'})
+        </h2>
         <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/records`)}>
           暂存退出
         </Button>
       </div>
+
+      {projectMismatch ? (
+        <Alert variant="warning">
+          <AlertTitle>文件「科研项目名称」与本项目名称不一致</AlertTitle>
+          <AlertDescription>
+            文件内的项目名称不包含当前项目「{data.projectName ?? ''}
+            」,请核对是否上传到了错误的项目(不阻断导入)。
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <Alert variant="info">
         <AlertTitle>
@@ -626,4 +674,4 @@ export function SettlementImportPreview({
   );
 }
 
-export const isSettlementTemplate = (v: string) => v === SETTLEMENT_TEMPLATE_VERSION;
+export const isSettlementTemplate = (v: string) => isSettlementTemplateVersion(v);

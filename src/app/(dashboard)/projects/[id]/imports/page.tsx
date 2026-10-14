@@ -6,7 +6,7 @@ import { FileSpreadsheet, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
-import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
+import { isSettlementTemplateVersion } from '@/lib/excel/settlement';
 import { cn } from '@/lib/utils';
 import {
   AlertDialog,
@@ -316,7 +316,7 @@ function ImportPageInner() {
         if (cancelled) return;
         setPreview(data);
         // §10.3 疑似重复默认不勾选;有效行默认全选(仅标准模板;结算单由其组件自管)。
-        if (data.templateVersion !== SETTLEMENT_TEMPLATE_VERSION) {
+        if (!isSettlementTemplateVersion(data.templateVersion)) {
           const sel = new Set<string>();
           (data as BatchPreview).valid.forEach((r) => sel.add(r.rowId));
           setSelected(sel);
@@ -409,7 +409,7 @@ function ImportPageInner() {
   };
 
   const stats = useMemo(() => {
-    if (!preview || preview.templateVersion === SETTLEMENT_TEMPLATE_VERSION) return null;
+    if (!preview || isSettlementTemplateVersion(preview.templateVersion)) return null;
     const std = preview as BatchPreview;
     return {
       valid: std.valid.length,
@@ -444,7 +444,7 @@ function ImportPageInner() {
     }
 
     // 个人结算单批次:整页交给结算单预览组件(逐条科目指定 + 暂存)。
-    if (preview.templateVersion === SETTLEMENT_TEMPLATE_VERSION) {
+    if (isSettlementTemplateVersion(preview.templateVersion)) {
       return (
         <SettlementImportPreview
           projectId={projectId}
@@ -605,8 +605,10 @@ function ImportPageInner() {
       <Alert variant="info">
         <AlertTitle>两阶段导入:上传校验 → 预览确认</AlertTitle>
         <AlertDescription>
-          支持两种文件,上传时自动识别:① 系统模板(下载模板后按列填写,文件内含科目编码); ②
-          财务系统导出的「个人结算单查询」(表头在第 4 行,无科目列,预览页逐条指定科目)。
+          支持三种文件,上传时自动识别:① 系统模板(下载模板后按列填写,文件内含科目编码); ②
+          财务系统导出的「个人结算单查询」(表头在第 4 行,无科目列,预览页逐条指定科目); ③
+          财务结算单导出·2025 新格式(含 科研项目名称/开支细项 列,同号明细行自动按单据合并,
+          开支细项末段与科目名一致时自动预选科目)。
           上传后逐行校验并识别疑似重复;确认导入才写入业务记录,期间可暂存退出。
         </AlertDescription>
       </Alert>
@@ -638,8 +640,10 @@ function ImportPageInner() {
                       {b.fileName}
                     </TableCell>
                     <TableCell>
-                      {b.templateVersion === SETTLEMENT_TEMPLATE_VERSION ? (
-                        <Badge>个人结算单</Badge>
+                      {isSettlementTemplateVersion(b.templateVersion) ? (
+                        <Badge>
+                          {b.templateVersion === 'settlement-2.0' ? '财务结算单' : '个人结算单'}
+                        </Badge>
                       ) : (
                         <Badge variant="secondary">标准模板</Badge>
                       )}

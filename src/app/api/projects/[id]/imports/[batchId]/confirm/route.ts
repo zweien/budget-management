@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
 import { confirmImport } from '@/server/services/excelImport.service';
 import { confirmSettlementImport } from '@/server/services/settlementImport.service';
-import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
+import { isSettlementTemplateVersion } from '@/lib/excel/settlement';
 
 /**
  * POST /api/projects/:id/imports/:batchId/confirm — 确认入库(§10 阶段二)。
@@ -32,10 +32,9 @@ export const POST = withRoute(
     if (!batch) {
       return NextResponse.json({ error: '导入批次不存在' }, { status: 404 });
     }
-    const result =
-      batch.templateVersion === SETTLEMENT_TEMPLATE_VERSION
-        ? await confirmSettlementImport(batchId, selectedRowIds, user)
-        : await confirmImport(batchId, selectedRowIds, user);
+    const result = isSettlementTemplateVersion(batch.templateVersion)
+      ? await confirmSettlementImport(batchId, selectedRowIds, user)
+      : await confirmImport(batchId, selectedRowIds, user);
     return NextResponse.json(result);
   },
 );

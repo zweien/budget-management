@@ -10,12 +10,16 @@ import { toStored, fromStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
 import {
+  isSettlementTemplateVersion,
   SETTLEMENT_HEADERS,
   SETTLEMENT_HEADER_SCAN_ROWS,
+  SETTLEMENT_HEADERS_V3,
   SETTLEMENT_SKIPPED_STATUS,
   SETTLEMENT_STATUS_TO_ENUM,
   SETTLEMENT_TEMPLATE_VERSION,
   SETTLEMENT_V2_APPLY_DATE,
+  SETTLEMENT_V3_MARKERS,
+  SETTLEMENT_V3_TEMPLATE_VERSION,
 } from '@/lib/excel/settlement';
 import {
   cellToString,
@@ -30,8 +34,11 @@ import { checkDuplicates, hardDupReason } from '@/server/services/duplicateCheck
  * 个人结算单查询 Excel 导入(财务系统导出格式,与标准模板 §10 并存)。
  *
  * 差异点(相对 excelImport.service):
- * - 表头不在首行,按表头名匹配列;**两种版式并存**(见 src/lib/excel/settlement.ts):
- *   v1 填制日期版(填制日期/事项)与 v2 申请日期版(申请日期/完成日期/备注,其余新列忽略)。
+ * - 表头不在首行,按表头名匹配列;**三种版式并存**(见 src/lib/excel/settlement.ts):
+ *   v1 填制日期版(填制日期/事项)、v2 申请日期版(申请日期/完成日期/备注,其余新列忽略)、
+ *   v3 2025 财务导出版(新增 科研项目名称/开支细项名称/预算科目代码/摘要 列;
+ *   单据编号为明细行粒度,冲账重报产生同号多行 → 按单据编号分组、金额取组内代数和
+ *   (净额)成一条记录;开支细项末段与本地叶科目名精确相等时自动预选科目)。
  * - 无科目列:科目在预览页由用户逐条指定(updateSettlementRows 暂存),确认时写入。
  * - 单据状态映射:完成记账→PAID,制单保存/完成审核→FINANCE_APPROVAL,业务退单→跳过。
  * - 预算年度按日期(填制/申请)年份推导,预览页可改。
@@ -67,6 +74,17 @@ export interface SettlementParsedRow {
   subjectName: string | null;
   /** 硬重复理由(预览标记悬浮展示;非硬重复行为空)。 */
   dupReason?: string | null;
+  /** ---- v3 专属(明细分组合并版式) ---- */
+  /** 开支细项层级路径全文(如「直接费用/会议、差旅、国际合作与交流/差旅费」)。 */
+  detailPath?: string | null;
+  /** 财务系统预算科目代码(与本地科目树编码无关,仅指派辅助)。 */
+  finCode?: string | null;
+  /** 文件「科研项目名称」原值(用于与上传项目的非阻断核对)。 */
+  fileProjectName?: string | null;
+  /** 文件项目名不含本项目名 → 预览页顶部警告(传错项目防护,非阻断)。 */
+  fileProjectMismatch?: boolean;
+  /** 组内源行号(明细分组合并前的原始行)。 */
+  sourceRows?: number[];
 }
 
 /** 单行字段级错误(与标准模板 RowFieldError 同形)。 */
@@ -104,8 +122,10 @@ export interface SettlementBatchPreview {
   errors: SettlementPreviewRow[];
   /** 业务退单等被跳过的行数(仅提示条数)。 */
   skippedCount: number;
-  /** 行被跳过的原因 → 条数(目前只有业务退单)。 */
+  /** 行被跳过的原因 → 条数(业务退单/纯冲账净额非正等)。 */
   skippedReasons: Record<string, number>;
+  /** 项目名称(v3 预览的项目名核对警告用)。 */
+  projectName: string | null;
   /** 项目叶科目(科目指定下拉数据源)。 */
   leafSubjects: Array<{ id: string; code: string; name: string }>;
 }
@@ -231,7 +251,28 @@ export async function parseSettlement(
     throw new HTTPError(422, '未找到个人结算单表头(需包含 单据编号/单据状态)');
   }
 
+  // v3(2025 财务导出)判定:表头同时含「科研项目名称」「开支细项名称」
+  // → 明细分组合并版式(同号多行冲账重报,金额取组内代数和)。
+  {
+    const headerCells = new Set<string>();
+    headerSheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell) => {
+      const s = cellToString(cell);
+      if (s) headerCells.add(s);
+    });
+    if (SETTLEMENT_V3_MARKERS.every((m) => headerCells.has(m))) {
+      return parseSettlementV3({
+        sheet: headerSheet,
+        headerRowNo,
+        projectId,
+        projectName: project.name,
+        user,
+        fileName,
+      });
+    }
+  }
+
   // 版式判定:表头含「申请日期」→ v2(申请日期版);否则为 v1(填制日期版)。两者长期并存。
+  const templateVersion = SETTLEMENT_TEMPLATE_VERSION;
   const isV2 = colIndex.has(SETTLEMENT_V2_APPLY_DATE);
   const requiredKeys = isV2
     ? [
@@ -456,7 +497,404 @@ export async function parseSettlement(
         id: batchId,
         projectId,
         fileName,
-        templateVersion: SETTLEMENT_TEMPLATE_VERSION,
+        templateVersion,
+        status: 'pending',
+        creatorId: user.id,
+      },
+    });
+    await tx.importRow.createMany({
+      data: parsedRows.map((r) => ({
+        id: uuidv7(),
+        batchId,
+        rowNo: r.rowNo,
+        parsedData: r.data as unknown as Prisma.InputJsonValue,
+        validationStatus: r.validationStatus,
+        errors: (r.errors.length > 0 ? r.errors : null) as unknown as Prisma.InputJsonValue,
+        duplicateFlag: r.duplicate,
+        duplicateLevel: r.duplicateLevel,
+        forcedImport: false,
+      })),
+    });
+  }, BULK_TX_OPTIONS);
+
+  return batchId;
+}
+
+// ---------- v3(2025 财务导出):明细行按单据编号分组合并 ----------
+
+/** 解析金额(允许负数:冲账行);空/非法返回 null。 */
+function parseAmountAllowNegative(raw: string): Prisma.Decimal | null {
+  const t = raw.trim();
+  if (!t) return null;
+  try {
+    const d = new Prisma.Decimal(t);
+    return d.isFinite() ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+interface V3RawRow {
+  rowNo: number;
+  docNo: string;
+  statusLabel: string;
+  applyDate: string;
+  completeDate: string;
+  amountRaw: string;
+  handler: string;
+  summary: string;
+  remark: string;
+  detailPath: string;
+  finCode: string;
+  projectFileName: string;
+}
+
+/**
+ * v3 版式解析:表头含 科研项目名称+开支细项名称(2025 财务导出)。
+ *
+ * 与 v1/v2 的差异:
+ * - 单据编号是明细行粒度,冲账重报会产生同号多行(含负数行)→ 按单据编号分组,
+ *   金额取组内代数和(净额)成一条记录;净额 ≤ 0 的组(纯冲账)整组跳过留痕;
+ *   组内 经办人/开支细项 不一致 → error 交人工。
+ * - 摘要取「摘要」列,空则退「备注」,组内取第一个非空。
+ * - 科目自动预选:开支细项末段与本地叶科目名精确相等(且不重名)时预选;
+ *   否则留空走预览指派/摘要历史映射。
+ * - 「科研项目名称」与上传项目名做包含式核对,不符仅警告不阻断。
+ */
+async function parseSettlementV3(opts: {
+  sheet: ExcelJS.Worksheet;
+  headerRowNo: number;
+  projectId: string;
+  projectName: string;
+  user: Pick<User, 'id' | 'role'>;
+  fileName: string;
+}): Promise<string> {
+  const { sheet, headerRowNo, projectId, projectName, user, fileName } = opts;
+
+  const colIndex = new Map<string, number>();
+  sheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell, colNumber) => {
+    const s = cellToString(cell);
+    if (s) colIndex.set(s, colNumber);
+  });
+  const required = [
+    SETTLEMENT_HEADERS.docNo,
+    SETTLEMENT_HEADERS.docStatus,
+    SETTLEMENT_V2_APPLY_DATE,
+    SETTLEMENT_HEADERS.amount,
+    SETTLEMENT_HEADERS.handler,
+    ...SETTLEMENT_V3_MARKERS,
+  ];
+  const missing = required.filter((k) => !colIndex.has(k));
+  if (missing.length > 0) {
+    throw new HTTPError(422, `结算单缺少必要列:${missing.join('、')},请核对导出文件`);
+  }
+  const get = (row: ExcelJS.Row, key: string): string => {
+    const idx = colIndex.get(key);
+    return idx === undefined ? '' : (cellToString(row.getCell(idx)) ?? '').trim();
+  };
+
+  // 科目自动预选:开支细项末段 == 叶科目名;重名叶科目不留预选(歧义交人工)。
+  const leaves = await prisma.budgetSubject.findMany({
+    where: { projectId, isLeaf: true },
+    select: { id: true, name: true },
+  });
+  const leafIdByName = new Map<string, string>();
+  for (const l of leaves) {
+    if (leafIdByName.has(l.name))
+      leafIdByName.set(l.name, ''); // 歧义标记
+    else leafIdByName.set(l.name, l.id);
+  }
+  for (const [name, id] of [...leafIdByName]) {
+    if (id === '') leafIdByName.delete(name);
+  }
+
+  // 收集原始明细行(空行跳过;容量闸与 v1/v2 同规则)。
+  const rawRows: V3RawRow[] = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber <= headerRowNo) return;
+    const docNo = get(row, SETTLEMENT_HEADERS.docNo);
+    const statusLabel = get(row, SETTLEMENT_HEADERS.docStatus);
+    const applyDate = get(row, SETTLEMENT_V2_APPLY_DATE);
+    const amountRaw = get(row, SETTLEMENT_HEADERS.amount);
+    const handler = get(row, SETTLEMENT_HEADERS.handler);
+    if (!docNo && !statusLabel && !applyDate && !amountRaw && !handler) return;
+    if (rawRows.length >= env.MAX_IMPORT_ROWS) {
+      throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
+    }
+    rawRows.push({
+      rowNo: rowNumber,
+      docNo,
+      statusLabel,
+      applyDate,
+      completeDate: get(row, SETTLEMENT_HEADERS.completeDate),
+      amountRaw,
+      handler,
+      summary: get(row, SETTLEMENT_HEADERS_V3.summary),
+      remark: get(row, SETTLEMENT_HEADERS.remark),
+      detailPath: get(row, SETTLEMENT_HEADERS_V3.detailPath),
+      finCode: get(row, SETTLEMENT_HEADERS_V3.finCode),
+      projectFileName: get(row, SETTLEMENT_HEADERS_V3.projectName),
+    });
+  });
+
+  const parsedRows: Array<{
+    rowNo: number;
+    data: SettlementParsedRow;
+    errors: SettlementRowError[];
+    validationStatus: 'valid' | 'error' | 'skipped';
+    duplicate: boolean;
+    duplicateLevel: DuplicateLevel;
+  }> = [];
+
+  // 业务退单:整行跳过留痕,不参与分组。
+  for (const r of rawRows) {
+    if (r.statusLabel !== SETTLEMENT_SKIPPED_STATUS) continue;
+    parsedRows.push({
+      rowNo: r.rowNo,
+      data: {
+        kind: 'settlement',
+        docNo: r.docNo || null,
+        statusLabel: r.statusLabel,
+        status: 'PAID',
+        businessDate: r.applyDate,
+        completedDate: null,
+        budgetYear: 0,
+        summary: r.summary || r.remark,
+        amount: r.amountRaw,
+        handler: r.handler,
+        subjectId: null,
+        subjectName: null,
+      },
+      errors: [{ field: 'docStatus', message: '业务退单,不导入' }],
+      validationStatus: 'skipped',
+      duplicate: false,
+      duplicateLevel: 'none',
+    });
+  }
+
+  // 按单据编号分组;空编号行各自成组(退回指纹查重)。Map 保持首次出现顺序。
+  const groups = new Map<string, V3RawRow[]>();
+  for (const r of rawRows) {
+    if (r.statusLabel === SETTLEMENT_SKIPPED_STATUS) continue;
+    const key = r.docNo || `__row_${r.rowNo}`;
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
+  }
+
+  for (const grp of groups.values()) {
+    const rowNo = grp[0].rowNo;
+    const errors: SettlementRowError[] = [];
+    const first = grp[0];
+
+    // 状态:组内取首行;无法映射 → error。
+    const statusLabel = first.statusLabel;
+    const mapped = statusLabel ? SETTLEMENT_STATUS_TO_ENUM[statusLabel] : undefined;
+    if (!mapped) {
+      errors.push({
+        field: 'docStatus',
+        message: statusLabel
+          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核,业务退单不导入)`
+          : '单据状态不能为空',
+      });
+    }
+
+    // 经办人/开支细项:组内不一致 → 人工核对。
+    const distinctHandlers = [...new Set(grp.map((r) => r.handler).filter(Boolean))];
+    if (distinctHandlers.length > 1) {
+      errors.push({
+        field: 'handler',
+        message: `组内经办人不一致(${distinctHandlers.join('/')}),请回财务核对`,
+      });
+    }
+    const handler = distinctHandlers[0] ?? '';
+    if (!handler) errors.push({ field: 'handler', message: '经办人不能为空' });
+
+    const detailPaths = [...new Set(grp.map((r) => r.detailPath).filter(Boolean))];
+    if (detailPaths.length > 1) {
+      errors.push({
+        field: 'subject',
+        message: `组内开支细项不一致(${detailPaths.length} 种),请回财务核对或拆分导入`,
+      });
+    }
+    const detailPath = detailPaths[0] ?? '';
+    const detailLeaf = detailPath ? (detailPath.split('/').pop() ?? '').trim() : '';
+    const finCode = grp.map((r) => r.finCode).find(Boolean) ?? '';
+    const fileProjectName = grp.map((r) => r.projectFileName).find(Boolean) ?? '';
+
+    // 金额:组内代数和(负数行 = 冲账,互相抵销);任一行无法解析 → 整组标错。
+    let net: Prisma.Decimal | null = null;
+    for (const r of grp) {
+      const d = parseAmountAllowNegative(r.amountRaw);
+      if (d === null) {
+        errors.push({ field: 'amount', message: `金额无法解析:${r.amountRaw || '(空)'}` });
+        net = null;
+        break;
+      }
+      net = net === null ? d : net.plus(d);
+    }
+    const netStr = net === null ? null : net.toFixed(2);
+    if (net !== null && netStr !== null && net.lessThanOrEqualTo(0)) {
+      // 纯冲账/净额非正:整组跳过留痕(不阻断其它组)。
+      parsedRows.push({
+        rowNo,
+        data: {
+          kind: 'settlement',
+          docNo: first.docNo || null,
+          statusLabel: statusLabel ?? '',
+          status: (mapped ?? 'PAID') as BusinessStatus,
+          businessDate: first.applyDate,
+          completedDate: null,
+          budgetYear: 0,
+          summary: first.summary || first.remark,
+          amount: netStr,
+          handler,
+          subjectId: null,
+          subjectName: null,
+          detailPath: detailPath || null,
+          finCode: finCode || null,
+          fileProjectName: fileProjectName || null,
+          sourceRows: grp.map((r) => r.rowNo),
+        },
+        errors: [{ field: 'amount', message: `单据净额 ${netStr} ≤ 0(冲账单据),不导入` }],
+        validationStatus: 'skipped',
+        duplicate: false,
+        duplicateLevel: 'none',
+      });
+      continue;
+    }
+
+    // 日期:申请日期组内取最晚;完成日期取最晚非空;完成不得早于申请。
+    let businessDate = '';
+    const applyParsed: string[] = [];
+    for (const r of grp) {
+      if (!r.applyDate) continue;
+      const d = normalizeDate(r.applyDate);
+      if (d === null) {
+        errors.push({ field: 'fillDate', message: `申请日期格式无效:${r.applyDate}` });
+        applyParsed.length = 0;
+        break;
+      }
+      applyParsed.push(d);
+    }
+    if (applyParsed.length > 0) {
+      businessDate = [...applyParsed].sort().pop()!;
+    }
+    let completedDate: string | null = null;
+    const completeParsed: string[] = [];
+    for (const r of grp) {
+      if (!r.completeDate) continue;
+      const d = normalizeDate(r.completeDate);
+      if (d === null) {
+        errors.push({ field: 'completedDate', message: `完成日期格式无效:${r.completeDate}` });
+        completeParsed.length = 0;
+        break;
+      }
+      completeParsed.push(d);
+    }
+    if (completeParsed.length > 0) {
+      completedDate = [...completeParsed].sort().pop()!;
+      if (businessDate && completedDate < businessDate) {
+        errors.push({
+          field: 'completedDate',
+          message: `完成日期(${completedDate})不能早于申请日期(${businessDate})`,
+        });
+      }
+    }
+
+    // 预算年度 = 申请日期年份。
+    const budgetYear = businessDate ? Number(businessDate.slice(0, 4)) : 0;
+    if (businessDate && (budgetYear < 1900 || budgetYear > 9999)) {
+      errors.push({
+        field: 'budgetYear',
+        message: `申请日期年度必须是 1900~9999 的正整数(当前 ${budgetYear})`,
+      });
+    }
+
+    // 摘要:摘要列优先,备注兜底,组内取第一个非空;
+    // 两者皆空允许(裁决 Q3:按单据编号/指纹查重兜底,不报错)。
+    const summary =
+      grp.map((r) => r.summary).find(Boolean) ?? grp.map((r) => r.remark).find(Boolean) ?? '';
+
+    // 科目自动预选:开支细项末段 == 唯一叶科目名。
+    const preselected = detailLeaf ? (leafIdByName.get(detailLeaf) ?? null) : null;
+
+    const data: SettlementParsedRow = {
+      kind: 'settlement',
+      docNo: first.docNo || null,
+      statusLabel: statusLabel ?? '',
+      status: (mapped ?? 'PAID') as BusinessStatus,
+      businessDate,
+      completedDate,
+      budgetYear,
+      summary,
+      amount: netStr ?? first.amountRaw,
+      handler,
+      subjectId: preselected,
+      subjectName: preselected ? detailLeaf : null,
+      detailPath: detailPath || null,
+      finCode: finCode || null,
+      fileProjectName: fileProjectName || null,
+      fileProjectMismatch: !!fileProjectName && !fileProjectName.includes(projectName),
+      sourceRows: grp.map((r) => r.rowNo),
+    };
+    parsedRows.push({
+      rowNo,
+      data,
+      errors,
+      validationStatus: errors.length === 0 ? 'valid' : 'error',
+      duplicate: false,
+      duplicateLevel: 'none',
+    });
+  }
+
+  if (parsedRows.length === 0) {
+    throw new HTTPError(422, 'Excel 文件不含任何有效数据行');
+  }
+
+  const validRows = parsedRows.filter((r) => r.validationStatus === 'valid');
+
+  // ---- 重复检测(统一判定器 ADR 0002;金额为组内净额)----
+  const verdicts = await checkDuplicates(
+    projectId,
+    validRows.map((r) => ({
+      rowKey: String(r.rowNo),
+      docNo: r.data.docNo,
+      budgetYear: r.data.budgetYear > 0 ? r.data.budgetYear : null,
+      amount: normalizeAmount(r.data.amount),
+      businessDate: normalizeDate(r.data.businessDate),
+      summary: r.data.summary || null,
+      status: r.data.status,
+      completedDate: r.data.completedDate ?? null,
+    })),
+    { allowRefresh: true },
+  );
+  const verdictByRowNo = new Map(verdicts.map((v) => [v.rowKey, v]));
+  for (const r of validRows) {
+    const v = verdictByRowNo.get(String(r.rowNo));
+    if (!v) continue;
+    if (v.hard) {
+      r.duplicate = true;
+      r.duplicateLevel = 'hard';
+      r.data.dupReason = hardDupReason(v);
+    } else if (v.refresh) {
+      r.duplicate = true;
+      r.duplicateLevel = 'refresh';
+    } else if (v.suspected) {
+      r.duplicate = true;
+      r.duplicateLevel = 'suspected';
+    }
+  }
+
+  // ---- 落库 ----
+  const batchId = uuidv7();
+  await prisma.$transaction(async (tx) => {
+    await tx.importBatch.create({
+      data: {
+        id: batchId,
+        projectId,
+        fileName,
+        templateVersion: SETTLEMENT_V3_TEMPLATE_VERSION,
         status: 'pending',
         creatorId: user.id,
       },
@@ -498,7 +936,7 @@ export async function getSettlementBatch(
     throw new HTTPError(404, '导入批次不存在');
   }
   await requirePermission(user, 'project:view', batch.projectId);
-  if (batch.templateVersion !== SETTLEMENT_TEMPLATE_VERSION) {
+  if (!isSettlementTemplateVersion(batch.templateVersion)) {
     throw new HTTPError(409, '该批次不是个人结算单导入批次');
   }
 
@@ -547,16 +985,23 @@ export async function getSettlementBatch(
     }
   }
 
-  const leafSubjects = await prisma.budgetSubject.findMany({
-    where: { projectId: batch.projectId, isLeaf: true },
-    select: { id: true, code: true, name: true },
-    orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-  });
+  const [leafSubjects, project] = await Promise.all([
+    prisma.budgetSubject.findMany({
+      where: { projectId: batch.projectId, isLeaf: true },
+      select: { id: true, code: true, name: true },
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+    }),
+    prisma.project.findUnique({
+      where: { id: batch.projectId },
+      select: { name: true },
+    }),
+  ]);
 
   return {
     batchId: batch.id,
     projectId: batch.projectId,
     fileName: batch.fileName,
+    projectName: project?.name ?? null,
     templateVersion: batch.templateVersion,
     status: batch.status,
     createdAt: batch.createdAt.toISOString(),
@@ -589,7 +1034,7 @@ export async function updateSettlementRows(
     throw new HTTPError(404, '导入批次不存在');
   }
   await requirePermission(user, 'record:import', batch.projectId);
-  if (batch.templateVersion !== SETTLEMENT_TEMPLATE_VERSION) {
+  if (!isSettlementTemplateVersion(batch.templateVersion)) {
     throw new HTTPError(409, '该批次不是个人结算单导入批次');
   }
   if (batch.status !== 'pending') {
@@ -699,7 +1144,7 @@ export async function confirmSettlementImport(
     throw new HTTPError(404, '导入批次不存在');
   }
   await requirePermission(user, 'record:import', batch.projectId);
-  if (batch.templateVersion !== SETTLEMENT_TEMPLATE_VERSION) {
+  if (!isSettlementTemplateVersion(batch.templateVersion)) {
     throw new HTTPError(409, '该批次不是个人结算单导入批次');
   }
   if (batch.status !== 'pending') {
