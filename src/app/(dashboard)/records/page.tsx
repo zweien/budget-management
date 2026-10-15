@@ -166,19 +166,32 @@ const HEAD_WIDTH: Record<string, string> = {
 };
 
 /** 录入/编辑表单(schema 与项目内记录页一致)。 */
-const recordSchema = z.object({
-  budgetYear: z.coerce.number().int('年度须为整数').min(1900).max(9999),
-  subjectId: z.string().min(1, '请选择科目'),
-  amount: z
-    .string()
-    .min(1, '请输入金额')
-    .refine((v) => Number(v) > 0, '金额必须大于 0'),
-  businessDate: z.date().optional(), // 选填:留空默认当天(服务端兜底)
-  status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
-  handler: z.string().trim().min(1, '请输入经办人'),
-  summary: z.string().trim().min(1, '请输入摘要'),
-  remark: z.string().trim(),
-});
+const recordSchema = z
+  .object({
+    budgetYear: z.coerce.number().int('年度须为整数').min(1900).max(9999),
+    subjectId: z.string().min(1, '请选择科目'),
+    amount: z
+      .string()
+      .min(1, '请输入金额')
+      .refine((v) => Number(v) > 0, '金额必须大于 0'),
+    businessDate: z.date().optional(), // 选填:留空默认当天(服务端兜底)
+    /** 完成日期(选填);与申请日期都填时不得早于申请日期。 */
+    completedDate: z.date().optional(),
+    docNo: z.string().trim().max(64, '单据编号过长'),
+    status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
+    handler: z.string().trim().min(1, '请输入经办人'),
+    summary: z.string().trim().min(1, '请输入摘要'),
+    remark: z.string().trim(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.completedDate && v.businessDate && v.completedDate < v.businessDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['completedDate'],
+        message: '完成日期不能早于申请日期',
+      });
+    }
+  });
 type RecordFormValues = z.infer<typeof recordSchema>;
 
 // ============================================================
@@ -1004,6 +1017,8 @@ function UnifiedRecordsPageInner() {
           ...values,
           amount: Number(values.amount).toFixed(2),
           businessDate: values.businessDate ? format(values.businessDate, 'yyyy-MM-dd') : '',
+          completedDate: values.completedDate ? format(values.completedDate, 'yyyy-MM-dd') : null,
+          docNo: values.docNo || null,
           remark: values.remark || null,
         }),
       });
@@ -1034,6 +1049,8 @@ function UnifiedRecordsPageInner() {
       subjectId: row.subjectId,
       amount: row.amount,
       businessDate: new Date(row.businessDate),
+      completedDate: row.completedDate ? new Date(row.completedDate) : undefined,
+      docNo: row.docNo ?? '',
       status: row.status,
       handler: row.handler,
       summary: row.summary,
@@ -1052,6 +1069,8 @@ function UnifiedRecordsPageInner() {
           ...values,
           amount: Number(values.amount).toFixed(2),
           businessDate: values.businessDate ? format(values.businessDate, 'yyyy-MM-dd') : '',
+          completedDate: values.completedDate ? format(values.completedDate, 'yyyy-MM-dd') : null,
+          docNo: values.docNo || null,
           remark: values.remark || null,
         }),
       });
@@ -1527,6 +1546,39 @@ function UnifiedRecordsPageInner() {
                       <FormItem>
                         <FormLabel>申请日期(选填,留空默认当天)</FormLabel>
                         <DatePicker value={field.value} onChange={field.onChange} />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={editForm.control}
+                    name="completedDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          完成日期
+                          <span className="ml-1 text-xs font-normal text-mute">(选填)</span>
+                        </FormLabel>
+                        <FormControl>
+                          <DatePicker
+                            value={field.value}
+                            onChange={field.onChange}
+                            placeholder="报销完成后由财务导出回填"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={editForm.control}
+                    name="docNo"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>单据编号(可选)</FormLabel>
+                        <FormControl>
+                          <Input maxLength={64} placeholder="财务系统单据编号" {...field} />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
