@@ -3,7 +3,16 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { ClipboardPlus, Download, Funnel, History, Paperclip, Upload } from 'lucide-react';
+import {
+  Ban,
+  ClipboardPlus,
+  Download,
+  Funnel,
+  History,
+  Pencil,
+  Paperclip,
+  Upload,
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -147,13 +156,13 @@ const HEAD_WIDTH: Record<string, string> = {
   completedDate: 'w-24',
   status: 'w-28',
   handler: 'w-20',
-  docNo: 'w-[9%]',
+  docNo: 'w-52',
   summary: 'w-[15%]',
   remark: 'w-[11%]',
   enteredAt: 'w-32',
   creatorName: 'w-20',
   attachments: 'w-14',
-  actions: 'w-40',
+  actions: 'w-28',
 };
 
 /** 录入/编辑表单(schema 与项目内记录页一致)。 */
@@ -615,10 +624,7 @@ function UnifiedRecordsPageInner() {
           />
         ),
         cell: ({ row }) => (
-          <span
-            className="block max-w-full truncate"
-            title={row.original.subject?.name ?? undefined}
-          >
+          <span className="line-clamp-2" title={row.original.subject?.name ?? undefined}>
             {row.original.subject?.name ?? '—'}
           </span>
         ),
@@ -708,7 +714,7 @@ function UnifiedRecordsPageInner() {
         ),
         cell: ({ row }) => (
           <span
-            className="block max-w-full truncate font-mono text-xs"
+            className="block whitespace-nowrap font-mono text-xs"
             title={row.original.docNo ?? undefined}
           >
             {row.original.docNo || '—'}
@@ -720,7 +726,7 @@ function UnifiedRecordsPageInner() {
         accessorKey: 'summary',
         header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
         cell: ({ row }) => (
-          <span className="block max-w-full truncate" title={row.original.summary}>
+          <span className="line-clamp-2" title={row.original.summary}>
             {row.original.summary}
           </span>
         ),
@@ -939,31 +945,45 @@ function UnifiedRecordsPageInner() {
   /** 行内操作(修改/作废/查看;修改与作废仅可写项目且未作废)。 */
   function RowActions({ row }: { row: UnifiedRecordRow }) {
     const writable = writableIds.has(row.projectId);
+    const iconBtn =
+      'size-7 [&_svg]:size-3.5 text-mute transition-colors hover:text-foreground hover:bg-accent';
     return (
-      <div className="flex gap-1">
+      <div className="flex items-center gap-0.5">
         {writable && !row.isVoid ? (
           <>
-            <Button variant="ghost" size="sm" onClick={() => void openEdit(row)}>
-              修改
+            <Button
+              variant="ghost"
+              size="icon"
+              className={iconBtn}
+              title="修改"
+              aria-label={`修改记录:${row.summary}`}
+              onClick={() => void openEdit(row)}
+            >
+              <Pencil />
             </Button>
             <Button
               variant="ghost"
-              size="sm"
-              className="text-error-deep hover:bg-error-soft"
+              size="icon"
+              className={`${iconBtn} text-error-deep hover:bg-error-soft hover:text-error-deep`}
+              title="作废"
+              aria-label={`作废记录:${row.summary}`}
               onClick={() => {
                 setVoidTarget(row);
                 setVoidReason('');
                 setVoidError(null);
               }}
             >
-              作废
+              <Ban />
             </Button>
           </>
         ) : null}
-        <Button variant="ghost" size="sm" asChild>
-          <Link href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}`}>
+        <Button variant="ghost" size="icon" className={iconBtn} asChild>
+          <Link
+            href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}`}
+            title="查看该科目的记录"
+            aria-label={`查看科目记录:${row.summary}`}
+          >
             <History />
-            查看
           </Link>
         </Button>
       </div>
