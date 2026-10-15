@@ -6,9 +6,17 @@ import { cn } from '@/lib/utils';
  * IDRL 工作台表格:hairline 行分隔、surface-subtle 表头(12px/500/muted)、
  * 14px 正文、数字列 tabular-nums(由 MoneyText 等调用点负责)。
  */
-function Table({ className, ...props }: React.ComponentProps<'table'>) {
+function Table({
+  className,
+  /** 作用于外层滚动容器(如限高 + sticky 表头的滚动区)。 */
+  wrapperClassName,
+  ...props
+}: React.ComponentProps<'table'> & { wrapperClassName?: string }) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-auto">
+    <div
+      data-slot="table-container"
+      className={cn('relative w-full overflow-auto', wrapperClassName)}
+    >
       <table
         data-slot="table"
         className={cn('w-full caption-bottom text-sm', className)}

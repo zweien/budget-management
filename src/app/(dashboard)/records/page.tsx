@@ -1387,7 +1387,10 @@ function UnifiedRecordsPageInner() {
         />
 
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-          <Table className="table-fixed min-w-[1100px]">
+          <Table
+            className="table-fixed min-w-[1100px]"
+            wrapperClassName="max-h-[calc(100vh-380px)]"
+          >
             <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="hover:bg-transparent">
