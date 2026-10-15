@@ -113,10 +113,16 @@ export function SettlementImportPreview({
   projectId,
   initialData,
   canEdit,
+  /** 暂存退出/完成后的返回路径(缺省回承载项目记录页;统一导入入口传业务录入页)。 */
+  exitTo,
+  onExit,
 }: {
   projectId: string;
   initialData: SettlementBatchData;
   canEdit: boolean;
+  exitTo?: string;
+  /** 退出前的额外清理(统一导入入口用它切回上传模式)。 */
+  onExit?: () => void;
 }) {
   const router = useRouter();
   const [data, setData] = useState<SettlementBatchData>(initialData);
@@ -545,7 +551,13 @@ export function SettlementImportPreview({
         <h2 className="text-base font-semibold tracking-[-0.3px]">
           导入预览({isV3 ? '财务结算单' : '个人结算单'})
         </h2>
-        <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/records`)}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            onExit?.();
+            router.push(exitTo ?? `/projects/${projectId}/records`);
+          }}
+        >
           暂存退出
         </Button>
       </div>
