@@ -6,13 +6,13 @@
 
 ## 来源
 
-| 项             | 值                                                        |
-| -------------- | --------------------------------------------------------- |
-| 源仓库         | https://github.com/zweien/idrl-vi                         |
-| sourceCommit   | `c5c67868577a00d040973523d5be2f7a25d22f11`                |
-| tokenVersion   | 0.2.1                                                     |
-| 快照 dirty     | 否(纯提交快照)                                            |
-| 逐文件 SHA-256 | 见 `idrl-source.json` 与 idrl-vi `npm run vi:export` 输出 |
+| 项             | 值                                                                               |
+| -------------- | -------------------------------------------------------------------------------- |
+| 源仓库         | https://github.com/zweien/idrl-vi                                                |
+| sourceCommit   | `48bdb76bace0b7d94059d8f4d3848f803aee8bb9`(在 `c5c6786` 基础上追其 favicon 修复) |
+| tokenVersion   | 0.2.1                                                                            |
+| 快照 dirty     | 否(纯提交快照)                                                                   |
+| 逐文件 SHA-256 | 见 `idrl-source.json` 与 idrl-vi `npm run vi:export` 输出                        |
 
 ## 接入深度
 
@@ -22,12 +22,16 @@
 
 ## 复制资产
 
-| 资产                | 目标路径              | 说明                                                                                    |
-| ------------------- | --------------------- | --------------------------------------------------------------------------------------- |
-| logo SVG ×7         | `public/brand/logo/`  | symbol-color(-reverse)、lockup-idrl(-reverse)、lockup-bilingual(-reverse)、favicon-tile |
-| InterVariable.woff2 | `public/brand/fonts/` | 自托管英文字体(globals.css `@font-face`)                                                |
-| Inter-LICENSE.txt   | `public/brand/fonts/` | OFL 授权,随字体保留                                                                     |
-| favicon-tile.svg    | `src/app/icon.svg`    | Next.js App Router 图标约定(替换原 favicon.ico)                                         |
+| 资产                | 目标路径              | 说明                                                                                                                          |
+| ------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| logo SVG ×8         | `public/brand/logo/`  | symbol-color(-reverse)、lockup-idrl(-reverse)、lockup-bilingual(-reverse)、favicon-tile、favicon                              |
+| favicon.svg         | `src/app/icon.svg`    | Next.js App Router 图标约定;透明底,内嵌 `prefers-color-scheme` 随浏览器标签栏明暗自适应(navy ↔ navyOnDark),不随应用内主题按钮 |
+| InterVariable.woff2 | `public/brand/fonts/` | 自托管英文字体(globals.css `@font-face`)                                                                                      |
+| Inter-LICENSE.txt   | `public/brand/fonts/` | OFL 授权,随字体保留                                                                                                           |
+
+favicon 规范(上游 48bdb76 起):默认浏览器 favicon 用透明自适应的
+`favicon.svg`;navy 方底 `favicon-tile.svg` 仅用于需要固定底色的应用图标 /
+快捷方式,不再作浏览器默认图标。
 
 token 数值(tokens-values.css / shadcn-aliases.css 生成物)已并入
 `src/app/globals.css` 并保持本应用原变量名(`--mute`、`--link`、`--*-soft` 等),
