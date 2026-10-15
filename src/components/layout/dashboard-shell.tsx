@@ -45,7 +45,7 @@ export function DashboardShell({ defaultCollapsed, version, children }: Props) {
         )}
       >
         <SiteHeader version={version} collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
-        <main className="mx-auto w-full max-w-[1560px] flex-1 p-4 lg:p-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1920px] flex-1 p-4 lg:p-8">{children}</main>
       </div>
     </TooltipProvider>
   );

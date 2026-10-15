@@ -132,6 +132,30 @@ const STATUS_FILTER_LABELS: Record<string, string> = {
   __void__: '已作废',
 };
 
+/**
+ * 列宽档(table-fixed 口径):短字段定宽 px;文本列百分比——表格恒等于容器宽,
+ * 空间按比例分配不再留白,配合单元格 max-w-full truncate 只在列宽不足时截断;
+ * 窄于最小宽度时由容器横向滚动兜底。
+ */
+const HEAD_WIDTH: Record<string, string> = {
+  select: 'w-9',
+  project: 'w-[11%]',
+  budgetYear: 'w-16',
+  subject: 'w-[12%]',
+  amount: 'w-24 text-right',
+  businessDate: 'w-24',
+  completedDate: 'w-24',
+  status: 'w-28',
+  handler: 'w-20',
+  docNo: 'w-[9%]',
+  summary: 'w-[15%]',
+  remark: 'w-[11%]',
+  enteredAt: 'w-32',
+  creatorName: 'w-20',
+  attachments: 'w-14',
+  actions: 'w-40',
+};
+
 /** 录入/编辑表单(schema 与项目内记录页一致)。 */
 const recordSchema = z.object({
   budgetYear: z.coerce.number().int('年度须为整数').min(1900).max(9999),
@@ -558,7 +582,7 @@ function UnifiedRecordsPageInner() {
             href={`/projects/${row.original.projectId}/records`}
             className="text-link underline-offset-4 hover:underline"
           >
-            <span className="block max-w-44 truncate">
+            <span className="block max-w-full truncate">
               {projectName.get(row.original.projectId) ?? row.original.projectId.slice(0, 8)}
             </span>
           </Link>
@@ -590,6 +614,14 @@ function UnifiedRecordsPageInner() {
             sortable
           />
         ),
+        cell: ({ row }) => (
+          <span
+            className="block max-w-full truncate"
+            title={row.original.subject?.name ?? undefined}
+          >
+            {row.original.subject?.name ?? '—'}
+          </span>
+        ),
       },
       {
         id: 'amount',
@@ -608,7 +640,7 @@ function UnifiedRecordsPageInner() {
           <HeaderFilter column={column} title="申请日期" type="dateRange" sortable />
         ),
         cell: ({ row }) => (
-          <span className="tabular-nums">
+          <span className="block whitespace-nowrap tabular-nums">
             {format(new Date(row.original.businessDate), 'yyyy-MM-dd')}
           </span>
         ),
@@ -626,7 +658,7 @@ function UnifiedRecordsPageInner() {
           />
         ),
         cell: ({ row }) => (
-          <span className="tabular-nums">
+          <span className="block whitespace-nowrap tabular-nums">
             {row.original.completedDate
               ? format(new Date(row.original.completedDate), 'yyyy-MM-dd')
               : '—'}
@@ -676,7 +708,7 @@ function UnifiedRecordsPageInner() {
         ),
         cell: ({ row }) => (
           <span
-            className="block max-w-32 truncate font-mono text-xs"
+            className="block max-w-full truncate font-mono text-xs"
             title={row.original.docNo ?? undefined}
           >
             {row.original.docNo || '—'}
@@ -688,7 +720,7 @@ function UnifiedRecordsPageInner() {
         accessorKey: 'summary',
         header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
         cell: ({ row }) => (
-          <span className="block max-w-40 truncate" title={row.original.summary}>
+          <span className="block max-w-full truncate" title={row.original.summary}>
             {row.original.summary}
           </span>
         ),
@@ -701,7 +733,7 @@ function UnifiedRecordsPageInner() {
         cell: ({ row }) =>
           row.original.remark ? (
             <span
-              className="block max-w-32 truncate text-muted-foreground"
+              className="block max-w-full truncate text-muted-foreground"
               title={row.original.remark}
             >
               {row.original.remark}
@@ -1335,21 +1367,12 @@ function UnifiedRecordsPageInner() {
         />
 
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-          <Table>
-            <TableHeader>
+          <Table className="table-fixed min-w-[1100px]">
+            <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="hover:bg-transparent">
                   {hg.headers.map((header) => (
-                    <TableHead
-                      key={header.id}
-                      className={
-                        header.column.id === 'amount'
-                          ? 'w-32 text-right'
-                          : header.column.id === 'actions'
-                            ? 'w-44'
-                            : undefined
-                      }
-                    >
+                    <TableHead key={header.id} className={HEAD_WIDTH[header.column.id]}>
                       {header.isPlaceholder
                         ? null
                         : flexRender(header.column.columnDef.header, header.getContext())}
