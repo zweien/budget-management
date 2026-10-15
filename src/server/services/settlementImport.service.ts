@@ -4,7 +4,7 @@ import { BusinessStatus, Prisma, User } from '@prisma/client';
 import { BULK_TX_OPTIONS, prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
 import { env } from '@/lib/env';
-import { requirePermission } from '@/lib/auth/permissions';
+import { denyApiKeyCrossProject, requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { toStored, fromStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
@@ -1044,6 +1044,9 @@ export async function parseSettlementUnified(
   needsHost: boolean;
   mappableProjects?: Array<{ id: string; name: string }>;
 }> {
+  // selected 项目范围凭证:跨项目/无项目上下文接口一律 403(审计后拒绝,codex P1)。
+  await denyApiKeyCrossProject(user, 'record:import');
+
   const { workbook, isSettlement } = await loadWorkbookWithFormatDetection(fileBuffer);
   if (!isSettlement) {
     throw new HTTPError(422, '仅支持财务结算单(2025 导出)格式;系统模板/个人结算单请在项目内导入');
@@ -1102,6 +1105,8 @@ export async function parseSettlementUnified(
         mappableProjects: await importableProjectsFor(user),
       };
     }
+    // 自动命中也要过 record:import(codex P1:只读凭证不得借自动映射创建批次)。
+    await requirePermission(user, 'record:import', probe);
     hostProjectId = probe;
   }
 
@@ -1172,6 +1177,9 @@ export async function listMySettlementBatches(
     rowCount: number;
   }>
 > {
+  // selected 项目范围凭证:无项目上下文的聚合列表一律 403(审计后拒绝,codex P1)。
+  await denyApiKeyCrossProject(user, 'record:import');
+
   const batches = await prisma.importBatch.findMany({
     where: {
       creatorId: user.id,

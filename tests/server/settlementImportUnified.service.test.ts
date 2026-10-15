@@ -110,6 +110,8 @@ describe('settlementImport unified entry (integration, real PG)', () => {
     for (const id of createdProjectIds.splice(0)) {
       await cleanupProject(id);
     }
+    // 守卫测试会写 apikey.denied 等被拒审计(operatorId FK):先清审计再删用户。
+    await prisma.auditLog.deleteMany({ where: { operatorId: { in: createdUserIds } } });
     await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
     await prisma.$disconnect();
   });
@@ -160,6 +162,29 @@ describe('settlementImport unified entry (integration, real PG)', () => {
     expect(hosted.needsHost).toBe(false);
     expect(hosted.batchProjectId).toBe(projectAId);
     // 承载项目 = 种子项目甲:不在测试内清理(后续用例依赖);afterAll 统一清理。
+  });
+
+  it('unified 安全闸:Selected 范围凭证 403(解析与批次列表);只读凭证自动命中也 403', async () => {
+    const buf = await buildV3Xlsx([
+      { docNo: 'UNI-SEC-1', amount: 10, projectName: `其他专项科学技术费/${projectNameA}` },
+    ]);
+    const scopedKeyUser = {
+      id: adminId,
+      role: UserRole.ADMIN,
+      viaApiKey: true,
+      keyProjectScope: 'selected',
+      keyProjectIds: [projectAId],
+    };
+    await expect(parseSettlementUnified(buf, scopedKeyUser, 'scoped.xlsx')).rejects.toMatchObject({
+      status: 403,
+    });
+    await expect(listMySettlementBatches(scopedKeyUser)).rejects.toMatchObject({ status: 403 });
+
+    // 只读档凭证:自动预映射命中目标也不得创建批次(record:import 闸)。
+    const readKeyUser = { id: adminId, role: UserRole.ADMIN, viaApiKey: true, keyTier: 'read' };
+    await expect(parseSettlementUnified(buf, readKeyUser, 'readonly.xlsx')).rejects.toMatchObject({
+      status: 403,
+    });
   });
 
   it('unified:仅接受 v3(v1 结算单 → 422 提示去项目内导入)', async () => {
