@@ -37,15 +37,15 @@ export function DashboardShell({ defaultCollapsed, version, children }: Props) {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <AppSidebar collapsed={collapsed} version={version} onToggleCollapse={toggleCollapsed} />
+      <AppSidebar collapsed={collapsed} version={version} />
       <div
         className={cn(
           'flex min-h-screen flex-col transition-[padding] duration-200',
-          collapsed ? 'lg:pl-16' : 'lg:pl-60',
+          collapsed ? 'lg:pl-[72px]' : 'lg:pl-60',
         )}
       >
-        <SiteHeader version={version} />
-        <main className="flex-1 p-4 lg:p-8">{children}</main>
+        <SiteHeader version={version} collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
+        <main className="mx-auto w-full max-w-[1560px] flex-1 p-4 lg:p-8">{children}</main>
       </div>
     </TooltipProvider>
   );

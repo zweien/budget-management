@@ -2,126 +2,162 @@
 /* shadcn 组件的 animate-in/out 动效工具类(Tailwind v4 官方接替 tailwindcss-animate)。 */
 @import 'tw-animate-css';
 
+/*
+ * Inter 自托管(IDRL VI font.sans 英文/数字位)。
+ * 中文走官方回退栈(见 --font-sans),不导入展示站中文子集。
+ * 授权:public/brand/fonts/Inter-LICENSE.txt (OFL)。
+ */
+@font-face {
+  font-family: Inter;
+  src: url('/brand/fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * DESIGN.md (Vercel 设计语言) token 主题。
- * 只取 token 体系:canvas 表面 / hairline / 负字距排版 / stacked shadow,
- * 不引入营销组件(mesh 渐变、100px 药丸 CTA)。
- * 暗色 token 为按 Vercel 暗色惯例的推导值(DESIGN.md 未采集暗色)。
+ * IDRL VI token 主题(来源 zweien/idrl-vi,token 0.2.1,commit c5c6786)。
+ * 数值唯一来源为上游 assets/brand/tokens.json,生成物已并入本文件,不私改品牌值;
+ * 变量名沿用原 DESIGN.md 体系以保持组件调用点稳定,接入记录见 docs/idrl-adoption.md。
+ * 主题协议:根元素 .dark 与 data-theme="light|dark" 由 ThemeProvider 同步设置,
+ * 品牌 logo 按 data-theme 切换浅/深版本。
  */
-:root {
-  /* ── 表面 ─────────────────────────────── */
-  --background: #fafafa; /* canvas-soft 页面体 */
-  --foreground: #171717; /* ink */
-  --card: #ffffff; /* canvas 卡片/对话框 */
-  --card-foreground: #171717;
+:root,
+[data-theme='light'] {
+  /* ── 表面(IDRL light)──────────────────── */
+  --background: #f5f8fc; /* 页面画布,浅蓝灰 */
+  --foreground: #182a43;
+  --surface: #ffffff; /* 内容面板 */
+  --surface-subtle: #edf3fa; /* 次级面板/表头 */
+  --card: #ffffff;
+  --card-foreground: #182a43;
   --popover: #ffffff;
-  --popover-foreground: #171717;
+  --popover-foreground: #182a43;
 
   /* ── 语义 ─────────────────────────────── */
-  --primary: #171717; /* ink 主 CTA */
+  --primary: #236db9; /* brand blue */
   --primary-foreground: #ffffff;
-  --secondary: #f5f5f5; /* canvas-soft-2 */
-  --secondary-foreground: #171717;
-  --muted: #f5f5f5;
-  --muted-foreground: #4d4d4d; /* body 次要正文 */
-  --accent: #f5f5f5; /* hover 底 */
-  --accent-foreground: #171717;
-  --destructive: #ee0000; /* error */
+  --primary-hover: #1c5999;
+  --secondary: #edf3fa;
+  --secondary-foreground: #182a43;
+  --muted: #edf3fa;
+  --muted-foreground: #52637a;
+  --accent: #dff4fb; /* IDRL accent(cyan 淡底) */
+  --accent-foreground: #203663;
+  --destructive: #b5343b;
   --destructive-foreground: #ffffff;
-  --border: #ebebeb; /* hairline */
-  --input: #ebebeb;
-  --ring: #0070f3; /* link 蓝聚焦环 */
+  --border: #dce4ef;
+  --control-border: #7b8a9b; /* 控件边界,强于分隔线 */
+  --input: #7b8a9b;
+  --ring: #236db9; /* var(--focus) */
 
-  /* ── DESIGN.md 扩展 token ─────────────── */
-  --mute: #6e6e6e; /* 占位/辅助文字(AA:对 #fafafa 4.89:1) */
-  --hairline-strong: #a1a1a1;
-  --link: #0070f3;
-  --link-deep: #0761d1;
-  --success: #0070f3; /* DESIGN.md: success 即 link 蓝 */
-  --success-soft: #d3e5ff;
-  --warning: #f5a623;
-  --warning-soft: #ffefcf;
-  --warning-deep: #ab570a;
-  --error-soft: #f7d4d6;
-  --error-deep: #c50000;
+  /* ── 状态(IDRL 语义色;徽章底=基色 15% 混 surface)── */
+  --mute: #52637a; /* 占位/辅助文字 */
+  --hairline-strong: #7b8a9b;
+  --link: #236db9;
+  --link-deep: #1c5999;
+  --primary-text: #1c5999;
+  --primary-soft: color-mix(in srgb, #236db9 15%, #ffffff);
+  --success: #16734a;
+  --success-soft: color-mix(in srgb, #16734a 15%, #ffffff);
+  --warning: #8a5200;
+  --warning-soft: color-mix(in srgb, #8a5200 15%, #ffffff);
+  --warning-deep: #744500;
+  --error-soft: color-mix(in srgb, #b5343b 15%, #ffffff);
+  --error-deep: #9c2a31;
 
-  /* ── 圆角:--radius 基准 8px → sm 4 / md 6 / lg 8 / xl 12 ── */
-  --radius: 0.5rem;
+  /* ── 品牌三色(IDRL navy/blue/cyan)─────── */
+  --brand-navy: #203663;
+  --brand-blue: #236db9;
+  --brand-cyan: #56c0e5;
+  --brand-navy-on-dark: #8fb8dc;
 
-  /* ── 层级阴影:stacked 小 offset + inset hairline,禁止单重投影 ── */
-  --shadow-l1: 0 0 0 1px rgb(0 0 0 / 0.08);
-  --shadow-l2:
-    0 1px 1px rgb(0 0 0 / 0.02), 0 2px 2px rgb(0 0 0 / 0.04), inset 0 0 0 1px rgb(0 0 0 / 0.05);
-  --shadow-l3:
-    0 2px 2px rgb(0 0 0 / 0.04), 0 8px 8px -8px rgb(0 0 0 / 0.04), inset 0 0 0 1px rgb(0 0 0 / 0.05);
-  --shadow-l4:
-    0 2px 2px rgb(0 0 0 / 0.04), 0 8px 16px -4px rgb(0 0 0 / 0.04),
-    inset 0 0 0 1px rgb(0 0 0 / 0.05);
-  --shadow-l5:
-    0 1px 1px rgb(0 0 0 / 0.02), 0 8px 16px -4px rgb(0 0 0 / 0.04),
-    0 24px 32px -8px rgb(0 0 0 / 0.06), inset 0 0 0 1px rgb(0 0 0 / 0.05);
+  /* ── 圆角:控件 6 / 卡片 12 / 弹窗 16 ──── */
+  --radius: 0.375rem;
+
+  /* ── 动效(IDRL motion)────────────────── */
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+  --motion-slow: 240ms;
+
+  /* ── 阴影:面板靠边框,浮层才用投影(IDRL 惯例)── */
+  --shadow-l1: 0 0 #0000;
+  --shadow-l2: 0 0 #0000;
+  --shadow-l3: 0 4px 16px rgb(0 0 0 / 0.08);
+  --shadow-l4: 0 8px 24px rgb(0 0 0 / 0.1);
+  --shadow-l5: 0 20px 90px rgb(0 0 0 / 0.15);
 }
 
-.dark {
-  --background: #000000;
-  --foreground: #ededed; /* 极性翻转 */
-  --card: #0a0a0a;
-  --card-foreground: #ededed;
-  --popover: #0a0a0a;
-  --popover-foreground: #ededed;
+.dark,
+[data-theme='dark'] {
+  --background: #0e1726;
+  --foreground: #edf4ff;
+  --surface: #162238;
+  --surface-subtle: #1d2e47;
+  --card: #162238;
+  --card-foreground: #edf4ff;
+  --popover: #162238;
+  --popover-foreground: #edf4ff;
 
-  --primary: #ededed; /* 极性翻转:白 CTA */
-  --primary-foreground: #171717;
-  --secondary: #1a1a1a;
-  --secondary-foreground: #ededed;
-  --muted: #1a1a1a;
-  --muted-foreground: #a1a1a1;
-  --accent: #1f1f1f;
-  --accent-foreground: #ededed;
-  --destructive: #ff4d4d;
-  --destructive-foreground: #ffffff;
-  --border: #262626;
-  --input: #2e2e2e;
-  --ring: #3291ff;
+  --primary: #69b8ff;
+  --primary-foreground: #0e1726;
+  --primary-hover: #93ccff;
+  --secondary: #1d2e47;
+  --secondary-foreground: #edf4ff;
+  --muted: #1d2e47;
+  --muted-foreground: #a8b8cf;
+  --accent: #1b3e50;
+  --accent-foreground: #9bdcf2;
+  --destructive: #ff9298;
+  --destructive-foreground: #0e1726;
+  --border: #344764;
+  --control-border: #687b94;
+  --input: #687b94;
+  --ring: #69b8ff;
 
-  --mute: #8f8f8f;
-  --hairline-strong: #5c5c5c;
-  --link: #3291ff;
-  --link-deep: #70b0ff;
-  --success: #3291ff;
-  --success-soft: #12233d;
-  --warning: #f5a623;
-  --warning-soft: #33260e;
-  --warning-deep: #f0bd5c;
-  --error-soft: #3d1f21;
-  --error-deep: #ff6369;
+  --mute: #a8b8cf;
+  --hairline-strong: #687b94;
+  --link: #69b8ff;
+  --link-deep: #93ccff;
+  --primary-text: #69b8ff;
+  --primary-soft: color-mix(in srgb, #69b8ff 15%, #162238);
+  --success: #5fd1a0;
+  --success-soft: color-mix(in srgb, #5fd1a0 15%, #162238);
+  --warning: #f7c66b;
+  --warning-soft: color-mix(in srgb, #f7c66b 15%, #162238);
+  --warning-deep: #f7c66b;
+  --error-soft: color-mix(in srgb, #ff9298 15%, #162238);
+  --error-deep: #ff9298;
 
-  --shadow-l1: 0 0 0 1px rgb(255 255 255 / 0.1);
-  --shadow-l2:
-    0 1px 1px rgb(0 0 0 / 0.4), 0 2px 2px rgb(0 0 0 / 0.4), inset 0 0 0 1px rgb(255 255 255 / 0.06);
-  --shadow-l3:
-    0 2px 2px rgb(0 0 0 / 0.4), 0 8px 8px -8px rgb(0 0 0 / 0.4),
-    inset 0 0 0 1px rgb(255 255 255 / 0.06);
-  --shadow-l4:
-    0 2px 2px rgb(0 0 0 / 0.4), 0 8px 16px -4px rgb(0 0 0 / 0.4),
-    inset 0 0 0 1px rgb(255 255 255 / 0.06);
-  --shadow-l5:
-    0 1px 1px rgb(0 0 0 / 0.4), 0 8px 16px -4px rgb(0 0 0 / 0.4), 0 24px 32px -8px rgb(0 0 0 / 0.5),
-    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --brand-navy: #203663;
+  --brand-blue: #236db9;
+  --brand-cyan: #56c0e5;
+  --brand-navy-on-dark: #8fb8dc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --motion-slow: 0ms;
+  }
 }
 
 @theme inline {
   /* ── 颜色:语义变量 → utilities ────────── */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -131,12 +167,15 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-control-border: var(--control-border);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-mute: var(--mute);
   --color-hairline-strong: var(--hairline-strong);
   --color-link: var(--link);
   --color-link-deep: var(--link-deep);
+  --color-primary-text: var(--primary-text);
+  --color-primary-soft: var(--primary-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -144,18 +183,22 @@
   --color-warning-deep: var(--warning-deep);
   --color-error-soft: var(--error-soft);
   --color-error-deep: var(--error-deep);
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-cyan: var(--brand-cyan);
+  --color-brand-navy-on-dark: var(--brand-navy-on-dark);
 
-  /* ── 字体:Geist → 系统中文回落 ────────── */
+  /* ── 字体:Inter + IDRL 官方中文回退栈 ──── */
   --font-sans:
-    var(--font-geist-sans), 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
-    'Noto Sans CJK SC', system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    Inter, 'Noto Sans CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
 
-  /* ── 圆角(DESIGN.md rounded 比例尺)────── */
-  --radius-sm: calc(var(--radius) - 4px); /* 4px */
-  --radius-md: calc(var(--radius) - 2px); /* 6px in-app 基准 */
-  --radius-lg: var(--radius); /* 8px 卡片 */
-  --radius-xl: calc(var(--radius) + 4px); /* 12px 大卡片 */
+  /* ── 圆角:控件 6 / 卡片 12 / 弹窗 16(IDRL radius)── */
+  --radius-sm: 0.25rem; /* 4px 小控件 */
+  --radius-md: 0.375rem; /* 6px 控件基准 */
+  --radius-lg: 0.75rem; /* 12px 卡片 */
+  --radius-xl: 1rem; /* 16px 弹窗 */
 
   /* ── 阴影层级(引用上方 :root / .dark 变量)── */
   --shadow-l1: var(--shadow-l1);
@@ -164,28 +207,27 @@
   --shadow-l4: var(--shadow-l4);
   --shadow-l5: var(--shadow-l5);
 
-  /* ── 排版(DESIGN.md typography,负字距是品牌声部,不可省)── */
-  --text-display-xl: 3rem; /* 48px hero */
+  /* ── 排版(IDRL type 尺度,标题 700/-0.025em)── */
+  --text-display-xl: 2.5rem; /* 40px hero/heading1 */
   --text-display-xl--line-height: 3rem;
-  --text-display-xl--letter-spacing: -2.4px;
-  --text-display-xl--font-weight: 600;
-  --text-display-lg: 2rem; /* 32px 区块标题 */
+  --text-display-xl--letter-spacing: -0.025em;
+  --text-display-xl--font-weight: 700;
+  --text-display-lg: 2rem; /* 32px 区块标题/指标 */
   --text-display-lg--line-height: 2.5rem;
-  --text-display-lg--letter-spacing: -1.28px;
-  --text-display-lg--font-weight: 600;
-  --text-display-md: 1.5rem; /* 24px 页标题 */
-  --text-display-md--line-height: 2rem;
-  --text-display-md--letter-spacing: -0.96px;
-  --text-display-md--font-weight: 600;
-  --text-display-sm: 1.25rem; /* 20px 微标题 */
+  --text-display-lg--letter-spacing: -0.025em;
+  --text-display-lg--font-weight: 700;
+  --text-display-md: 1.75rem; /* 28px 页标题/heading2 */
+  --text-display-md--line-height: 2.25rem;
+  --text-display-md--letter-spacing: -0.025em;
+  --text-display-md--font-weight: 700;
+  --text-display-sm: 1.25rem; /* 20px 微标题/heading3 */
   --text-display-sm--line-height: 1.75rem;
-  --text-display-sm--letter-spacing: -0.6px;
-  --text-display-sm--font-weight: 600;
-  --text-body-sm: 0.875rem; /* 14px 界面正文基准 */
-  --text-body-sm--line-height: 1.25rem;
-  --text-body-sm--letter-spacing: -0.28px;
-  --text-caption: 0.75rem; /* 12px 标签/表头 */
-  --text-caption--line-height: 1rem;
+  --text-display-sm--letter-spacing: -0.025em;
+  --text-display-sm--font-weight: 700;
+  --text-body-sm: 0.875rem; /* 14px 界面正文基准,工具 1.5-1.6 行距 */
+  --text-body-sm--line-height: 1.375rem;
+  --text-caption: 0.75rem; /* 12px 标签/表头/辅助文字下限 */
+  --text-caption--line-height: 1.125rem;
 }
 
 @layer base {
@@ -199,26 +241,54 @@
     @apply bg-background text-foreground font-sans antialiased;
     min-height: 100%;
     font-size: 0.875rem; /* body-sm 14px 为界面基准 */
-    line-height: 1.25rem;
-    letter-spacing: -0.28px;
+    line-height: 1.375rem;
   }
-  /* DESIGN.md selection:ink 底浅灰字 */
+  h1,
+  h2,
+  h3 {
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  /* IDRL 焦点可见性:2px focus 实线 + 3px 外延(覆盖无 ring 类的裸链接/导航) */
+  :where(a, button, [role='button'], summary):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+    border-radius: var(--radius-md);
+  }
+  /* IDRL selection:primary 底 + primary-foreground 字 */
   ::selection {
-    background: #171717;
-    color: #f2f2f2;
-  }
-  .dark ::selection {
-    background: #ededed;
-    color: #171717;
+    background: var(--primary);
+    color: var(--primary-foreground);
   }
 }
 
-/* DESIGN.md caption-mono:表头/眉题/技术标签专用 */
+/* IDRL eyebrow(沿用 caption-mono 类名以复用调用点):12px/700/.16em 眉题 */
 @utility caption-mono {
-  font-family: var(--font-mono);
   font-size: 0.75rem;
-  line-height: 1rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--mute);
+  line-height: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--muted-foreground);
+}
+
+/* ── IDRL 品牌 logo:data-theme 决定浅/深版本,禁止滤镜变白 ── */
+/* 尺寸规则须先于主题切换规则(同特异性,后者的 display:none 必须能覆盖 display:block) */
+.brand-wordmark {
+  display: block;
+  width: 124px;
+  height: auto;
+}
+.brand-symbol {
+  width: 40px;
+  height: 30px;
+  object-fit: contain;
+}
+.brand-theme-dark {
+  display: none;
+}
+[data-theme='dark'] .brand-theme-light {
+  display: none;
+}
+[data-theme='dark'] .brand-theme-dark {
+  display: block;
 }

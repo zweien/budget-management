@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
-import { KeyRound, Wallet } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 
 import { env } from '@/lib/env';
 import { getCurrentUser } from '@/lib/auth/session';
@@ -32,10 +32,23 @@ export default async function LoginPage({
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-sm space-y-6 rounded-lg border border-border bg-card p-8 shadow-l3">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Wallet className="size-5" />
-          </div>
+        <div className="flex flex-col items-center gap-5 text-center">
+          {/* 对外入口用 IDRL 双语组合字标(data-theme 驱动浅/深版本切换) */}
+          <span className="relative block h-12 w-auto">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand/logo/lockup-bilingual.svg"
+              alt="IDRL · 智能设计与鲁棒学习"
+              className="brand-theme-light h-12 w-auto"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand/logo/lockup-bilingual-reverse.svg"
+              alt=""
+              aria-hidden="true"
+              className="brand-theme-dark h-12 w-auto"
+            />
+          </span>
           <div className="space-y-1">
             <h1 className="text-display-sm">预算管理系统</h1>
             <p className="text-sm text-muted-foreground">使用单位统一身份认证(Authentik)登录</p>
@@ -58,7 +71,7 @@ export default async function LoginPage({
           </Button>
         </Suspense>
 
-        <p className="caption-mono text-center text-mute">
+        <p className="text-center text-xs text-mute">
           首次登录将自动创建本地账号(普通用户),权限由管理员分配
         </p>
       </div>

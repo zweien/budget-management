@@ -3,8 +3,8 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * DESIGN.md ex-data-table-cell:表头 caption-mono(mono 12px、mute 色),
- * 正文 body-sm,hairline 行边框,canvas-soft 表头底。
+ * IDRL 工作台表格:hairline 行分隔、surface-subtle 表头(12px/500/muted)、
+ * 14px 正文、数字列 tabular-nums(由 MoneyText 等调用点负责)。
  */
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
   return (
@@ -56,9 +56,7 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
     <tr
       data-slot="table-row"
       className={cn(
-        'border-b border-border transition-colors hover:bg-accent data-[state=selected]:bg-muted',
-        // 悬停信号以左侧 2px ink 竖条为主(色随明暗主题翻转),底色为辅。
-        'hover:shadow-[inset_2px_0_0_0_var(--foreground)]',
+        'border-b border-border transition-colors hover:bg-muted/60 data-[state=selected]:bg-muted',
         className,
       )}
       {...props}
@@ -71,7 +69,7 @@ function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
     <th
       data-slot="table-head"
       className={cn(
-        'caption-mono h-9 bg-muted/50 px-3 text-left align-middle font-normal whitespace-nowrap first:pl-4 last:pr-4',
+        'h-9 bg-muted px-3 text-left align-middle text-xs font-medium whitespace-nowrap text-muted-foreground first:pl-4 last:pr-4',
         className,
       )}
       {...props}

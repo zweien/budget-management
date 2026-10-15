@@ -88,9 +88,9 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
                 href={href}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'relative -mb-px inline-flex items-center border-b-2 px-3 py-2 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                  'relative -mb-px inline-flex items-center border-b-[3px] px-2.5 py-2 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                   active
-                    ? 'border-primary font-medium text-foreground'
+                    ? 'border-primary font-bold text-primary'
                     : 'border-transparent text-muted-foreground hover:text-foreground',
                 )}
               >
