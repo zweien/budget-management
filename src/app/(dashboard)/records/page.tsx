@@ -591,7 +591,7 @@ function UnifiedRecordsPageInner() {
             href={`/projects/${row.original.projectId}/records`}
             className="text-link underline-offset-4 hover:underline"
           >
-            <span className="block max-w-full truncate">
+            <span className="line-clamp-2">
               {projectName.get(row.original.projectId) ?? row.original.projectId.slice(0, 8)}
             </span>
           </Link>
