@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { ClipboardPlus, Download, Funnel, History, Paperclip } from 'lucide-react';
+import { ClipboardPlus, Download, Funnel, History, Paperclip, Upload } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -1048,6 +1048,16 @@ function UnifiedRecordsPageInner() {
         title="业务录入"
         description="跨项目统一录入与维护业务记录;可录入范围由项目成员身份决定(负责人/录入成员)。"
       />
+
+      {/* 统一导入入口:财务结算单(2025 导出,可含多项目) */}
+      <div className="flex justify-end">
+        <Link href="/records/import">
+          <Button variant="outline">
+            <Upload />
+            导入财务结算单
+          </Button>
+        </Link>
+      </div>
 
       {/* ===== 录入卡片 ===== */}
       <Card>

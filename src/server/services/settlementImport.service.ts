@@ -4,7 +4,7 @@ import { BusinessStatus, Prisma, User } from '@prisma/client';
 import { BULK_TX_OPTIONS, prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
 import { env } from '@/lib/env';
-import { requirePermission } from '@/lib/auth/permissions';
+import { denyApiKeyCrossProject, requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { toStored, fromStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
@@ -272,14 +272,14 @@ export async function parseSettlement(
       if (s) headerCells.add(s);
     });
     if (SETTLEMENT_V3_MARKERS.every((m) => headerCells.has(m))) {
-      return parseSettlementV3({
+      const { batchId } = await parseSettlementV3({
         sheet: headerSheet,
         headerRowNo,
         projectId,
-        projectName: project.name,
         user,
         fileName,
       });
+      return batchId;
     }
   }
 
@@ -639,15 +639,16 @@ async function parseSettlementV3(opts: {
   sheet: ExcelJS.Worksheet;
   headerRowNo: number;
   projectId: string;
-  projectName: string;
   user: Pick<User, 'id' | 'role'> & {
     viaApiKey?: boolean;
     keyProjectScope?: string;
     keyProjectIds?: string[];
   };
   fileName: string;
-}): Promise<string> {
-  const { sheet, headerRowNo, projectId, projectName, user, fileName } = opts;
+  /** 统一入口:强制批次承载项目(缺省回退上传项目上下文)。 */
+  batchProjectId?: string;
+}): Promise<{ batchId: string; batchProjectId: string }> {
+  const { sheet, headerRowNo, projectId, user, fileName } = opts;
 
   const colIndex = new Map<string, number>();
   sheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell, colNumber) => {
@@ -988,12 +989,14 @@ async function parseSettlementV3(opts: {
   }
 
   // ---- 落库 ----
+  // 批次承载项目:统一入口的强制承载 > 上传项目上下文(容器语义,行入账按行级映射)。
+  const batchProjectId = opts.batchProjectId ?? projectId;
   const batchId = uuidv7();
   await prisma.$transaction(async (tx) => {
     await tx.importBatch.create({
       data: {
         id: batchId,
-        projectId,
+        projectId: batchProjectId,
         fileName,
         templateVersion: SETTLEMENT_V3_TEMPLATE_VERSION,
         status: 'pending',
@@ -1015,7 +1018,196 @@ async function parseSettlementV3(opts: {
     });
   }, BULK_TX_OPTIONS);
 
-  return batchId;
+  return { batchId, batchProjectId };
+}
+
+/**
+ * 统一导入入口(v3 财务结算单):不依赖项目上下文解析文件。
+ * - 批次承载项目 = hostProjectId(显式指定) > 自动预映射的第一个目标项目;
+ *   两者皆无 → 422 needsHost(调用方让用户选择承载项目后携 hostProjectId 重传)。
+ * - 仅接受 v3 版式;v1/v2/标准模板请在项目内导入。
+ * - 承载项目显式指定时要求 record:import(自动命中目标项目不在此校验,
+ *   映射暂存与确认会逐目标项目复核)。
+ */
+export async function parseSettlementUnified(
+  fileBuffer: ArrayBuffer | Buffer,
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
+  fileName = 'upload.xlsx',
+  hostProjectId?: string,
+): Promise<{
+  batchId: string | null;
+  batchProjectId: string | null;
+  needsHost: boolean;
+  mappableProjects?: Array<{ id: string; name: string }>;
+}> {
+  // selected 项目范围凭证:跨项目/无项目上下文接口一律 403(审计后拒绝,codex P1)。
+  await denyApiKeyCrossProject(user, 'record:import');
+
+  const { workbook, isSettlement } = await loadWorkbookWithFormatDetection(fileBuffer);
+  if (!isSettlement) {
+    throw new HTTPError(422, '仅支持财务结算单(2025 导出)格式;系统模板/个人结算单请在项目内导入');
+  }
+
+  // v3 版式判定(与项目内入口同一规则)。
+  let headerRowNo = 0;
+  let headerSheet: ExcelJS.Worksheet | null = null;
+  const headerCells = new Set<string>();
+  outer: for (const sheet of workbook.worksheets) {
+    for (let r = 1; r <= Math.min(sheet.rowCount, SETTLEMENT_HEADER_SCAN_ROWS); r++) {
+      const row = sheet.getRow(r);
+      const found = new Set<string>();
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const s = cellToString(cell);
+        if (s) found.add(s);
+      });
+      if (found.has(SETTLEMENT_HEADERS.docNo) && found.has(SETTLEMENT_HEADERS.docStatus)) {
+        headerRowNo = r;
+        headerSheet = sheet;
+        headerCells.clear();
+        found.forEach((v) => headerCells.add(v));
+        break outer;
+      }
+    }
+  }
+  if (headerRowNo === 0 || !headerSheet) {
+    throw new HTTPError(422, '未找到结算单表头(需包含 单据编号/单据状态)');
+  }
+  const isV3 = SETTLEMENT_V3_MARKERS.every((m) => headerCells.has(m));
+  if (!isV3) {
+    throw new HTTPError(422, '仅支持财务结算单(2025 导出)格式;个人结算单查询请在项目内导入');
+  }
+
+  // 显式承载项目:须存在、未归档、可导入。
+  if (hostProjectId) {
+    const host = await prisma.project.findUnique({
+      where: { id: hostProjectId },
+      select: { archivedAt: true },
+    });
+    if (!host) throw new HTTPError(404, '承载项目不存在');
+    if (host.archivedAt) throw new HTTPError(422, '承载项目已归档,数据只读');
+    await requirePermission(user, 'record:import', hostProjectId);
+  }
+
+  // 先探测自动预映射(轻量:解析前只读科研列 + 候选匹配)——无命中且未显式指定 → needsHost。
+  // 实现为「解析后落库前判定」:解析本身只读,无副作用,直接复用 v3 解析并捕获无主结果。
+  if (!hostProjectId) {
+    const probe = await probeV3FirstTarget(headerSheet, headerRowNo, user);
+    if (!probe) {
+      // 显式空批次结果 + needsHost 标记:调用方让用户选择承载项目后携 hostProjectId 重传。
+      return {
+        batchId: null,
+        batchProjectId: null,
+        needsHost: true,
+        mappableProjects: await importableProjectsFor(user),
+      };
+    }
+    // 自动命中也要过 record:import(codex P1:只读凭证不得借自动映射创建批次)。
+    await requirePermission(user, 'record:import', probe);
+    hostProjectId = probe;
+  }
+
+  const { batchId, batchProjectId } = await parseSettlementV3({
+    sheet: headerSheet,
+    headerRowNo,
+    projectId: hostProjectId,
+    user,
+    fileName,
+    batchProjectId: hostProjectId,
+  });
+  return { batchId, batchProjectId, needsHost: false, mappableProjects: undefined };
+}
+
+/** 探测 v3 文件的自动预映射第一个目标项目;无命中返回 null(不落任何数据)。 */
+async function probeV3FirstTarget(
+  sheet: ExcelJS.Worksheet,
+  headerRowNo: number,
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
+): Promise<string | null> {
+  const colIndex = new Map<string, number>();
+  sheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell, colNumber) => {
+    const s = cellToString(cell);
+    if (s) colIndex.set(s, colNumber);
+  });
+  const nameCol = colIndex.get(SETTLEMENT_HEADERS_V3.projectName);
+  if (!nameCol) return null;
+  const names = new Set<string>();
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber <= headerRowNo) return;
+    const idx = colIndex.get(SETTLEMENT_HEADERS_V3.projectName);
+    const v = idx ? cellToString(row.getCell(idx)) : null;
+    if (v && v.trim()) names.add(v.trim());
+  });
+  const candidates = await importableProjectsFor(user);
+  for (const name of names) {
+    const stripped = stripProjectPrefix(name);
+    const hits = candidates.filter((c) => stripped.includes(c.name));
+    if (hits.length === 1) return hits[0].id;
+  }
+  return null;
+}
+
+/**
+ * 我的结算单批次(统一导入入口「进行中批次」列表):
+ * 当前用户创建的 settlement 批次(含已确认,便于核对),最近 20 条。
+ * - 权限:仅本人批次(creatorId=当前用户),无需项目上下文。
+ */
+export async function listMySettlementBatches(
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
+): Promise<
+  Array<{
+    batchId: string;
+    hostProjectId: string;
+    hostProjectName: string;
+    fileName: string;
+    templateVersion: string;
+    status: string;
+    createdAt: string;
+    rowCount: number;
+  }>
+> {
+  // selected 项目范围凭证:无项目上下文的聚合列表一律 403(审计后拒绝,codex P1)。
+  await denyApiKeyCrossProject(user, 'record:import');
+
+  const batches = await prisma.importBatch.findMany({
+    where: {
+      creatorId: user.id,
+      templateVersion: { in: [SETTLEMENT_TEMPLATE_VERSION, SETTLEMENT_V3_TEMPLATE_VERSION] },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: {
+      id: true,
+      projectId: true,
+      fileName: true,
+      templateVersion: true,
+      status: true,
+      createdAt: true,
+      _count: { select: { rows: true } },
+      project: { select: { name: true } },
+    },
+  });
+  return batches.map((b) => ({
+    batchId: b.id,
+    hostProjectId: b.projectId,
+    hostProjectName: b.project.name,
+    fileName: b.fileName,
+    templateVersion: b.templateVersion,
+    status: b.status,
+    createdAt: b.createdAt.toISOString(),
+    rowCount: b._count.rows,
+  }));
 }
 
 // ---------- 预览 / 暂存 / 确认 ----------
