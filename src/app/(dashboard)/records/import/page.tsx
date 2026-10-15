@@ -6,7 +6,7 @@ import { format } from 'date-fns';
 import { Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { apiFetch } from '@/lib/api/client';
+import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -114,29 +114,39 @@ export default function UnifiedImportPage() {
       setUploading(true);
       setNeedsHost(false);
       try {
+        // FormData 上传走原生 fetch:apiFetch 会强设 application/json,
+        // 覆盖 multipart 边界导致服务端 formData() 解析失败(与项目内导入页同款处理)。
+        const mockUserId = await bootstrapMockUser();
         const form = new FormData();
         form.append('file', file);
         if (host) form.append('hostProjectId', host);
-        const res = await apiFetch<{
-          batchId: string | null;
-          batchProjectId: string | null;
-          needsHost: boolean;
-          mappableProjects?: MappableProject[];
-        }>('/api/imports/settlement', {
+        const res = await fetch('/api/imports/settlement', {
           method: 'POST',
+          headers: mockUserId ? { 'x-mock-user-id': mockUserId } : {},
           body: form,
         });
-        if (res.needsHost) {
+        const isJson = (res.headers.get('Content-Type') ?? '').includes('application/json');
+        const payload = (isJson ? await res.json().catch(() => null) : null) as {
+          batchId?: string | null;
+          batchProjectId?: string | null;
+          needsHost?: boolean;
+          mappableProjects?: MappableProject[];
+          error?: string;
+        } | null;
+        if (!res.ok) {
+          throw new Error(payload?.error ?? `上传失败(${res.status})`);
+        }
+        if (payload?.needsHost) {
           // 未命中自动预映射:展示承载项目选择后重传。
           setNeedsHost(true);
           setPendingFile(file);
-          setMappableProjects(res.mappableProjects ?? []);
+          setMappableProjects(payload.mappableProjects ?? []);
           toast.info('未能自动识别目标项目,请选择承载项目后重试');
           return;
         }
         toast.success('解析完成,请核对项目映射与科目');
         await loadMine();
-        await openPreview(res.batchId!, res.batchProjectId!);
+        await openPreview(payload!.batchId!, payload!.batchProjectId!);
       } catch (e) {
         if (e instanceof Error) toast.error(e.message);
       } finally {
