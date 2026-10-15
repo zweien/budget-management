@@ -435,6 +435,141 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     expect(recB).not.toBeNull();
   });
 
+  it('v3:同号跨项目拆组/各目标叶科目清单/整组无日期报错/Key 范围过滤候选', async () => {
+    const projectBName = '另一个科研项目B';
+    const projectB = await createProject(
+      {
+        code: `V3-${uuidv7().slice(0, 8)}-${Math.random().toString(36).slice(2, 6)}`,
+        name: projectBName,
+      },
+      adminUser(),
+    );
+    projectIdB = projectB.id;
+    createdProjectIds.push(projectB.id);
+    const rootB = uuidv7();
+    await prisma.budgetSubject.create({
+      data: {
+        id: rootB,
+        projectId: projectB.id,
+        code: 'ROOT',
+        name: '直接费用',
+        level: 1,
+        isLeaf: false,
+      },
+    });
+    await prisma.budgetSubject.create({
+      data: {
+        id: uuidv7(),
+        projectId: projectB.id,
+        parentId: rootB,
+        code: 'B1',
+        name: '专家咨询费',
+        level: 2,
+        isLeaf: true,
+      },
+    });
+    // 1) 同单据编号出现在两个科研项目名称下 → 分组按 项目+单据 拆分,各自入账。
+    const buf2 = await buildV3Xlsx([
+      {
+        docNo: 'TYBX-SHARED-1',
+        applyDate: '2025-09-01',
+        amount: 500,
+        handler: '甲',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+        remark: 'A 侧明细',
+        projectName: '其他专项科学技术费/图谱驱动测试专属项目甲',
+      },
+      {
+        docNo: 'TYBX-SHARED-1',
+        applyDate: '2025-09-02',
+        amount: 700,
+        handler: '乙',
+        detailPath: '直接费用/专家咨询费',
+        remark: 'B 侧明细',
+        projectName: `其他专项科学技术费/${projectBName}`,
+      },
+    ]);
+    const wb2 = await loadSettlementWorkbookIfMatch(buf2);
+    const batchId2 = await parseSettlement(wb2!, projectId, adminUser(), 'shared.xlsx');
+    let preview2 = await getSettlementBatch(batchId2, adminUser());
+
+    // 名称B 与任何项目都无名称关联 → 未映射留人工(同号行也不会与名称A 合并)。
+    const rowB0 = preview2.errors.find((r) => r.parsedData.docNo === 'TYBX-SHARED-1')!;
+    expect(rowB0.errors.some((e) => e.message.includes('未映射项目'))).toBe(true);
+    const rowA = preview2.pending.find(
+      (r) => r.parsedData.docNo === 'TYBX-SHARED-1' && r.parsedData.amount === '500.00',
+    )!;
+    expect(rowA.parsedData.targetProjectId).toBe(projectId);
+
+    // 人工映射:名称B → projectB(重算科目预选 + 按目标查重)。
+    await updateSettlementRows(
+      batchId2,
+      [{ rowId: rowB0.rowId, targetProjectId: projectB.id }],
+      adminUser(),
+    );
+    preview2 = await getSettlementBatch(batchId2, adminUser());
+    const sharedRows = preview2.pending.filter((r) => r.parsedData.docNo === 'TYBX-SHARED-1');
+    expect(sharedRows).toHaveLength(2);
+    const sharedA = sharedRows.find((r) => r.parsedData.targetProjectId === projectId)!;
+    const sharedB = sharedRows.find((r) => r.parsedData.targetProjectId === projectB.id)!;
+    expect(sharedA.parsedData.amount).toBe('500.00');
+    expect(sharedB.parsedData.amount).toBe('700.00');
+    // 各目标项目的叶科目清单(行级下拉按行目标取用)。
+    expect(preview2.leafSubjectsByProject?.[projectId]?.some((s) => s.name === '差旅费')).toBe(
+      true,
+    );
+    expect(
+      preview2.leafSubjectsByProject?.[projectB.id]?.some((s) => s.name === '专家咨询费'),
+    ).toBe(true);
+    const result2 = await confirmSettlementImport(batchId2, [sharedA.rowId, sharedB.rowId], {
+      id: adminId,
+      role: UserRole.ADMIN,
+    });
+    expect(result2.created).toBe(2);
+    expect(
+      (await prisma.businessRecord.findFirst({
+        where: { projectId, docNo: 'TYBX-SHARED-1' },
+      }))!.amount.toFixed(2),
+    ).toBe('500.00');
+    expect(
+      (await prisma.businessRecord.findFirst({
+        where: { projectId: projectB.id, docNo: 'TYBX-SHARED-1' },
+      }))!.amount.toFixed(2),
+    ).toBe('700.00');
+
+    // 2) 整组无申请日期 → 预览期即 error(而不是拖到确认期整体失败)。
+    const buf3 = await buildV3Xlsx([
+      {
+        docNo: 'TYBX-NODATE',
+        amount: 10,
+        handler: '丁',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+        remark: '无日期行',
+        projectName: '其他专项科学技术费/图谱驱动测试专属项目甲',
+      },
+    ]);
+    const wb3 = await loadSettlementWorkbookIfMatch(buf3);
+    const batchId3 = await parseSettlement(wb3!, projectId, adminUser(), 'nodate.xlsx');
+    const preview3 = await getSettlementBatch(batchId3, adminUser());
+    const errRow = preview3.errors.find((r) => r.parsedData.docNo === 'TYBX-NODATE');
+    expect(errRow).toBeTruthy();
+    expect(errRow!.errors.some((e) => e.message.includes('申请日期不能为空'))).toBe(true);
+
+    // 3) 机器凭证 selected 项目范围:映射候选仅含允许清单内的项目(codex P2)。
+    const scopedUser = {
+      id: adminId,
+      role: UserRole.ADMIN,
+      viaApiKey: true,
+      keyProjectScope: 'selected',
+      keyProjectIds: [projectId],
+    };
+    const scopedBatch = await parseSettlement(wb3!, projectId, scopedUser, 'scoped.xlsx');
+    const scopedPreview = await getSettlementBatch(scopedBatch, scopedUser);
+    const names = scopedPreview.mappableProjects.map((p) => p.name);
+    expect(names).toContain('图谱驱动测试专属项目甲');
+    expect(names).not.toContain(projectBName);
+  });
+
   it('v3 多项目权限:映射无导入权限的目标项目 → 403', async () => {
     // 普通用户:是本项目 HANDLER(可导入本项目),但不是项目 B 成员。
     const userId = uuidv7();

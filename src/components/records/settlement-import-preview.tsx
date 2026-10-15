@@ -91,6 +91,7 @@ export interface SettlementBatchData {
   projectName?: string | null;
   projectMappings?: Array<{ fileProjectName: string; targetProjectId: string | null }>;
   mappableProjects?: Array<{ id: string; name: string }>;
+  leafSubjectsByProject?: Record<string, Array<{ id: string; code: string; name: string }>>;
   leafSubjects: Array<{ id: string; code: string; name: string }>;
 }
 
@@ -150,6 +151,11 @@ export function SettlementImportPreview({
   const projectMappings = data.projectMappings ?? [];
   const mappableProjects = data.mappableProjects ?? [];
   const [remapping, setRemapping] = useState(false);
+  // v3 勾选行跨多个目标项目时,批量设置科目不可用(科目须属于各自目标项目)。
+  const multiTargetV3 =
+    isV3 &&
+    new Set([...data.pending, ...data.duplicates].map((r) => r.parsedData.targetProjectId ?? ''))
+      .size > 1;
 
   const subjectOptions = useMemo(() => {
     const nameCount = new Map<string, number>();
@@ -161,8 +167,21 @@ export function SettlementImportPreview({
     }));
   }, [data.leafSubjects]);
 
-  const subjectName = (id: string | null) =>
-    id ? (subjectOptions.find((o) => o.value === id)?.label ?? null) : null;
+  /** 行级科目选项:v3 按行目标项目的叶科目;其余回退上传项目清单。 */
+  const subjectOptionsFor = (r: SettlementRow) => {
+    const t = r.parsedData.targetProjectId;
+    const list =
+      (t && data.leafSubjectsByProject?.[t]?.length
+        ? data.leafSubjectsByProject[t]
+        : data.leafSubjects) ?? [];
+    const nameCount = new Map<string, number>();
+    list.forEach((s) => nameCount.set(s.name, (nameCount.get(s.name) ?? 0) + 1));
+    return list.map((s) => ({
+      value: s.id,
+      label: (nameCount.get(s.name) ?? 0) > 1 ? `${s.name}(${s.code})` : s.name,
+      keywords: s.code,
+    }));
+  };
 
   /** 暂存 PATCH(串行排队,避免乱序覆盖);本地状态先行乐观更新。 */
   const patchRows = (updates: RowUpdate[]) => {
@@ -198,10 +217,10 @@ export function SettlementImportPreview({
     });
   };
 
-  const handleSubjectChange = (rowId: string, subjectId: string) => {
-    const name = subjectName(subjectId);
-    applyLocal(rowId, { subjectId, subjectName: name });
-    patchRows([{ rowId, subjectId }]);
+  const handleSubjectChange = (row: SettlementRow, subjectId: string) => {
+    const name = subjectOptionsFor(row).find((o) => o.value === subjectId)?.label ?? null;
+    applyLocal(row.rowId, { subjectId, subjectName: name });
+    patchRows([{ rowId: row.rowId, subjectId }]);
   };
 
   /** 项目映射(v3):对同名科研项目名称的全部行设置目标项目,服务端重算后重拉预览。 */
@@ -300,9 +319,11 @@ export function SettlementImportPreview({
   const handleBatchAssign = () => {
     if (!batchSubjectId) return;
     const targets = importable.filter((r) => selected.has(r.rowId));
-    targets.forEach((r) =>
-      applyLocal(r.rowId, { subjectId: batchSubjectId, subjectName: subjectName(batchSubjectId) }),
-    );
+    // 科目名按行目标解析(v3 不同行可能属于不同目标项目)。
+    targets.forEach((r) => {
+      const name = subjectOptionsFor(r).find((o) => o.value === batchSubjectId)?.label ?? null;
+      applyLocal(r.rowId, { subjectId: batchSubjectId, subjectName: name });
+    });
     patchRows(targets.map((r) => ({ rowId: r.rowId, subjectId: batchSubjectId })));
     toast.success(`已为 ${targets.length} 行指定科目(已暂存)`);
     setBatchSubjectId(null);
@@ -433,9 +454,9 @@ export function SettlementImportPreview({
             (r.parsedData.subjectName ?? <span className="text-mute">未指定</span>)
           ) : (
             <Combobox
-              options={subjectOptions}
+              options={subjectOptionsFor(r)}
               value={r.parsedData.subjectId ?? undefined}
-              onChange={(v) => handleSubjectChange(r.rowId, v)}
+              onChange={(v) => handleSubjectChange(r, v)}
               placeholder={r.parsedData.subjectId ? undefined : '选择科目…'}
               searchPlaceholder="搜索科目…"
               className="h-7 w-40 text-xs"
@@ -629,7 +650,8 @@ export function SettlementImportPreview({
             <Button
               variant="outline"
               size="sm"
-              disabled={selected.size === 0}
+              disabled={selected.size === 0 || multiTargetV3}
+              title={multiTargetV3 ? '勾选行属于不同项目,请按行指定科目' : undefined}
               onClick={() => setBatchDialogOpen(true)}
             >
               批量设置科目({selected.size} 行)

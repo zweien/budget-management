@@ -130,6 +130,8 @@ export interface SettlementBatchPreview {
   skippedReasons: Record<string, number>;
   /** 项目名称。 */
   projectName: string | null;
+  /** v3:各目标项目的叶科目(行级科目下拉按行目标项目取用;缺省回退 leafSubjects)。 */
+  leafSubjectsByProject?: Record<string, Array<{ id: string; code: string; name: string }>>;
   /** 项目映射(v3):文件中每个 distinct 科研项目名称 → 当前映射的目标项目(未映射 null)。 */
   projectMappings: Array<{ fileProjectName: string; targetProjectId: string | null }>;
   /** 映射候选:当前用户有 record:import 的项目(ADMIN 全部;USER 为 OWNER/HANDLER 成员项目)。 */
@@ -530,28 +532,42 @@ export async function parseSettlement(
   return batchId;
 }
 
-/** 上传者可导入(record:import)的项目候选:ADMIN=全部未归档;USER=OWNER/HANDLER 成员项目(未归档)。 */
+/**
+ * 上传者可导入(record:import)的项目候选:ADMIN=全部未归档;USER=OWNER/HANDLER 成员项目(未归档)。
+ * 机器凭证(codex P2):selected 项目范围的 Key 只返回允许清单内的项目(与项目列表口径一致)。
+ */
 async function importableProjectsFor(
-  user: Pick<User, 'id' | 'role'>,
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
 ): Promise<Array<{ id: string; name: string }>> {
+  let list: Array<{ id: string; name: string }>;
   if (user.role === 'ADMIN') {
-    return prisma.project.findMany({
+    list = await prisma.project.findMany({
       where: { archivedAt: null },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
+  } else {
+    const memberships = await prisma.projectMember.findMany({
+      where: {
+        userId: user.id,
+        memberRole: { in: ['OWNER', 'HANDLER'] },
+        project: { archivedAt: null },
+      },
+      select: { project: { select: { id: true, name: true } } },
+    });
+    list = memberships
+      .map((m) => m.project)
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
   }
-  const memberships = await prisma.projectMember.findMany({
-    where: {
-      userId: user.id,
-      memberRole: { in: ['OWNER', 'HANDLER'] },
-      project: { archivedAt: null },
-    },
-    select: { project: { select: { id: true, name: true } } },
-  });
-  return memberships
-    .map((m) => m.project)
-    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+  if (user.viaApiKey && (user.keyProjectScope ?? 'all') === 'selected') {
+    const allow = new Set(user.keyProjectIds ?? []);
+    list = list.filter((p) => allow.has(p.id));
+  }
+  return list;
 }
 
 /** 「科研项目名称」去财务口径前缀(首个「/」之前)后的可比对名称。 */
@@ -624,7 +640,11 @@ async function parseSettlementV3(opts: {
   headerRowNo: number;
   projectId: string;
   projectName: string;
-  user: Pick<User, 'id' | 'role'>;
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  };
   fileName: string;
 }): Promise<string> {
   const { sheet, headerRowNo, projectId, projectName, user, fileName } = opts;
@@ -730,11 +750,12 @@ async function parseSettlementV3(opts: {
     });
   }
 
-  // 按单据编号分组;空编号行各自成组(退回指纹查重)。Map 保持首次出现顺序。
+  // 按单据编号+科研项目名称分组(codex P1:同一单据可能拆到不同项目,
+  // 跨项目的同号行不得合并,金额须按各自项目分别结算);空编号行各自成组。
   const groups = new Map<string, V3RawRow[]>();
   for (const r of rawRows) {
     if (r.statusLabel === SETTLEMENT_SKIPPED_STATUS) continue;
-    const key = r.docNo || `__row_${r.rowNo}`;
+    const key = `${r.docNo || `__row_${r.rowNo}`}__${r.projectFileName}`;
     const g = groups.get(key);
     if (g) g.push(r);
     else groups.set(key, [r]);
@@ -837,6 +858,9 @@ async function parseSettlementV3(opts: {
     }
     if (applyParsed.length > 0) {
       businessDate = [...applyParsed].sort().pop()!;
+    } else if (!errors.some((e) => e.field === 'fillDate')) {
+      // 整组无申请日期:不标 error 的话确认期才失败且预览无法修复(codex P2)。
+      errors.push({ field: 'fillDate', message: '申请日期不能为空' });
     }
     let completedDate: string | null = null;
     const completeParsed: string[] = [];
@@ -1003,7 +1027,11 @@ async function parseSettlementV3(opts: {
  */
 export async function getSettlementBatch(
   batchId: string,
-  user: Pick<User, 'id' | 'role'>,
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
 ): Promise<SettlementBatchPreview> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
@@ -1076,10 +1104,29 @@ export async function getSettlementBatch(
 
   // 项目映射(v3):按行数据归纳 distinct 科研项目名称(顺序=行序)。
   const projectMappings = new Map<string, string | null>();
+  const rowTargets = new Set<string>([batch.projectId]);
   for (const r of [...pending, ...duplicates, ...errors]) {
-    const n = (r.parsedData as SettlementParsedRow).fileProjectName;
-    if (!n || projectMappings.has(n)) continue;
-    projectMappings.set(n, (r.parsedData as SettlementParsedRow).targetProjectId ?? null);
+    const d = r.parsedData as SettlementParsedRow;
+    if (d.fileProjectName && !projectMappings.has(d.fileProjectName)) {
+      projectMappings.set(d.fileProjectName, d.targetProjectId ?? null);
+    }
+    if (d.targetProjectId) rowTargets.add(d.targetProjectId);
+  }
+  // v3:各目标项目的叶科目(行级下拉按行目标取用;v1/v2 仅批次项目)。
+  const leafSubjectsByProject: Record<
+    string,
+    Array<{ id: string; code: string; name: string }>
+  > = {};
+  if (batch.templateVersion === SETTLEMENT_V3_TEMPLATE_VERSION) {
+    await Promise.all(
+      [...rowTargets].map(async (pid) => {
+        leafSubjectsByProject[pid] = await prisma.budgetSubject.findMany({
+          where: { projectId: pid, isLeaf: true },
+          select: { id: true, code: true, name: true },
+          orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+        });
+      }),
+    );
   }
 
   return {
@@ -1094,6 +1141,7 @@ export async function getSettlementBatch(
     mappableProjects: isSettlementTemplateVersion(batch.templateVersion)
       ? await importableProjectsFor(user)
       : [],
+    leafSubjectsByProject,
     templateVersion: batch.templateVersion,
     status: batch.status,
     createdAt: batch.createdAt.toISOString(),
