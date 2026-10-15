@@ -1521,6 +1521,7 @@ function UnifiedRecordsPageInner() {
                           onChange={field.onChange}
                           searchPlaceholder="搜索科目…"
                           emptyText="无叶科目"
+                          wrapSelected // 长科目名两行展示(编辑弹窗字段不全的延伸)
                         />
                         <FormMessage />
                       </FormItem>

@@ -30,6 +30,8 @@ interface ComboboxProps {
   emptyText?: string;
   disabled?: boolean;
   className?: string;
+  /** 选中值允许换行展示(最多两行);缺省单行截断。长名称科目等场景使用。 */
+  wrapSelected?: boolean;
   /** 未选择时是否允许清除(显示清除项)。 */
   clearable?: boolean;
 }
@@ -48,6 +50,8 @@ export function Combobox({
   disabled,
   className,
   clearable,
+  /** 选中值允许换行展示(最多两行);缺省单行截断。长名称科目等场景使用。 */
+  wrapSelected,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const selected = options.find((o) => o.value === value);
@@ -61,9 +65,16 @@ export function Combobox({
           aria-expanded={open}
           aria-label={selected?.label ?? placeholder}
           disabled={disabled}
-          className={cn('justify-between font-normal', !selected && 'text-mute', className)}
+          className={cn(
+            'justify-between font-normal',
+            !selected && 'text-mute',
+            wrapSelected && 'h-auto whitespace-normal py-1.5',
+            className,
+          )}
         >
-          <span className="truncate">{selected?.label ?? placeholder}</span>
+          <span className={wrapSelected ? 'whitespace-normal text-left line-clamp-2' : 'truncate'}>
+            {selected?.label ?? placeholder}
+          </span>
           <ChevronsUpDown className="shrink-0 text-mute" />
         </Button>
       </PopoverTrigger>
