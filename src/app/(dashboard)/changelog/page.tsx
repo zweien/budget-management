@@ -1,8 +1,6 @@
 import * as React from 'react';
 
 import { getChangelog } from '@/lib/changelog';
-import { PageHeader } from '@/components/layout/page-header';
-import { Badge } from '@/components/ui/badge';
 
 /** 条目内的最小行内标记:`code`、**bold**、[text](url)。服务端渲染,不注入原始 HTML。 */
 function InlineMd({ text }: { text: string }) {
@@ -60,39 +58,46 @@ function InlineMd({ text }: { text: string }) {
 
 /**
  * 更新日志:渲染仓库根 CHANGELOG.md(Keep a Changelog)。
+ * 布局移植 IDRL release 模板:左版本元信息、右变更内容,分类用 12% 品牌蓝药丸。
  * 单一数据源在 git 中,版本发布流程见 AGENTS.md。
  */
 export default async function ChangelogPage() {
   const releases = await getChangelog();
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        eyebrow="CHANGELOG"
-        title="更新日志"
-        description="版本历史与变更摘要。遵循 Keep a Changelog 与语义化版本。"
-      />
+    <div className="mx-auto max-w-[1040px]">
+      <div className="border-b border-border pb-8">
+        <h1 className="text-display-lg">更新日志</h1>
+        <p className="mt-3 max-w-[680px] leading-7 text-muted-foreground">
+          版本历史与变更摘要。遵循 Keep a Changelog 与语义化版本。
+        </p>
+      </div>
 
       {releases.length === 0 ? (
-        <p className="text-sm text-muted-foreground">暂无更新记录。</p>
+        <p className="py-9 text-sm text-muted-foreground">暂无更新记录。</p>
       ) : (
-        <ol className="space-y-4">
-          {releases.map((release, ri) => (
+        <ol>
+          {releases.map((release) => (
             <li
               key={release.version}
-              className="rounded-lg border border-border bg-card p-5 shadow-l2"
+              className="grid gap-5 border-b border-border py-7 max-lg:grid-cols-1 lg:grid-cols-[170px_minmax(0,1fr)] lg:gap-8 lg:py-9"
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={ri === 0 ? 'default' : 'outline'} className="font-mono">
-                  v{release.version}
-                </Badge>
-                <span className="caption-mono text-mute">{release.date}</span>
+              <div>
+                <h2 className="text-[23px] leading-[1.4] font-bold">v{release.version}</h2>
+                <time className="mt-2.5 block text-[13px] text-muted-foreground">
+                  {release.date}
+                </time>
               </div>
-              <div className="mt-4 space-y-4">
+              <div>
                 {release.sections.map((section) => (
-                  <section key={section.title}>
-                    <h2 className="text-sm font-medium">{section.title}</h2>
-                    <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm text-muted-foreground marker:text-mute">
+                  <section
+                    key={section.title}
+                    className="grid grid-cols-[58px_minmax(0,1fr)] items-start gap-3 py-1.5"
+                  >
+                    <span className="rounded bg-[color-mix(in_srgb,var(--primary)_12%,var(--surface))] px-2 py-[3px] text-center text-xs text-primary-text">
+                      {section.title}
+                    </span>
+                    <ul className="space-y-3 text-sm leading-7 text-muted-foreground">
                       {section.items.map((item, ii) => (
                         <li key={ii}>
                           <InlineMd text={item} />

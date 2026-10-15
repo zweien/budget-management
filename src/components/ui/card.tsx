@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-/** DESIGN.md card-marketing:canvas 面 + 8px 圆角 + L2 stacked shadow。 */
+/** IDRL panel:surface 面 + 1px 分隔线 + 12px 圆角,靠边框而非投影分层(shadow-l2 已定义为无)。 */
 function Card({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
@@ -30,7 +30,7 @@ function CardTitle({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="card-title"
-      className={cn('text-base leading-6 font-semibold tracking-[-0.3px]', className)}
+      className={cn('text-base leading-6 font-bold tracking-[-0.025em]', className)}
       {...props}
     />
   );

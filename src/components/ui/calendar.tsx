@@ -47,8 +47,8 @@ function Calendar({
         week: 'mt-1 flex',
         day: cn(
           'relative size-8 p-0 text-center text-sm focus-within:relative focus-within:z-20',
-          '[&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md',
-          '[&:has([aria-selected].day-outside)]:bg-accent/50',
+          '[&:has([aria-selected])]:bg-muted first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md',
+          '[&:has([aria-selected].day-outside)]:bg-muted/50',
           '[&:has([aria-selected].day-range-end)]:rounded-r-md',
         ),
         day_button: cn(
@@ -59,11 +59,11 @@ function Calendar({
         range_end: 'day-range-end rounded-r-md',
         selected:
           'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground',
-        today: 'bg-accent text-accent-foreground',
+        today: 'bg-muted text-foreground',
         outside:
-          'day-outside text-mute opacity-50 aria-selected:bg-accent/50 aria-selected:text-mute aria-selected:opacity-40',
+          'day-outside text-mute opacity-50 aria-selected:bg-muted/50 aria-selected:text-mute aria-selected:opacity-40',
         disabled: 'text-mute opacity-50',
-        range_middle: 'aria-selected:bg-accent aria-selected:text-accent-foreground',
+        range_middle: 'aria-selected:bg-muted aria-selected:text-foreground',
         hidden: 'invisible',
         ...classNames,
       }}

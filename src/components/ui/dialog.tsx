@@ -38,7 +38,7 @@ function DialogOverlay({
   );
 }
 
-/** DESIGN.md ex-modal-card:canvas 面 + lg 圆角 + L5 modal 阴影。 */
+/** IDRL 弹窗:surface 面 + 16px 圆角 + 大而柔的投影(0 20px 90px)。 */
 function DialogContent({
   className,
   children,
@@ -50,7 +50,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          'fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border border-border bg-card p-6 shadow-l5 sm:max-w-md',
+          'fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border border-border bg-card p-6 shadow-l5 sm:max-w-md',
           'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
           className,
         )}
@@ -90,7 +90,7 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn('text-base leading-6 font-semibold tracking-[-0.3px]', className)}
+      className={cn('text-lg leading-7 font-bold tracking-[-0.025em]', className)}
       {...props}
     />
   );

@@ -5,27 +5,29 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 /**
- * DESIGN.md in-app 按钮规格:6px 圆角(rounded-md)、weight 500、默认 32px 高。
- * 营销 100px pill 不采用(已确认只取 token 体系)。
+ * IDRL 按钮规格:控件圆角 6px、weight 500、默认高 40px(sm 32 / icon 36 / lg 44)、
+ * 字号 13px(sm 12px)、hover 用品牌 primary-hover、按下下沉 1px、过渡 120ms。
  */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-[13px] font-medium transition-[background-color,border-color,color,transform] duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-55 active:not-disabled:translate-y-px [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground shadow-l1 hover:bg-primary/90',
-        destructive: 'bg-destructive text-destructive-foreground shadow-l1 hover:bg-destructive/90',
+        default: 'border border-primary bg-primary text-primary-foreground hover:bg-primary-hover',
+        destructive:
+          'border border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90',
         outline:
-          'border border-input bg-card shadow-l1 hover:bg-accent hover:text-accent-foreground',
-        secondary: 'bg-secondary text-secondary-foreground shadow-l1 hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-link underline-offset-4 hover:underline',
+          'border border-control-border bg-card text-foreground hover:bg-muted hover:text-foreground',
+        secondary:
+          'border border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        ghost: 'hover:bg-muted hover:text-foreground',
+        link: 'text-primary-text underline-offset-4 hover:underline',
       },
       size: {
-        default: 'h-8 px-3',
-        sm: 'h-7 rounded-md px-2.5 text-xs',
-        lg: 'h-10 rounded-md px-4',
-        icon: 'size-8',
+        default: 'h-10 px-4',
+        sm: 'h-8 rounded-md px-3 text-xs',
+        lg: 'h-11 rounded-md px-5',
+        icon: 'size-9',
       },
     },
     defaultVariants: {

@@ -4,19 +4,21 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 /**
- * DESIGN.md badge-secondary 比例尺(full 圆角 + caption 12px)。
- * 状态语义色遵循 DESIGN.md:success 即 link 蓝、warning 琥珀、error 红。
+ * IDRL 徽章:圆点 + 文字(颜色必须配文字,圆点用 currentColor)、5px 圆角、
+ * 4px/7px 内距、12px/1.5;底色为状态基色 15% 混入 surface。
+ * 状态语义遵循 IDRL:success 绿 / warning 琥珀 / destructive 红 / info 品牌蓝。
  */
 const badgeVariants = cva(
-  'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs leading-4 whitespace-nowrap transition-colors [&>svg]:pointer-events-none [&>svg]:size-3',
+  'inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-[5px] border border-transparent px-[7px] py-1 text-xs leading-[18px] whitespace-nowrap transition-colors [&>svg]:pointer-events-none [&>svg]:size-3',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground',
+        default: 'bg-primary-soft text-primary-text',
         secondary: 'bg-secondary text-muted-foreground',
-        success: 'bg-success-soft text-link',
-        warning: 'bg-warning-soft text-warning-deep',
+        success: 'bg-success-soft text-success',
+        warning: 'bg-warning-soft text-warning',
         error: 'bg-error-soft text-error-deep',
+        info: 'bg-primary-soft text-primary-text',
         outline: 'border-border text-muted-foreground',
       },
     },
@@ -29,10 +31,14 @@ const badgeVariants = cva(
 function Badge({
   className,
   variant,
+  children,
   ...props
 }: React.ComponentProps<'span'> & VariantProps<typeof badgeVariants>) {
   return (
-    <span data-slot="badge" className={cn(badgeVariants({ variant }), className)} {...props} />
+    <span data-slot="badge" className={cn(badgeVariants({ variant }), className)} {...props}>
+      <span aria-hidden="true" className="size-[5px] shrink-0 rounded-full bg-current" />
+      {children}
+    </span>
   );
 }
 

@@ -1,0 +1,40 @@
+{
+  "sourceRepo": "https://github.com/zweien/idrl-vi",
+  "sourceCommit": "48bdb76bace0b7d94059d8f4d3848f803aee8bb9",
+  "sourceCommitNote": "在 c5c67868577a00d040973523d5be2f7a25d22f11 基础上追其 favicon 修复(transparent adaptive favicon)",
+  "sourceDirty": false,
+  "tokenVersion": "0.2.1",
+  "adoptedAt": "2026-10-15",
+  "adoptionDoc": "docs/idrl-adoption.md",
+  "copiedFiles": {
+    "public/brand/logo/symbol-color.svg": "0fa3845059570daf728a863129f66072a7df3fa6642dbff8e7a82c71f6a239ac",
+    "public/brand/logo/symbol-color-reverse.svg": "27c15bc03a2ea841266fd75c25a1780da33e457e5b3b1b5bcb0ef35b0d08d909",
+    "public/brand/logo/lockup-idrl.svg": "55ae943551429a1c3cbbdb8054b069b09b3254d5cd57ce108acd97da065ccc36",
+    "public/brand/logo/lockup-idrl-reverse.svg": "25802f9cbc4cb12f95844013e73d4d81d5de17f45ad842955e62a9d6b88a3047",
+    "public/brand/logo/lockup-bilingual.svg": "22a4f18b77d1972ee7b3d735b73beaec4b92cf0910cdc0183f45d1665ddb8bb0",
+    "public/brand/logo/lockup-bilingual-reverse.svg": "10d1c79c68c7d4336d20ad62c988d8d79f2fa2f6a85e2beb0c8e60e21682eea2",
+    "public/brand/logo/favicon.svg": "550b1a5a740a47cf6f8ebbd8a9be593c69289ffe6deb899762c0ea8d8b837682",
+    "public/brand/logo/favicon-tile.svg": "7c25ad1f3a04531ba3ba41040f4bd0721537bbe669995e630b5c43b2b7e8a7a2",
+    "public/brand/fonts/InterVariable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+  },
+  "sourceReferences": {
+    "assets/brand/tokens.json": "110c0c89dd062c28b85acfc1b85f5afb039417108f024871ac14a2507ea2c87b",
+    "assets/brand/tokens-values.css": "27e496fa24f379d8baa962e6f5205513ba70cad467d81cc3889148da2d3d3898",
+    "assets/brand/shadcn-aliases.css": "ca49518dc6e00645a3155c9f2758927eadfbde56e099f0d24d685714ff855f43",
+    "src/components/brand.tsx": "fba8e334a8469d1222e4a93dbf8a97971dd6e93cb798d2a7eacabf5ce1f5aae9",
+    "src/components/app-shell.tsx": "d189ea55df2c2ef7bf986b82b84d4dbad67d8a1e57729f2264a705f5f650539a",
+    "src/lib/app-shell-config.ts": "088042de22e39c1d1e3584f93eb214c1e57e4ccd8faf6977239e2bbd4ba4b7d9",
+    "src/app-shell.css": "fddaad78abae771519d4819cbb3ef8e81c904a855bfb89c645e05dc781493f60",
+    "src/components/ui/button.tsx": "555b5695670fc7a08698f798d7e27dc3910f5527537d1cef8526833d73e14408",
+    "src/components/ui/badge.tsx": "42d47e87263b20c65d7a7da4953354fd359d36d70dd822f764cea0f5a85df4c6"
+  },
+  "localAdaptations": [
+    "token 数值并入 src/app/globals.css,保留本应用原 CSS 变量名(--mute/--link/--*-soft 等)",
+    "AppShell 按规格重写为 DashboardShell/AppSidebar/SiteHeader(Next.js App Router + cookie 偏好)",
+    "caption-mono 类名保留、重定义为 IDRL eyebrow",
+    "Badge variant 名保留、视觉改为 IDRL 圆点徽章;success 语义由 link 蓝改为 IDRL 绿",
+    "changelog 页套用 IDRL release 模板,数据源仍为 CHANGELOG.md",
+    "品牌资产路径改为 public/brand/,浏览器默认 favicon 用透明自适应 favicon.svg(src/app/icon.svg);favicon-tile 仅备用应用图标"
+  ],
+  "validatedAt": "2026-10-15"
+}

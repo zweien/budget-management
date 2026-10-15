@@ -75,9 +75,9 @@ function renderRate(rate: number | null | undefined): string {
   return `${(rate * 100).toFixed(2)}%`;
 }
 
-/** 指标数值:display-md 字级 + tabular-nums(DESIGN.md 负字距标题字重 600)。 */
+/** 指标数值:sm 起 display-md 字级 + tabular-nums;移动端 20px 防长金额溢出双列卡。 */
 function MetricValue({ children }: { children: React.ReactNode }) {
-  return <p className="mt-2 text-display-md tabular-nums">{children}</p>;
+  return <p className="mt-2 text-xl tabular-nums sm:text-display-md">{children}</p>;
 }
 
 export default function DashboardPage() {
@@ -252,7 +252,7 @@ function BudgetMetricCards() {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-base font-semibold tracking-[-0.3px]">预算指标({year} 年)</h2>
+      <h2 className="text-base font-bold tracking-[-0.025em]">预算指标({year} 年)</h2>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         {loading || !metrics ? (
           Array.from({ length: 4 }).map((_, i) => (

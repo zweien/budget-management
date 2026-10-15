@@ -391,6 +391,12 @@ components:
 
 ## Overview
 
+> **⚠ 现行状态(2026-10-15)**:应用 UI 已迁移至团队 IDRL VI 体系
+> (zweien/idrl-vi,token 0.2.1)。本文保留为「Vercel 设计语言」的来源分析
+> 与历史参考,**其中颜色 / 字体 / 阴影 / 圆角数值不再是现行规范**;
+> 现行 token 与接入记录见 [docs/idrl-adoption.md](./docs/idrl-adoption.md)、
+> [idrl-source.json](./idrl-source.json) 与 `src/app/globals.css`。
+
 Vercel is a developer-platform brand — the page is a deployment dashboard's marketing surface, written for engineers who already know the syntax. It earns that posture with one of the cleanest stark systems on the web: near-white `{colors.canvas-soft}` body background, ink-near-black `{colors.ink}` text, a 200-step gray scale that gives every divider, border, and disabled state its own deliberate step. The only place the brand introduces colour at marketing scale is the multi-stop mesh gradient (`{colors.gradient-develop-start}` → `{colors.gradient-preview-end}` → `{colors.gradient-ship-start}` → cyan / magenta / amber) that floats in atmospheric backdrops, never miniaturised to a swatch. That gradient is the entire decoration system.
 
 Type is the second decisive voice. The brand's own custom geometric sans (Geist) carries display, body, button — everything narrative — at weight 600 for display, 500 for buttons, 400 for body. A matching monospaced face (Geist Mono) carries technical labels: terminal mockups, code blocks, sometimes filename captions. Headlines are sentence-case with aggressive negative letter-spacing (`-2.4px` at 48 px hero) — the brand never letter-spaces positively, never goes uppercase outside of mono labels.

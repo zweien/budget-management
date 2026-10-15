@@ -3,7 +3,16 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
-import { ClipboardPlus, Download, Funnel, History, Paperclip, Upload } from 'lucide-react';
+import {
+  Ban,
+  ClipboardPlus,
+  Download,
+  Funnel,
+  History,
+  Pencil,
+  Paperclip,
+  Upload,
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
@@ -130,6 +139,30 @@ const STATUS_FILTER_LABELS: Record<string, string> = {
   FINANCE_APPROVAL: '财务系统审批',
   PAID: '已支出',
   __void__: '已作废',
+};
+
+/**
+ * 列宽档(table-fixed 口径):短字段定宽 px;文本列百分比——表格恒等于容器宽,
+ * 空间按比例分配不再留白,配合单元格 max-w-full truncate 只在列宽不足时截断;
+ * 窄于最小宽度时由容器横向滚动兜底。
+ */
+const HEAD_WIDTH: Record<string, string> = {
+  select: 'w-9',
+  project: 'w-[11%]',
+  budgetYear: 'w-16',
+  subject: 'w-[12%]',
+  amount: 'w-24 text-right',
+  businessDate: 'w-24',
+  completedDate: 'w-24',
+  status: 'w-28',
+  handler: 'w-20',
+  docNo: 'w-52',
+  summary: 'w-[15%]',
+  remark: 'w-[11%]',
+  enteredAt: 'w-32',
+  creatorName: 'w-20',
+  attachments: 'w-14',
+  actions: 'w-28',
 };
 
 /** 录入/编辑表单(schema 与项目内记录页一致)。 */
@@ -558,7 +591,7 @@ function UnifiedRecordsPageInner() {
             href={`/projects/${row.original.projectId}/records`}
             className="text-link underline-offset-4 hover:underline"
           >
-            <span className="block max-w-44 truncate">
+            <span className="line-clamp-2">
               {projectName.get(row.original.projectId) ?? row.original.projectId.slice(0, 8)}
             </span>
           </Link>
@@ -590,6 +623,11 @@ function UnifiedRecordsPageInner() {
             sortable
           />
         ),
+        cell: ({ row }) => (
+          <span className="line-clamp-2" title={row.original.subject?.name ?? undefined}>
+            {row.original.subject?.name ?? '—'}
+          </span>
+        ),
       },
       {
         id: 'amount',
@@ -608,7 +646,7 @@ function UnifiedRecordsPageInner() {
           <HeaderFilter column={column} title="申请日期" type="dateRange" sortable />
         ),
         cell: ({ row }) => (
-          <span className="tabular-nums">
+          <span className="block whitespace-nowrap tabular-nums">
             {format(new Date(row.original.businessDate), 'yyyy-MM-dd')}
           </span>
         ),
@@ -626,7 +664,7 @@ function UnifiedRecordsPageInner() {
           />
         ),
         cell: ({ row }) => (
-          <span className="tabular-nums">
+          <span className="block whitespace-nowrap tabular-nums">
             {row.original.completedDate
               ? format(new Date(row.original.completedDate), 'yyyy-MM-dd')
               : '—'}
@@ -676,7 +714,7 @@ function UnifiedRecordsPageInner() {
         ),
         cell: ({ row }) => (
           <span
-            className="block max-w-32 truncate font-mono text-xs"
+            className="block whitespace-nowrap font-mono text-xs"
             title={row.original.docNo ?? undefined}
           >
             {row.original.docNo || '—'}
@@ -688,7 +726,7 @@ function UnifiedRecordsPageInner() {
         accessorKey: 'summary',
         header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
         cell: ({ row }) => (
-          <span className="block max-w-40 truncate" title={row.original.summary}>
+          <span className="line-clamp-2" title={row.original.summary}>
             {row.original.summary}
           </span>
         ),
@@ -701,7 +739,7 @@ function UnifiedRecordsPageInner() {
         cell: ({ row }) =>
           row.original.remark ? (
             <span
-              className="block max-w-32 truncate text-muted-foreground"
+              className="block max-w-full truncate text-muted-foreground"
               title={row.original.remark}
             >
               {row.original.remark}
@@ -907,31 +945,45 @@ function UnifiedRecordsPageInner() {
   /** 行内操作(修改/作废/查看;修改与作废仅可写项目且未作废)。 */
   function RowActions({ row }: { row: UnifiedRecordRow }) {
     const writable = writableIds.has(row.projectId);
+    const iconBtn =
+      'size-7 [&_svg]:size-3.5 text-mute transition-colors hover:text-foreground hover:bg-accent';
     return (
-      <div className="flex gap-1">
+      <div className="flex items-center gap-0.5">
         {writable && !row.isVoid ? (
           <>
-            <Button variant="ghost" size="sm" onClick={() => void openEdit(row)}>
-              修改
+            <Button
+              variant="ghost"
+              size="icon"
+              className={iconBtn}
+              title="修改"
+              aria-label={`修改记录:${row.summary}`}
+              onClick={() => void openEdit(row)}
+            >
+              <Pencil />
             </Button>
             <Button
               variant="ghost"
-              size="sm"
-              className="text-error-deep hover:bg-error-soft"
+              size="icon"
+              className={`${iconBtn} text-error-deep hover:bg-error-soft hover:text-error-deep`}
+              title="作废"
+              aria-label={`作废记录:${row.summary}`}
               onClick={() => {
                 setVoidTarget(row);
                 setVoidReason('');
                 setVoidError(null);
               }}
             >
-              作废
+              <Ban />
             </Button>
           </>
         ) : null}
-        <Button variant="ghost" size="sm" asChild>
-          <Link href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}`}>
+        <Button variant="ghost" size="icon" className={iconBtn} asChild>
+          <Link
+            href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}`}
+            title="查看该科目的记录"
+            aria-label={`查看科目记录:${row.summary}`}
+          >
             <History />
-            查看
           </Link>
         </Button>
       </div>
@@ -1335,21 +1387,15 @@ function UnifiedRecordsPageInner() {
         />
 
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-          <Table>
-            <TableHeader>
+          <Table
+            className="table-fixed min-w-[1100px]"
+            wrapperClassName="max-h-[calc(100vh-380px)]"
+          >
+            <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="hover:bg-transparent">
                   {hg.headers.map((header) => (
-                    <TableHead
-                      key={header.id}
-                      className={
-                        header.column.id === 'amount'
-                          ? 'w-32 text-right'
-                          : header.column.id === 'actions'
-                            ? 'w-44'
-                            : undefined
-                      }
-                    >
+                    <TableHead key={header.id} className={HEAD_WIDTH[header.column.id]}>
                       {header.isPlaceholder
                         ? null
                         : flexRender(header.column.columnDef.header, header.getContext())}
