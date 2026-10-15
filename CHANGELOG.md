@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-15
+
+品牌视觉重构(按 zweien/idrl-vi)与 pdf 附件在线预览修复。
+
+### 新增
+
+- **品牌视觉重构**:接入 zweien/idrl-vi 的品牌 token/logo/字体,壳层与组件按新视觉校准
+- scripts/provision-sso-users.ts 预建档脚本(按 Authentik sub 清单预先建档,等价 JIT)
+- .env.example 补充局域网访问的 ISSUER/APP_BASE_URL 配置说明
+- 记录表 sticky 表头、列宽自适应体系(table-fixed + 百分比列宽,宽屏零留白)
+
+### 修复
+
+- **pdf 附件在线预览失败**(「Cannot perform Construct on a detached ArrayBuffer」,0/0 页):
+  application/pdf 附件不再走 file-viewer 的 WASM 渲染器,改取字节转 blob URL 内嵌
+  浏览器原生 pdf 查看器(自带分页/缩放/打印/搜索);blob URL 随附件切换/关闭 revoke;
+  ViewerCanvas 每次挂载改用源缓冲独立切片,分离错误自动换新切片重挂(兜底其它格式)
+- 浏览器默认 favicon 换透明自适应版(同步上游 48bdb76)
+- 记录表科目列长名折行、日期列压缩折行的显示问题(table-fixed 下补 truncate/nowrap)
+
 ## [0.20.1] - 2026-10-15
 
 ### 修复
