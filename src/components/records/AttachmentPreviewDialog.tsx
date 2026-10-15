@@ -52,6 +52,8 @@ export function AttachmentPreviewDialog({
   onOpenChange,
 }: AttachmentPreviewDialogProps) {
   const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
+  /** PDF 的 blob URL(原生查看器渲染);切换/关闭时 revoke。 */
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const attachmentId = attachment?.id;
@@ -59,16 +61,32 @@ export function AttachmentPreviewDialog({
   const fileName = attachment?.fileName ?? '';
   const supported = SUPPORTED_PREFIXES.some((p) => contentType.startsWith(p));
 
+  const isPdf = contentType === 'application/pdf';
+
   useEffect(() => {
     if (!attachmentId || !supported) return;
     let cancelled = false;
+    let revokeUrl: string | null = null;
     fetchAttachmentBlob(projectId, recordId, attachmentId)
-      .then((blob) => blob.arrayBuffer())
-      .then((buf) => {
-        if (!cancelled) {
-          setBuffer(buf);
+      .then((blob) => {
+        if (cancelled) return;
+        // PDF 走浏览器原生查看器(blob URL + iframe):file-viewer 的 PDF 渲染器
+        // 会把缓冲转移给 WASM Worker,React StrictMode 双挂载下第二次初始化拿到
+        // 已分离缓冲而失败(dev 复现"detached ArrayBuffer");原生渲染更稳且自带
+        // 缩放/打印。其余格式维持 ArrayBuffer 直喂。
+        if (isPdf) {
+          revokeUrl = URL.createObjectURL(blob);
+          setPdfUrl(revokeUrl);
+          setBuffer(null);
           setError(null);
+          return;
         }
+        return blob.arrayBuffer().then((buf) => {
+          if (!cancelled) {
+            setBuffer(buf);
+            setError(null);
+          }
+        });
       })
       .catch((e: unknown) => {
         if (!cancelled) {
@@ -77,15 +95,18 @@ export function AttachmentPreviewDialog({
         }
       });
     return () => {
-      // 卸载/切换附件:作废飞行中回调,清字节引用(ArrayBuffer 无 object URL 需 revoke)。
+      // 卸载/切换附件:作废飞行中回调,回收字节引用与 blob URL。
       cancelled = true;
+      if (revokeUrl) URL.revokeObjectURL(revokeUrl);
       setBuffer(null);
+      setPdfUrl(null);
       setError(null);
     };
-  }, [attachmentId, projectId, recordId, supported]);
+  }, [attachmentId, projectId, recordId, supported, isPdf]);
 
-  // 渲染期派生 loading:支持预览、有附件、尚无 buffer 与 error = 加载中。
-  const loading = !!attachment && supported && buffer === null && error === null;
+  // 渲染期派生 loading:支持预览、非 PDF、尚无 buffer 与 error = 加载中(PDF 以 pdfUrl 为准)。
+  const loading =
+    !!attachment && supported && !isPdf && buffer === null && error === null && !pdfUrl;
 
   return (
     <Dialog open={!!attachment} onOpenChange={onOpenChange}>
@@ -110,6 +131,9 @@ export function AttachmentPreviewDialog({
               recordId={recordId}
               attachment={attachment}
             />
+          ) : isPdf && pdfUrl ? (
+            // 浏览器原生 PDF 查看器(与下载字节同源,带鉴权 blob URL)。
+            <iframe src={pdfUrl} title={`预览:${fileName}`} className="h-full w-full" />
           ) : buffer && attachment ? (
             <ViewerCanvas
               // 附件切换即重挂载,重置 viewer 内部 Worker 状态。

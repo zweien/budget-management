@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 // 本文件是 file-viewer 的唯一浏览器侧装配点:调用方必须以
@@ -39,11 +39,13 @@ export const ViewerCanvas = forwardRef<FileViewerHandle, ViewerCanvasProps>(func
   // key:buffer/filename 变化即重挂载,重置 viewer 内部 Worker 状态。
   const sourceKey = useRef(`${filename}:${buffer.byteLength}`).current;
   const errorReported = useRef(false);
-
-  useEffect(() => {
-    setReady(false);
-    errorReported.current = false;
-  }, [sourceKey]);
+  // PDF 渲染器会把缓冲转移给 WASM Worker(转移后原缓冲分离)。dev StrictMode
+  // 的双挂载会让第二次初始化拿到已分离缓冲 → "Cannot perform Construct on a
+  // detached ArrayBuffer"。每次挂载改用源缓冲的独立切片,并在出现分离错误时
+  // 自动换新切片重挂(上限 3 次,防渲染器自身缺陷的无限循环)。
+  const [mountSeq, setMountSeq] = useState(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mountSeq 变化必须重新切片(旧切片已被 Worker 转移分离)
+  const workingBuffer = useMemo(() => buffer.slice(0), [buffer, mountSeq]);
 
   const options = useMemo<ViewerOptions>(
     () => ({
@@ -63,9 +65,9 @@ export const ViewerCanvas = forwardRef<FileViewerHandle, ViewerCanvasProps>(func
         </div>
       )}
       <FileViewer
-        key={sourceKey}
+        key={`${sourceKey}:${mountSeq}`}
         ref={ref}
-        buffer={buffer}
+        buffer={workingBuffer}
         filename={filename}
         // 注意:不可传 type(MIME)——core 取扩展名时 type 优先于 filename 且被
         // 当作扩展名,MIME 串会导致"格式不支持"兜底;识别只靠 filename 后缀。
@@ -77,7 +79,13 @@ export const ViewerCanvas = forwardRef<FileViewerHandle, ViewerCanvasProps>(func
           }
         }}
         onStateChange={(state) => {
-          if (state.error && !errorReported.current) {
+          if (!state.error) return;
+          const message = state.error instanceof Error ? state.error.message : String(state.error);
+          if (message.includes('detached') && mountSeq < 3) {
+            setMountSeq((k) => k + 1);
+            return;
+          }
+          if (!errorReported.current) {
             errorReported.current = true;
             onError?.(state.error instanceof Error ? state.error.message : '文档渲染失败');
           }
