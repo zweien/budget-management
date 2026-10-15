@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
-import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
+import { isSettlementTemplateVersion } from '@/lib/excel/settlement';
 import { STATUS_ENUM_TO_CN } from '@/lib/excel/template';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -14,6 +14,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Combobox } from '@/components/ui/combobox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -51,6 +58,12 @@ export interface SettlementRow {
     handler: string;
     subjectId: string | null;
     subjectName: string | null;
+    /** ---- v3(财务结算单 2025 导出)专属 ---- */
+    detailPath?: string | null;
+    finCode?: string | null;
+    fileProjectName?: string | null;
+    targetProjectId?: string | null;
+    sourceRows?: number[];
   };
   validationStatus: 'valid' | 'error' | 'skipped';
   errors: { field: string; message: string }[];
@@ -75,6 +88,10 @@ export interface SettlementBatchData {
   errors: SettlementRow[];
   skippedCount: number;
   skippedReasons: Record<string, number>;
+  projectName?: string | null;
+  projectMappings?: Array<{ fileProjectName: string; targetProjectId: string | null }>;
+  mappableProjects?: Array<{ id: string; name: string }>;
+  leafSubjectsByProject?: Record<string, Array<{ id: string; code: string; name: string }>>;
   leafSubjects: Array<{ id: string; code: string; name: string }>;
 }
 
@@ -128,6 +145,17 @@ export function SettlementImportPreview({
 
   const confirmed = data.status === 'confirmed';
   const readOnly = confirmed || !canEdit;
+  // v3(财务结算单 2025 导出):行上展示 开支细项/科目代码,顶部做项目名核对警告。
+  // v3(财务结算单 2025 导出):行上展示 开支细项/科目代码,顶部做项目映射。
+  const isV3 = data.templateVersion === 'settlement-2.0';
+  const projectMappings = data.projectMappings ?? [];
+  const mappableProjects = data.mappableProjects ?? [];
+  const [remapping, setRemapping] = useState(false);
+  // v3 勾选行跨多个目标项目时,批量设置科目不可用(科目须属于各自目标项目)。
+  const multiTargetV3 =
+    isV3 &&
+    new Set([...data.pending, ...data.duplicates].map((r) => r.parsedData.targetProjectId ?? ''))
+      .size > 1;
 
   const subjectOptions = useMemo(() => {
     const nameCount = new Map<string, number>();
@@ -139,8 +167,21 @@ export function SettlementImportPreview({
     }));
   }, [data.leafSubjects]);
 
-  const subjectName = (id: string | null) =>
-    id ? (subjectOptions.find((o) => o.value === id)?.label ?? null) : null;
+  /** 行级科目选项:v3 按行目标项目的叶科目;其余回退上传项目清单。 */
+  const subjectOptionsFor = (r: SettlementRow) => {
+    const t = r.parsedData.targetProjectId;
+    const list =
+      (t && data.leafSubjectsByProject?.[t]?.length
+        ? data.leafSubjectsByProject[t]
+        : data.leafSubjects) ?? [];
+    const nameCount = new Map<string, number>();
+    list.forEach((s) => nameCount.set(s.name, (nameCount.get(s.name) ?? 0) + 1));
+    return list.map((s) => ({
+      value: s.id,
+      label: (nameCount.get(s.name) ?? 0) > 1 ? `${s.name}(${s.code})` : s.name,
+      keywords: s.code,
+    }));
+  };
 
   /** 暂存 PATCH(串行排队,避免乱序覆盖);本地状态先行乐观更新。 */
   const patchRows = (updates: RowUpdate[]) => {
@@ -176,10 +217,44 @@ export function SettlementImportPreview({
     });
   };
 
-  const handleSubjectChange = (rowId: string, subjectId: string) => {
-    const name = subjectName(subjectId);
-    applyLocal(rowId, { subjectId, subjectName: name });
-    patchRows([{ rowId, subjectId }]);
+  const handleSubjectChange = (row: SettlementRow, subjectId: string) => {
+    const name = subjectOptionsFor(row).find((o) => o.value === subjectId)?.label ?? null;
+    applyLocal(row.rowId, { subjectId, subjectName: name });
+    patchRows([{ rowId: row.rowId, subjectId }]);
+  };
+
+  /** 项目映射(v3):对同名科研项目名称的全部行设置目标项目,服务端重算后重拉预览。 */
+  const applyProjectMapping = async (fileProjectName: string, targetProjectId: string) => {
+    setRemapping(true);
+    try {
+      const rows = [...data.pending, ...data.duplicates, ...data.errors].filter(
+        (r) => r.parsedData.fileProjectName === fileProjectName,
+      );
+      await apiFetch(`/api/projects/${projectId}/imports/${data.batchId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          updates: rows.map((r) => ({ rowId: r.rowId, targetProjectId })),
+        }),
+      });
+      const fresh = await apiFetch<SettlementBatchData>(
+        `/api/projects/${projectId}/imports/${data.batchId}`,
+      );
+      setData(fresh);
+      setSelected(() => {
+        const sel = new Set<string>();
+        fresh.pending.forEach((r) => sel.add(r.rowId));
+        fresh.duplicates.forEach((r) => {
+          if (r.duplicateLevel === 'refresh') sel.add(r.rowId);
+          else if (r.forcedImport && r.duplicateLevel !== 'hard') sel.add(r.rowId);
+        });
+        return sel;
+      });
+      toast.success('已映射目标项目');
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setRemapping(false);
+    }
   };
 
   const handleYearChange = (
@@ -244,9 +319,11 @@ export function SettlementImportPreview({
   const handleBatchAssign = () => {
     if (!batchSubjectId) return;
     const targets = importable.filter((r) => selected.has(r.rowId));
-    targets.forEach((r) =>
-      applyLocal(r.rowId, { subjectId: batchSubjectId, subjectName: subjectName(batchSubjectId) }),
-    );
+    // 科目名按行目标解析(v3 不同行可能属于不同目标项目)。
+    targets.forEach((r) => {
+      const name = subjectOptionsFor(r).find((o) => o.value === batchSubjectId)?.label ?? null;
+      applyLocal(r.rowId, { subjectId: batchSubjectId, subjectName: name });
+    });
     patchRows(targets.map((r) => ({ rowId: r.rowId, subjectId: batchSubjectId })));
     toast.success(`已为 ${targets.length} 行指定科目(已暂存)`);
     setBatchSubjectId(null);
@@ -339,6 +416,29 @@ export function SettlementImportPreview({
         <TableCell className="max-w-56 truncate" title={r.parsedData.summary}>
           {r.parsedData.summary}
         </TableCell>
+        {isV3 ? (
+          <TableCell
+            className="max-w-48 truncate"
+            title={[
+              r.parsedData.detailPath,
+              r.parsedData.finCode ? `科目代码:${r.parsedData.finCode}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n')}
+          >
+            <span className="block truncate">
+              {r.parsedData.detailPath ? (r.parsedData.detailPath.split('/').pop() ?? '') : '—'}
+              {r.parsedData.finCode ? (
+                <span className="ml-1 text-xs text-mute">{r.parsedData.finCode}</span>
+              ) : null}
+              {r.parsedData.sourceRows && r.parsedData.sourceRows.length > 1 ? (
+                <span className="ml-1 text-xs text-mute">
+                  (合并 {r.parsedData.sourceRows.length} 行)
+                </span>
+              ) : null}
+            </span>
+          </TableCell>
+        ) : null}
         <TableCell>
           {r.normalizedAmount ? (
             <MoneyText value={r.normalizedAmount} riskOnNegative={false} />
@@ -354,9 +454,9 @@ export function SettlementImportPreview({
             (r.parsedData.subjectName ?? <span className="text-mute">未指定</span>)
           ) : (
             <Combobox
-              options={subjectOptions}
+              options={subjectOptionsFor(r)}
               value={r.parsedData.subjectId ?? undefined}
-              onChange={(v) => handleSubjectChange(r.rowId, v)}
+              onChange={(v) => handleSubjectChange(r, v)}
               placeholder={r.parsedData.subjectId ? undefined : '选择科目…'}
               searchPlaceholder="搜索科目…"
               className="h-7 w-40 text-xs"
@@ -403,6 +503,7 @@ export function SettlementImportPreview({
         <TableHead className="w-24">完成日期</TableHead>
         <TableHead className="w-20">年度</TableHead>
         <TableHead>事项(摘要)</TableHead>
+        {isV3 ? <TableHead className="w-56">开支细项 / 科目代码</TableHead> : null}
         <TableHead className="w-24 text-right">金额</TableHead>
         <TableHead className="w-20">经办人</TableHead>
         <TableHead className="w-44">科目</TableHead>
@@ -441,11 +542,61 @@ export function SettlementImportPreview({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold tracking-[-0.3px]">导入预览(个人结算单)</h2>
+        <h2 className="text-base font-semibold tracking-[-0.3px]">
+          导入预览({isV3 ? '财务结算单' : '个人结算单'})
+        </h2>
         <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/records`)}>
           暂存退出
         </Button>
       </div>
+
+      {isV3 && projectMappings.length > 0 ? (
+        <Card className="p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="caption-mono">项目映射</p>
+            {remapping ? <span className="text-xs text-mute">映射保存中…</span> : null}
+          </div>
+          <div className="space-y-2">
+            {projectMappings.map((m) => {
+              const mapped = m.targetProjectId
+                ? mappableProjects.find((p) => p.id === m.targetProjectId)
+                : null;
+              const rowCount = [...data.pending, ...data.duplicates, ...data.errors].filter(
+                (r) => r.parsedData.fileProjectName === m.fileProjectName,
+              ).length;
+              return (
+                <div key={m.fileProjectName} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="max-w-[22rem] truncate font-medium" title={m.fileProjectName}>
+                    {m.fileProjectName}
+                  </span>
+                  <span className="text-mute">({rowCount} 行)→</span>
+                  {readOnly ? (
+                    <span>{mapped?.name ?? '未映射'}</span>
+                  ) : (
+                    <Select
+                      value={m.targetProjectId ?? undefined}
+                      disabled={remapping}
+                      onValueChange={(v) => void applyProjectMapping(m.fileProjectName, v)}
+                    >
+                      <SelectTrigger className="w-72">
+                        <SelectValue placeholder="选择目标项目…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {mappableProjects.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {!mapped ? <Badge variant="error">未映射</Badge> : null}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
 
       <Alert variant="info">
         <AlertTitle>
@@ -499,7 +650,8 @@ export function SettlementImportPreview({
             <Button
               variant="outline"
               size="sm"
-              disabled={selected.size === 0}
+              disabled={selected.size === 0 || multiTargetV3}
+              title={multiTargetV3 ? '勾选行属于不同项目,请按行指定科目' : undefined}
               onClick={() => setBatchDialogOpen(true)}
             >
               批量设置科目({selected.size} 行)
@@ -626,4 +778,4 @@ export function SettlementImportPreview({
   );
 }
 
-export const isSettlementTemplate = (v: string) => v === SETTLEMENT_TEMPLATE_VERSION;
+export const isSettlementTemplate = (v: string) => isSettlementTemplateVersion(v);

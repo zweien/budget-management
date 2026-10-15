@@ -9,7 +9,7 @@ import {
   getSettlementBatch,
   updateSettlementRows,
 } from '@/server/services/settlementImport.service';
-import { SETTLEMENT_TEMPLATE_VERSION } from '@/lib/excel/settlement';
+import { isSettlementTemplateVersion } from '@/lib/excel/settlement';
 
 /**
  * GET /api/projects/:id/imports/:batchId — 取导入批次预览(§10 阶段一结果)。
@@ -27,10 +27,9 @@ export const GET = withRoute(
     if (!batch) {
       return NextResponse.json({ error: '导入批次不存在' }, { status: 404 });
     }
-    const preview =
-      batch.templateVersion === SETTLEMENT_TEMPLATE_VERSION
-        ? await getSettlementBatch(batchId, user)
-        : await getImportBatch(batchId, user);
+    const preview = isSettlementTemplateVersion(batch.templateVersion)
+      ? await getSettlementBatch(batchId, user)
+      : await getImportBatch(batchId, user);
     return NextResponse.json(preview);
   },
 );
