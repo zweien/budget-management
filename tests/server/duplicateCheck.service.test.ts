@@ -266,14 +266,24 @@ describe('duplicateCheck.service (integration, real PG)', () => {
     expect(self.suspected).toBe(false);
   });
 
-  it('超过500种金额和日期的批次仍能命中末行，不截断候选或改变指纹', async () => {
-    const rec = await seedRecord({ summary: '大批次 末行' });
-    const rows = Array.from({ length: 500 }, (_, i) => ({
+  it.each([
+    [500, 1],
+    [501, 1],
+    [1, 500],
+    [1, 501],
+    [501, 501],
+  ])('金额种类%d/日期种类%d的边界批次仍能命中末行', async (amountKinds, dateKinds) => {
+    const summary = `大批次${amountKinds}/${dateKinds} 末行`;
+    const rec = await seedRecord({ summary });
+    const rows = Array.from({ length: Math.max(amountKinds, dateKinds) - 1 }, (_, i) => ({
       rowKey: `large-${i}`,
       docNo: null,
       budgetYear: 2026,
-      amount: `${200 + i}.00`,
-      businessDate: new Date(Date.UTC(2023, 0, i + 1)).toISOString().slice(0, 10),
+      amount: amountKinds === 1 ? '100.00' : `${200 + i}.00`,
+      businessDate:
+        dateKinds === 1
+          ? '2026-08-01'
+          : new Date(Date.UTC(2023, 0, i + 1)).toISOString().slice(0, 10),
       summary: `无关 ${i}`,
     }));
     rows.push({
@@ -282,13 +292,40 @@ describe('duplicateCheck.service (integration, real PG)', () => {
       budgetYear: 2026,
       amount: '100.00',
       businessDate: '2026-08-01',
-      summary: ' 大批次\t末行 ',
+      summary: ` 大批次${amountKinds}/${dateKinds}\t末行 `,
     });
     const results = await checkDuplicates(projectId, rows);
-    expect(results).toHaveLength(501);
+    expect(results).toHaveLength(rows.length);
     expect(results.at(-1)?.suspected).toBe(true);
     expect(results.at(-1)?.conflicts[0].recordId).toBe(rec.id);
-    expect(results.slice(0, 500).every((r) => !r.suspected && !r.hard)).toBe(true);
+    expect(results.slice(0, -1).every((r) => !r.suspected && !r.hard)).toBe(true);
+  });
+
+  it.each([
+    ['bad', '2026-08-01'],
+    ['100.00', 'invalid-date'],
+  ])('混有非规范字段%s/%s时仍检查其他有效行', async (amount, businessDate) => {
+    await seedRecord({ summary: '混合有效行' });
+    const results = await checkDuplicates(projectId, [
+      {
+        rowKey: 'valid',
+        docNo: null,
+        budgetYear: 2026,
+        amount: '100.00',
+        businessDate: '2026-08-01',
+        summary: '混合有效行',
+      },
+      {
+        rowKey: 'invalid',
+        docNo: null,
+        budgetYear: 2026,
+        amount,
+        businessDate,
+        summary: '混合有效行',
+      },
+    ]);
+    expect(results[0].suspected).toBe(true);
+    expect(results[1].suspected).toBe(false);
   });
 
   it('DB 部分唯一索引兜底:同项目同号未作废插入被拒;作废后可插', async () => {
