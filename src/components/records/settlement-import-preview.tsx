@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { Combobox } from '@/components/ui/combobox';
 import {
   Select,
@@ -131,6 +132,25 @@ export function SettlementImportPreview({
     () => [...data.pending, ...data.duplicates],
     [data.pending, data.duplicates],
   );
+  const [requestedPage, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [requestedErrorPage, setErrorPage] = useState(1);
+  const page = Math.min(requestedPage, Math.max(1, Math.ceil(importable.length / pageSize)));
+  const errorPage = Math.min(requestedErrorPage, Math.max(1, Math.ceil(data.errors.length / 100)));
+  const visibleImportable = importable.slice((page - 1) * pageSize, page * pageSize);
+  const pagination = (
+    <TablePagination
+      page={page}
+      pageSize={pageSize}
+      total={importable.length}
+      onPageChange={setPage}
+      onPageSizeChange={(size) => {
+        setPageSize(size);
+        setPage(1);
+      }}
+      leftHint={`共 ${importable.length} 行，勾选及批量设置科目作用于全部已选行`}
+    />
+  );
   const [selected, setSelected] = useState<Set<string>>(() => {
     const s = new Set<string>();
     initialData.pending.forEach((r) => s.add(r.rowId));
@@ -173,20 +193,33 @@ export function SettlementImportPreview({
     }));
   }, [data.leafSubjects]);
 
-  /** 行级科目选项:v3 按行目标项目的叶科目;其余回退上传项目清单。 */
-  const subjectOptionsFor = (r: SettlementRow) => {
-    const t = r.parsedData.targetProjectId;
-    const list =
-      (t && data.leafSubjectsByProject?.[t]?.length
-        ? data.leafSubjectsByProject[t]
-        : data.leafSubjects) ?? [];
-    const nameCount = new Map<string, number>();
-    list.forEach((s) => nameCount.set(s.name, (nameCount.get(s.name) ?? 0) + 1));
-    return list.map((s) => ({
-      value: s.id,
-      label: (nameCount.get(s.name) ?? 0) > 1 ? `${s.name}(${s.code})` : s.name,
-      keywords: s.code,
-    }));
+  // 同一项目的科目候选只构建一次，行编辑继续使用各自目标项目的候选。
+  const optionsByProject = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(data.leafSubjectsByProject ?? {}).map(([id, subjects]) => {
+          const nameCount = new Map<string, number>();
+          subjects.forEach((subject) =>
+            nameCount.set(subject.name, (nameCount.get(subject.name) ?? 0) + 1),
+          );
+          return [
+            id,
+            subjects.map((subject) => ({
+              value: subject.id,
+              label:
+                (nameCount.get(subject.name) ?? 0) > 1
+                  ? `${subject.name}(${subject.code})`
+                  : subject.name,
+              keywords: subject.code,
+            })),
+          ];
+        }),
+      ),
+    [data.leafSubjectsByProject],
+  );
+  const subjectOptionsFor = (row: SettlementRow) => {
+    const options = optionsByProject[row.parsedData.targetProjectId ?? ''];
+    return options?.length ? options : subjectOptions;
   };
 
   /** 暂存 PATCH(串行排队,避免乱序覆盖);本地状态先行乐观更新。 */
@@ -537,8 +570,9 @@ export function SettlementImportPreview({
           <CardContent>
             <Table>
               {tableHead(false)}
-              <TableBody>{importable.map(renderRow)}</TableBody>
+              <TableBody>{visibleImportable.map(renderRow)}</TableBody>
             </Table>
+            {pagination}
           </CardContent>
         </Card>
       </div>
@@ -674,19 +708,22 @@ export function SettlementImportPreview({
           {importable.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">无可导入行</p>
           ) : (
-            <Table>
-              {tableHead(
-                !readOnly,
-                !readOnly ? (
-                  <Checkbox
-                    checked={allPendingSelected}
-                    onCheckedChange={toggleAllPending}
-                    aria-label="全选待导入行"
-                  />
-                ) : null,
-              )}
-              <TableBody>{importable.map(renderRow)}</TableBody>
-            </Table>
+            <>
+              <Table>
+                {tableHead(
+                  !readOnly,
+                  !readOnly ? (
+                    <Checkbox
+                      checked={allPendingSelected}
+                      onCheckedChange={toggleAllPending}
+                      aria-label="全选待导入行"
+                    />
+                  ) : null,
+                )}
+                <TableBody>{visibleImportable.map(renderRow)}</TableBody>
+              </Table>
+              {pagination}
+            </>
           )}
         </CardContent>
       </Card>
@@ -710,7 +747,7 @@ export function SettlementImportPreview({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.errors.map((r) => (
+                {data.errors.slice((errorPage - 1) * 100, errorPage * 100).map((r) => (
                   <TableRow key={r.rowId}>
                     <TableCell className="tabular-nums">{r.rowNo}</TableCell>
                     <TableCell className="font-mono text-xs">{r.parsedData.docNo ?? '—'}</TableCell>
@@ -733,6 +770,14 @@ export function SettlementImportPreview({
                 ))}
               </TableBody>
             </Table>
+            <TablePagination
+              page={errorPage}
+              pageSize={100}
+              total={data.errors.length}
+              onPageChange={setErrorPage}
+              onPageSizeChange={() => {}}
+              pageSizes={[100]}
+            />
           </CardContent>
         </Card>
       ) : null}

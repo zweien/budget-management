@@ -18,15 +18,26 @@ export interface AuditContext {
  */
 export function recordAudit(tx: Prisma.TransactionClient, ctx: AuditContext) {
   return tx.auditLog.create({
-    data: {
-      id: uuidv7(),
-      projectId: ctx.projectId ?? null,
-      objectType: ctx.objectType,
-      objectId: ctx.objectId,
-      action: ctx.action,
-      beforeData: (ctx.before ? snapshotRow(ctx.before) : null) as Prisma.InputJsonValue,
-      afterData: (ctx.after ? snapshotRow(ctx.after) : null) as Prisma.InputJsonValue,
-      operatorId: ctx.operatorId,
-    },
+    data: auditData(ctx),
   });
+}
+
+/** 批量写入仍每条业务记录一条日志，且必须与业务写入共用事务。 */
+export async function recordAudits(tx: Prisma.TransactionClient, contexts: AuditContext[]) {
+  for (let i = 0; i < contexts.length; i += 500) {
+    await tx.auditLog.createMany({ data: contexts.slice(i, i + 500).map(auditData) });
+  }
+}
+
+function auditData(ctx: AuditContext): Prisma.AuditLogCreateManyInput {
+  return {
+    id: uuidv7(),
+    projectId: ctx.projectId ?? null,
+    objectType: ctx.objectType,
+    objectId: ctx.objectId,
+    action: ctx.action,
+    beforeData: (ctx.before ? snapshotRow(ctx.before) : null) as Prisma.InputJsonValue,
+    afterData: (ctx.after ? snapshotRow(ctx.after) : null) as Prisma.InputJsonValue,
+    operatorId: ctx.operatorId,
+  };
 }

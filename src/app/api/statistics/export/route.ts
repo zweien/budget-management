@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { BusinessStatus } from '@prisma/client';
 
 import { withRoute } from '@/lib/api/withRoute';
+import { parseRecordFilters } from '@/lib/api/record-filters';
 import { requireUser } from '@/lib/auth/session';
 import { exportBalanceStatistics, exportStatistics } from '@/server/services/export.service';
-import type {
-  BalanceStatisticsFilters,
-  CustomStatisticsFilters,
-} from '@/server/services/statistics.service';
-
-const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
+import type { BalanceStatisticsFilters } from '@/server/services/statistics.service';
 
 /**
  * GET /api/statistics/export — 导出统计结果 xlsx(§10.5)。
@@ -52,42 +47,10 @@ export const GET = withRoute(async (req: NextRequest) => {
     });
   }
 
-  const filters: CustomStatisticsFilters = {};
-  const projectId = sp.get('projectId');
-  if (projectId) filters.projectId = projectId;
-
-  const yearParam = sp.get('budgetYear');
-  if (yearParam !== null) {
-    const year = Number.parseInt(yearParam, 10);
-    if (!Number.isInteger(year) || year < 1900 || year > 9999) {
-      return NextResponse.json({ error: '年度参数无效' }, { status: 400 });
-    }
-    filters.budgetYear = year;
-  }
-
-  const subject = sp.get('subject');
-  if (subject) filters.subject = subject;
-
-  const status = sp.get('status');
-  if (status) {
-    if (!STATUS_SET.has(status)) {
-      return NextResponse.json({ error: `状态参数无效:${status}` }, { status: 400 });
-    }
-    filters.status = status as BusinessStatus;
-  }
-
-  const businessDateFrom = sp.get('businessDateFrom');
-  if (businessDateFrom) filters.businessDateFrom = businessDateFrom;
-  const businessDateTo = sp.get('businessDateTo');
-  if (businessDateTo) filters.businessDateTo = businessDateTo;
-
-  const handler = sp.get('handler');
-  if (handler) filters.handler = handler;
-
-  const includeVoidParam = sp.get('includeVoid');
-  if (includeVoidParam === '1' || includeVoidParam === 'true') {
-    filters.includeVoid = true;
-  }
+  const filters = parseRecordFilters(sp);
+  // 导出始终覆盖筛选全集，不接受列表页码截断导出。
+  delete filters.page;
+  delete filters.pageSize;
 
   // 用户时区偏移(浏览器 Date#getTimezoneOffset 分钟,UTC+8 = -480):
   // 导出的「录入时间」按用户时区渲染,与页面显示一致(codex P2);非法值忽略,回落服务器时区。
@@ -96,11 +59,17 @@ export const GET = withRoute(async (req: NextRequest) => {
   const enteredAtOffsetMinutes =
     Number.isInteger(tzOffset) && Math.abs(tzOffset) <= 840 ? tzOffset : undefined;
 
-  const buffer = await exportStatistics(filters, user, { enteredAtOffsetMinutes });
+  const recordsLayout = sp.get('mode') === 'records';
+  const buffer = await exportStatistics(filters, user, {
+    enteredAtOffsetMinutes,
+    layout: recordsLayout ? 'records' : undefined,
+  });
   return new NextResponse(buffer as unknown as BodyInit, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': 'attachment; filename="statistics.xlsx"',
+      'Content-Disposition': recordsLayout
+        ? 'attachment'
+        : 'attachment; filename="statistics.xlsx"',
       // 私有财务数据下载,禁止任何缓存层/浏览器磁盘缓存保留(与其他下载路由一致)。
       'Cache-Control': 'no-store',
     },

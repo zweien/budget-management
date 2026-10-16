@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { EmptyState } from '@/components/layout/empty-state';
 import { MoneyText } from '@/components/ui/MoneyText';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -155,104 +156,122 @@ function PreviewTable({
   isHardRow?: (r: PreviewRow) => boolean;
   emptyText: string;
 }) {
+  const [requestedPage, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const page = Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / pageSize)));
   if (rows.length === 0) {
     return <p className="py-6 text-center text-sm text-muted-foreground">{emptyText}</p>;
   }
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          {selectable ? <TableHead className="w-10" /> : null}
-          <TableHead className="w-14">行号</TableHead>
-          <TableHead>项目编号</TableHead>
-          <TableHead className="w-16">年度</TableHead>
-          <TableHead>科目</TableHead>
-          <TableHead className="w-28 text-right">金额</TableHead>
-          <TableHead className="w-28">业务日期</TableHead>
-          <TableHead className="w-20">经办人</TableHead>
-          <TableHead>摘要</TableHead>
-          <TableHead className="w-28">单据编号</TableHead>
-          <TableHead className="w-24">业务状态</TableHead>
-          <TableHead>备注</TableHead>
-          <TableHead className="w-56">错误</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((r) => {
-          const hard = isHardRow?.(r) ?? false;
-          return (
-            <TableRow key={r.rowId} className={hard ? 'opacity-60' : undefined}>
-              {selectable ? (
-                <TableCell className="pr-0">
-                  {hard ? (
-                    <span
-                      className="inline-block size-4 rounded border border-input bg-muted"
-                      title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
-                      aria-label={`第 ${r.rowNo} 行硬重复,不可导入`}
-                    />
-                  ) : (
-                    <Checkbox
-                      checked={selected.has(r.rowId)}
-                      onCheckedChange={() => onToggle(r.rowId)}
-                      aria-label={`选择第 ${r.rowNo} 行`}
-                    />
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            {selectable ? <TableHead className="w-10" /> : null}
+            <TableHead className="w-14">行号</TableHead>
+            <TableHead>项目编号</TableHead>
+            <TableHead className="w-16">年度</TableHead>
+            <TableHead>科目</TableHead>
+            <TableHead className="w-28 text-right">金额</TableHead>
+            <TableHead className="w-28">业务日期</TableHead>
+            <TableHead className="w-20">经办人</TableHead>
+            <TableHead>摘要</TableHead>
+            <TableHead className="w-28">单据编号</TableHead>
+            <TableHead className="w-24">业务状态</TableHead>
+            <TableHead>备注</TableHead>
+            <TableHead className="w-56">错误</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.slice((page - 1) * pageSize, page * pageSize).map((r) => {
+            const hard = isHardRow?.(r) ?? false;
+            return (
+              <TableRow key={r.rowId} className={hard ? 'opacity-60' : undefined}>
+                {selectable ? (
+                  <TableCell className="pr-0">
+                    {hard ? (
+                      <span
+                        className="inline-block size-4 rounded border border-input bg-muted"
+                        title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
+                        aria-label={`第 ${r.rowNo} 行硬重复,不可导入`}
+                      />
+                    ) : (
+                      <Checkbox
+                        checked={selected.has(r.rowId)}
+                        onCheckedChange={() => onToggle(r.rowId)}
+                        aria-label={`选择第 ${r.rowNo} 行`}
+                      />
+                    )}
+                  </TableCell>
+                ) : null}
+                <TableCell className="tabular-nums">{r.rowNo}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {r.parsedData.projectCode ?? '—'}
+                </TableCell>
+                <TableCell className="tabular-nums">{r.parsedData.budgetYear ?? '—'}</TableCell>
+                <TableCell>
+                  {r.parsedData.subjectName ?? r.parsedData.subjectCode ?? (
+                    <span className="text-mute">—</span>
                   )}
                 </TableCell>
-              ) : null}
-              <TableCell className="tabular-nums">{r.rowNo}</TableCell>
-              <TableCell className="font-mono text-xs">{r.parsedData.projectCode ?? '—'}</TableCell>
-              <TableCell className="tabular-nums">{r.parsedData.budgetYear ?? '—'}</TableCell>
-              <TableCell>
-                {r.parsedData.subjectName ?? r.parsedData.subjectCode ?? (
-                  <span className="text-mute">—</span>
-                )}
-              </TableCell>
-              <TableCell>
-                {r.normalizedAmount ? (
-                  <MoneyText value={r.normalizedAmount} riskOnNegative={false} />
-                ) : (
-                  <span className="block text-right text-mute">—</span>
-                )}
-              </TableCell>
-              <TableCell className="tabular-nums">{r.parsedData.businessDate ?? '—'}</TableCell>
-              <TableCell>{r.parsedData.handler ?? '—'}</TableCell>
-              <TableCell className="max-w-36 truncate" title={r.parsedData.summary ?? undefined}>
-                {r.parsedData.summary ?? '—'}
-              </TableCell>
-              <TableCell className="font-mono text-xs">
-                {hard ? (
-                  <Badge
-                    variant="error"
-                    title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
-                  >
-                    硬重复
-                  </Badge>
-                ) : (
-                  (r.parsedData.docNo ?? <span className="text-mute">—</span>)
-                )}
-              </TableCell>
-              <TableCell>{r.parsedData.businessStatus ?? '—'}</TableCell>
-              <TableCell className="max-w-36 truncate" title={r.parsedData.remark ?? undefined}>
-                {r.parsedData.remark ?? <span className="text-mute">—</span>}
-              </TableCell>
-              <TableCell>
-                {r.errors.length > 0 ? (
-                  <div className="space-y-0.5">
-                    {r.errors.map((e, i) => (
-                      <p key={i} className="text-xs text-error-deep">
-                        {e.field}:{e.message}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-mute">—</span>
-                )}
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+                <TableCell>
+                  {r.normalizedAmount ? (
+                    <MoneyText value={r.normalizedAmount} riskOnNegative={false} />
+                  ) : (
+                    <span className="block text-right text-mute">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="tabular-nums">{r.parsedData.businessDate ?? '—'}</TableCell>
+                <TableCell>{r.parsedData.handler ?? '—'}</TableCell>
+                <TableCell className="max-w-36 truncate" title={r.parsedData.summary ?? undefined}>
+                  {r.parsedData.summary ?? '—'}
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {hard ? (
+                    <Badge
+                      variant="error"
+                      title={`硬重复,禁止导入:${r.parsedData.dupReason ?? '单据编号与未作废记录重复'}`}
+                    >
+                      硬重复
+                    </Badge>
+                  ) : (
+                    (r.parsedData.docNo ?? <span className="text-mute">—</span>)
+                  )}
+                </TableCell>
+                <TableCell>{r.parsedData.businessStatus ?? '—'}</TableCell>
+                <TableCell className="max-w-36 truncate" title={r.parsedData.remark ?? undefined}>
+                  {r.parsedData.remark ?? <span className="text-mute">—</span>}
+                </TableCell>
+                <TableCell>
+                  {r.errors.length > 0 ? (
+                    <div className="space-y-0.5">
+                      {r.errors.map((e, i) => (
+                        <p key={i} className="text-xs text-error-deep">
+                          {e.field}:{e.message}
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-mute">—</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={rows.length}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+        leftHint={`共 ${rows.length} 行，勾选跨页保留`}
+      />
+    </>
   );
 }
 

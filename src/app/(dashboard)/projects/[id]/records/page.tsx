@@ -26,18 +26,17 @@ import {
   type ColumnFiltersState,
 } from '@tanstack/react-table';
 
-import { apiFetch } from '@/lib/api/client';
+import { apiFetch, downloadFile } from '@/lib/api/client';
 import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
 import { buildRecordQuery } from '@/lib/table/record-query';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
-import type { VisibilityState } from '@tanstack/react-table';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { PackageAttachmentsDialog } from '@/components/records/PackageAttachmentsDialog';
 import { dateRange, multiSelectStrict, numberRange, textContains } from '@/lib/table/filter-fns';
 import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
-import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
+import { describeDateRangeValue } from '@/lib/table/describe-date-range';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
 import {
   AlertDialog,
@@ -462,23 +461,26 @@ function BusinessRecordsPageInner() {
   };
 
   /** 打开"修改"Dialog,预填当前行。 */
-  const openEdit = (row: BusinessRecordRow) => {
-    setEditing(row);
-    setPendingFiles([]);
-    form.reset({
-      budgetYear: row.budgetYear,
-      subjectId: row.subjectId,
-      amount: row.amount,
-      businessDate: new Date(row.businessDate),
-      completedDate: row.completedDate ? new Date(row.completedDate) : undefined,
-      handler: row.handler,
-      summary: row.summary,
-      status: row.status,
-      docNo: row.docNo ?? '',
-      remark: row.remark ?? '',
-    });
-    setFormOpen(true);
-  };
+  const openEdit = useCallback(
+    (row: BusinessRecordRow) => {
+      setEditing(row);
+      setPendingFiles([]);
+      form.reset({
+        budgetYear: row.budgetYear,
+        subjectId: row.subjectId,
+        amount: row.amount,
+        businessDate: new Date(row.businessDate),
+        completedDate: row.completedDate ? new Date(row.completedDate) : undefined,
+        handler: row.handler,
+        summary: row.summary,
+        status: row.status,
+        docNo: row.docNo ?? '',
+        remark: row.remark ?? '',
+      });
+      setFormOpen(true);
+    },
+    [form],
+  );
 
   /**
    * 提交新增/修改。
@@ -664,36 +666,42 @@ function BusinessRecordsPageInner() {
   };
 
   /** 切换状态(下拉菜单触发)。 */
-  const switchStatus = async (row: BusinessRecordRow, next: BusinessStatus) => {
-    if (next === row.status) return;
-    try {
-      await apiFetch<{ record: BusinessRecordRow }>(
-        `/api/projects/${projectId}/records/${row.id}/status`,
-        { method: 'POST', body: JSON.stringify({ status: next }) },
-      );
-      toast.success(`状态已切换为:${STATUS_LABEL[next]}`);
-      await reloadRecords();
-    } catch (e) {
-      if (e instanceof Error) toast.error(e.message);
-    }
-  };
+  const switchStatus = useCallback(
+    async (row: BusinessRecordRow, next: BusinessStatus) => {
+      if (next === row.status) return;
+      try {
+        await apiFetch<{ record: BusinessRecordRow }>(
+          `/api/projects/${projectId}/records/${row.id}/status`,
+          { method: 'POST', body: JSON.stringify({ status: next }) },
+        );
+        toast.success(`状态已切换为:${STATUS_LABEL[next]}`);
+        await reloadRecords();
+      } catch (e) {
+        if (e instanceof Error) toast.error(e.message);
+      }
+    },
+    [projectId, reloadRecords],
+  );
 
   /** §17.7 打开变更历史 Sheet,拉取该记录的 history 行。 */
-  const openHistory = async (row: BusinessRecordRow) => {
-    setHistoryTarget(row);
-    setHistoryRows([]);
-    setHistoryLoading(true);
-    try {
-      const data = await apiFetch<{ history: BusinessRecordHistoryRow[] }>(
-        `/api/projects/${projectId}/records/${row.id}/history`,
-      );
-      setHistoryRows(data.history ?? []);
-    } catch (e) {
-      if (e instanceof Error) toast.error(e.message);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
+  const openHistory = useCallback(
+    async (row: BusinessRecordRow) => {
+      setHistoryTarget(row);
+      setHistoryRows([]);
+      setHistoryLoading(true);
+      try {
+        const data = await apiFetch<{ history: BusinessRecordHistoryRow[] }>(
+          `/api/projects/${projectId}/records/${row.id}/history`,
+        );
+        setHistoryRows(data.history ?? []);
+      } catch (e) {
+        if (e instanceof Error) toast.error(e.message);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [projectId],
+  );
 
   // subjectMap 同步更新为 HeaderFilter 的 valueLabels(subjectId → 科目名)。
   const subjectLabels = useMemo(() => {
@@ -757,53 +765,56 @@ function BusinessRecordsPageInner() {
   };
 
   /** 行内操作:修改/状态切换/作废(可录入者且未作废);历史全员可见。 */
-  function RowActions({ row }: { row: BusinessRecordRow }) {
-    return (
-      <div className="flex gap-1">
-        {project?.canWriteRecords ? (
-          <>
-            <Button variant="ghost" size="sm" onClick={() => openEdit(row)} disabled={row.isVoid}>
-              修改
+  const renderRowActions = useCallback(
+    (row: BusinessRecordRow) => {
+      return (
+        <div className="flex gap-1">
+          {project?.canWriteRecords ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => openEdit(row)} disabled={row.isVoid}>
+                修改
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" disabled={row.isVoid}>
+                    状态
+                    <ChevronDown />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
+                    <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
+                      切换为:{STATUS_LABEL[s]}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : null}
+          {/* 作废是破坏性操作(record:void=OWNER/ADMIN),与批量作废入口同门控。 */}
+          {project?.canEdit ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-error-deep hover:bg-error-soft"
+              onClick={() => {
+                setVoidTarget(row);
+                setVoidReason('');
+                setVoidError(null);
+              }}
+              disabled={row.isVoid}
+            >
+              作废
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" disabled={row.isVoid}>
-                  状态
-                  <ChevronDown />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
-                  <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
-                    切换为:{STATUS_LABEL[s]}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        ) : null}
-        {/* 作废是破坏性操作(record:void=OWNER/ADMIN),与批量作废入口同门控。 */}
-        {project?.canEdit ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-error-deep hover:bg-error-soft"
-            onClick={() => {
-              setVoidTarget(row);
-              setVoidReason('');
-              setVoidError(null);
-            }}
-            disabled={row.isVoid}
-          >
-            作废
+          ) : null}
+          <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
+            历史
           </Button>
-        ) : null}
-        <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
-          历史
-        </Button>
-      </div>
-    );
-  }
+        </div>
+      );
+    },
+    [project?.canWriteRecords, project?.canEdit, openEdit, switchStatus, openHistory],
+  );
 
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
   const columns = useMemo<ColumnDef<BusinessRecordRow>[]>(
@@ -1082,10 +1093,11 @@ function BusinessRecordsPageInner() {
         id: 'actions',
         header: () => '操作',
         enableColumnFilter: false,
-        cell: ({ row }) => <RowActions row={row.original} />,
+        cell: ({ row }) => renderRowActions(row.original),
       },
     ],
     [
+      renderRowActions,
       subjectLabels,
       subjectOptions,
       subjectMap,
@@ -1093,7 +1105,6 @@ function BusinessRecordsPageInner() {
       creatorOptions,
       handlerOptions,
       project?.canEdit,
-      project?.canWriteRecords,
       selectedIds,
     ],
   );
@@ -1132,35 +1143,14 @@ function BusinessRecordsPageInner() {
   const handleExportXlsx = async () => {
     setExportingXlsx(true);
     try {
-      const all: BusinessRecordRow[] = [];
-      for (let cursor = 1; ; cursor++) {
-        const data = await apiFetch<{ records: BusinessRecordRow[]; total: number }>(
-          `/api/statistics/custom?${buildParams(cursor, 500)}`,
-        );
-        all.push(...data.records);
-        if (!data.records.length || all.length >= data.total) break;
-      }
-      await exportRecordsToXlsx(
-        all.map((o) => ({
-          budgetYear: o.budgetYear,
-          subject: subjectMap.get(o.subjectId)?.name ?? o.subjectId.slice(0, 8),
-          businessDate: o.businessDate,
-          completedDate: o.completedDate,
-          amount: o.amount,
-          status: o.isVoid ? '已作废' : (STATUS_LABEL[o.status] ?? o.status),
-          docNo: o.docNo,
-          handler: o.handler,
-          summary: o.summary,
-          remark: o.remark,
-          creatorName: o.creatorName,
-          enteredAt: o.enteredAt,
-        })),
-        {
-          fileName: `业务记录-${project?.code ?? projectId}-${format(new Date(), 'yyyyMMdd')}`,
-          title: project ? `${project.name} 业务记录(筛选结果)` : undefined,
-        },
+      const params = buildParams(1, 1);
+      params.set('mode', 'records');
+      params.set('tzOffset', String(new Date().getTimezoneOffset()));
+      await downloadFile(
+        `/api/statistics/export?${params}`,
+        `业务记录-${project?.code ?? projectId}-${format(new Date(), 'yyyyMMdd')}.xlsx`,
       );
-      toast.success(`已导出 ${all.length} 条记录`);
+      toast.success('已导出筛选结果');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '导出失败');
     } finally {

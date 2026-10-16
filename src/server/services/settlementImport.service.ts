@@ -8,6 +8,7 @@ import { denyApiKeyCrossProject, requirePermission } from '@/lib/auth/permission
 import { uuidv7 } from '@/lib/id';
 import { toStored, fromStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
+import { createImportedRecords } from '@/server/services/importRecords.service';
 import { snapshotRow } from '@/server/audit/snapshot';
 import {
   isSettlementTemplateVersion,
@@ -1619,7 +1620,7 @@ export async function confirmSettlementImport(
 ): Promise<{ created: number; updated: number; batchId: string }> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
-    include: { rows: true },
+    include: { rows: { orderBy: { rowNo: 'asc' } } },
   });
   if (!batch) {
     throw new HTTPError(404, '导入批次不存在');
@@ -1840,7 +1841,7 @@ export async function confirmSettlementImport(
         });
       }
 
-      for (const row of createRows) {
+      const newRecords = createRows.map((row) => {
         const data = row.parsedData as unknown as SettlementParsedRow;
         const amount = normalizeAmount(data.amount);
         if (!amount) {
@@ -1861,7 +1862,7 @@ export async function confirmSettlementImport(
         }
 
         const recordId = uuidv7();
-        const created = await tx.businessRecord.create({
+        return {
           data: {
             id: recordId,
             projectId: rowProjectId(row),
@@ -1877,35 +1878,12 @@ export async function confirmSettlementImport(
             isVoid: false,
             createdById: user.id,
           },
-        });
-
-        if (row.duplicateFlag) {
-          await tx.importRow.update({
-            where: { id: row.id },
-            data: { forcedImport: true },
-          });
-        }
-
-        const after = snapshotRow({
-          ...created,
-          amount: created.amount.toFixed(2),
-          businessDate: formatYmd(created.businessDate),
-          importBatchId: batchId,
+          importRowId: row.id,
           importRowNo: row.rowNo,
           forcedImport: row.duplicateFlag,
-        });
-
-        await recordAudit(tx, {
-          projectId: rowProjectId(row),
-          objectType: 'business_records',
-          objectId: recordId,
-          action: 'import',
-          operatorId: user.id,
-          after,
-        });
-
-        createdIds.push(recordId);
-      }
+        };
+      });
+      createdIds.push(...(await createImportedRecords(tx, newRecords, batchId, user.id)));
 
       updatedCount = refreshRows.length;
       await tx.importBatch.update({

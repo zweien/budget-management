@@ -288,6 +288,17 @@ describe('export.service (integration, real PG)', () => {
       }
     }
     expect(foundAmount).toBe(true);
+    const listBuffer = await exportStatistics(
+      { projectId: project.id, budgetYear: 2026 },
+      adminUser(),
+      { layout: 'records' },
+    );
+    const listWorkbook = new ExcelJS.Workbook();
+    await listWorkbook.xlsx.load(listBuffer as never);
+    const listSheet = listWorkbook.worksheets[0];
+    expect(listSheet.getRow(2).values).toContain('年度');
+    expect(listSheet.getRow(2).values).toContain('单据编号');
+    expect(listSheet.getRow(3).values).toContain(200);
   });
 
   it('exportStatistics: 跨项目(无 projectId)普通用户可导出(全局只读)', async () => {

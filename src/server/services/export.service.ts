@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
 import { HTTPError } from '@/lib/auth/session';
 import { fromStored } from '@/lib/decimal';
+import { STATUS_ENUM_TO_CN } from '@/lib/excel/template';
 import { getProjectLedger, type LedgerNode } from '@/server/services/ledger.service';
 import {
   balanceStatistics,
@@ -177,14 +178,23 @@ function ledgerNodeRow(node: LedgerNode): (string | number)[] {
 export async function exportStatistics(
   filters: CustomStatisticsFilters,
   user: ExportUser,
-  tz?: { enteredAtOffsetMinutes?: number },
+  tz?: { enteredAtOffsetMinutes?: number; layout?: 'records' },
 ): Promise<Buffer> {
-  // 1) 复用 statistics service(内部已做权限 + 占用计算)。
-  const result = await customStatistics(filters, user);
+  // 先用单行预检取得筛选全集行数，超限时不搬运全部业务明细。
+  const preview = await customStatistics({ ...filters, page: 1, pageSize: 1 }, user);
+  if (preview.total > env.MAX_EXPORT_ROWS) {
+    throw new HTTPError(
+      413,
+      `导出行数(${preview.total})超过上限 ${env.MAX_EXPORT_ROWS},请增加筛选条件缩小范围`,
+    );
+  }
+  // 再次读取也有硬上限，避免预检与读取之间的新增将内存物化放大到无界。
+  const result = await customStatistics(
+    { ...filters, page: 1, pageSize: env.MAX_EXPORT_ROWS },
+    user,
+  );
 
-  // 行数门(安全审计 bm1-sxp-statexport-unpaged-full-record-xlsx):custom 导出走
-  // 「缺省全量」语义,导出前不设行数上限——明细行逐行写 workbook 且整个 xlsx 在内存
-  // 物化,行数无界时单次请求即可耗尽共享进程堆。超限 413,提示加筛选缩小范围。
+  // 预检后发生并发新增时仍检查总数，不能静默截断筛选全集。
   if (result.total > env.MAX_EXPORT_ROWS) {
     throw new HTTPError(
       413,
@@ -205,6 +215,10 @@ export async function exportStatistics(
         })
       : Promise.resolve(null),
   ]);
+
+  if (tz?.layout === 'records') {
+    return exportRecordList(result.records, project, tz.enteredAtOffsetMinutes);
+  }
 
   // 3) 构造 workbook。
   const workbook = new ExcelJS.Workbook();
@@ -287,6 +301,64 @@ export async function exportStatistics(
     sheet.getColumn(c).width = 16;
   }
 
+  return toBuffer(await workbook.xlsx.writeBuffer());
+}
+
+/** 记录页的筛选全集；沿用数值金额、中文状态、冻结表头和项目标题。 */
+async function exportRecordList(
+  records: CustomStatisticsResult['records'],
+  project: { code: string; name: string } | null,
+  offsetMinutes?: number,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('业务记录');
+  const headers = [
+    '项目',
+    '年度',
+    '科目',
+    '申请日期',
+    '完成日期',
+    '金额',
+    '状态',
+    '单据编号',
+    '经办人',
+    '摘要',
+    '备注',
+    '录入人',
+    '录入时间',
+  ];
+  const widths = [24, 8, 22, 12, 12, 14, 10, 20, 10, 32, 28, 10, 17];
+  if (project) {
+    sheet.mergeCells(1, 1, 1, headers.length - 1);
+    sheet.getCell('A1').value = `${project.name} 业务记录(筛选结果)`;
+    sheet.getCell('A1').font = { bold: true, size: 13 };
+  }
+  (project ? widths.slice(1) : widths).forEach((width, i) => {
+    sheet.getColumn(i + 1).width = width;
+  });
+  const header = sheet.addRow(project ? headers.slice(1) : headers);
+  header.font = { bold: true };
+  sheet.views = [{ state: 'frozen', ySplit: header.number }];
+  for (const rec of records) {
+    const values = [
+      `${rec.project.code} ${rec.project.name}`,
+      rec.budgetYear,
+      rec.subject.name,
+      toIsoDate(rec.businessDate),
+      rec.completedDate ? toIsoDate(rec.completedDate) : '',
+      fromStored(rec.amount).toNumber(),
+      rec.isVoid ? '已作废' : (STATUS_ENUM_TO_CN[rec.status] ?? rec.status),
+      rec.docNo ?? '',
+      rec.handler,
+      rec.summary,
+      rec.remark ?? '',
+      rec.creatorName ?? '',
+      // 两个记录页原有时间字段不同，保持各页口径。
+      toIsoDateTime(project ? rec.enteredAt : rec.createdAt, offsetMinutes).slice(0, 16),
+    ];
+    const row = sheet.addRow(project ? values.slice(1) : values);
+    row.getCell(project ? 5 : 6).numFmt = '#,##0.00';
+  }
   return toBuffer(await workbook.xlsx.writeBuffer());
 }
 

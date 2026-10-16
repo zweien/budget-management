@@ -7,8 +7,7 @@ import { env } from '@/lib/env';
 import { requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { D, ZERO, fromStored, toStored } from '@/lib/decimal';
-import { recordAudit } from '@/server/audit/interceptor';
-import { snapshotRow } from '@/server/audit/snapshot';
+import { createImportedRecords } from '@/server/services/importRecords.service';
 import { checkDuplicates, hardDupReason } from '@/server/services/duplicateCheck.service';
 import {
   EXCEL_COLUMNS,
@@ -659,7 +658,7 @@ export async function confirmImport(
           );
         }
       }
-      for (const row of eligibleRows) {
+      const newRecords = eligibleRows.map((row) => {
         const data = row.parsedData as unknown as ParsedRowData;
         const subj = data.subjectCode ? subjectByCode.get(data.subjectCode) : null;
         // 行已校验通过,理论上科目一定存在;防御性兜底。
@@ -682,7 +681,7 @@ export async function confirmImport(
         }
 
         const recordId = uuidv7();
-        const created = await tx.businessRecord.create({
+        return {
           data: {
             id: recordId,
             projectId: batch.projectId,
@@ -698,36 +697,12 @@ export async function confirmImport(
             isVoid: false,
             createdById: user.id,
           },
-        });
-
-        // §10.3 强制导入重复行留痕:置 forcedImport=true + 审计 after 附 forcedImport。
-        if (row.duplicateFlag) {
-          await tx.importRow.update({
-            where: { id: row.id },
-            data: { forcedImport: true },
-          });
-        }
-
-        const after = snapshotRow({
-          ...created,
-          amount: created.amount.toFixed(2),
-          businessDate: formatYmd(created.businessDate),
-          importBatchId: batchId,
+          importRowId: row.id,
           importRowNo: row.rowNo,
           forcedImport: row.duplicateFlag,
-        });
-
-        await recordAudit(tx, {
-          projectId: batch.projectId,
-          objectType: 'business_records',
-          objectId: recordId,
-          action: 'import',
-          operatorId: user.id,
-          after,
-        });
-
-        createdIds.push(recordId);
-      }
+        };
+      });
+      createdIds.push(...(await createImportedRecords(tx, newRecords, batchId, user.id)));
 
       await tx.importBatch.update({
         where: { id: batchId },

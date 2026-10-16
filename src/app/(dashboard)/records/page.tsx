@@ -20,14 +20,14 @@ import { z } from 'zod';
 
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 
-import { apiFetch } from '@/lib/api/client';
+import { apiFetch, downloadFile } from '@/lib/api/client';
 import { buildRecordQuery } from '@/lib/table/record-query';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
-import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
+import { describeDateRangeValue } from '@/lib/table/describe-date-range';
 import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -804,37 +804,14 @@ function UnifiedRecordsPageInner() {
   const handleExportXlsx = async () => {
     setExportingXlsx(true);
     try {
-      // 所见即所导:按当前筛选逐页拉全量(单页 500,直至取满 total)。
-      const all: UnifiedRecordRow[] = [];
-      let cursor = 1;
-      for (;;) {
-        const sp = buildParams(cursor, 500);
-        const data = await apiFetch<{ records: UnifiedRecordRow[]; total: number }>(
-          `/api/statistics/custom?${sp.toString()}`,
-        );
-        all.push(...(data.records ?? []));
-        if (!data.records?.length || all.length >= (data.total ?? 0) || cursor >= 200) break;
-        cursor++;
-      }
-      await exportRecordsToXlsx(
-        all.map((o) => ({
-          project: projectName.get(o.projectId) ?? o.projectId.slice(0, 8),
-          budgetYear: o.budgetYear,
-          subject: o.subject?.name ?? o.subjectId.slice(0, 8),
-          businessDate: o.businessDate,
-          completedDate: o.completedDate,
-          amount: o.amount,
-          status: o.isVoid ? '已作废' : (STATUS_LABEL[o.status] ?? o.status),
-          docNo: o.docNo,
-          handler: o.handler,
-          summary: o.summary,
-          remark: o.remark,
-          creatorName: o.creatorName,
-          enteredAt: o.createdAt,
-        })),
-        { fileName: `业务录入-${format(new Date(), 'yyyyMMdd')}` },
+      const params = buildParams(1, 1);
+      params.set('mode', 'records');
+      params.set('tzOffset', String(new Date().getTimezoneOffset()));
+      await downloadFile(
+        `/api/statistics/export?${params}`,
+        `业务录入-${format(new Date(), 'yyyyMMdd')}.xlsx`,
       );
-      toast.success(`已导出 ${all.length} 条记录`);
+      toast.success('已导出筛选结果');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '导出失败');
     } finally {
