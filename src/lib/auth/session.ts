@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS } from '@/lib/auth/oidc';
 import { verifyApiKey } from '@/lib/auth/api-key';
+import { measureAuthentication } from '@/server/observability/request-metrics';
 
 function sessionSecret(): Uint8Array {
   // MOCK_AUTH=false 时 env 校验保证 AUTH_SECRET 存在且 ≥32 字符。
@@ -86,7 +87,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 }
 
 export async function requireUser(): Promise<CurrentUser> {
-  const user = await getCurrentUser();
+  const user = await measureAuthentication(getCurrentUser);
   if (!user) throw new HTTPError(401, '未登录或用户不存在');
   return user;
 }

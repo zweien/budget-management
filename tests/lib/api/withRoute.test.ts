@@ -123,7 +123,7 @@ describe('withRoute(HTTP 边缘)', () => {
   it('请求日志:一行结构化 JSON,含 requestId/method/path/status/耗时', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const handler = withRoute(async () => NextResponse.json({ ok: true }));
-    await call(handler, '/api/health');
+    const response = await call(handler, '/api/health');
     expect(logSpy).toHaveBeenCalledTimes(1);
     const log = JSON.parse(logSpy.mock.calls[0][0] as string);
     expect(log.msg).toBe('http_request');
@@ -133,6 +133,8 @@ describe('withRoute(HTTP 边缘)', () => {
     expect(log.status).toBe(200);
     expect(log.requestId).toBeTruthy();
     expect(typeof log.durationMs).toBe('number');
+    expect(response.headers.get('x-request-id')).toBe(log.requestId);
+    expect(response.headers.get('server-timing')).toMatch(/app;dur=\d/);
   });
 });
 

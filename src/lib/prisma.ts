@@ -1,7 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { env } from '@/lib/env';
+import { measureDatabase } from '@/server/observability/request-metrics';
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const globalForPrisma = globalThis as unknown as {
+  prisma?: PrismaClient;
+  measuredClients?: WeakSet<PrismaClient>;
+};
 
 /**
  * 连接池上限基线:拼进 DATABASE_URL 的 connection_limit(URL 已带该参数时不覆盖,
@@ -23,6 +27,13 @@ export const prisma =
     // 会以 P2028 整批回滚。单笔交互仍远小于该上限;超大批次应在调用方分批。
     transactionOptions: { maxWait: 5_000, timeout: 30_000 },
   });
+
+// HMR 不重复注册 middleware；请求外调用不采集，也不输出查询参数。
+globalForPrisma.measuredClients ??= new WeakSet();
+if (!globalForPrisma.measuredClients.has(prisma)) {
+  prisma.$use((params, next) => measureDatabase(() => next(params)));
+  globalForPrisma.measuredClients.add(prisma);
+}
 
 if (env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 

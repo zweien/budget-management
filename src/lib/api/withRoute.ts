@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 
 import { env } from '@/lib/env';
 import { HTTPError } from '@/lib/auth/session';
+import { requestMetrics } from '@/server/observability/request-metrics';
 
 /**
  * HTTP 边缘的深模块:一条接缝服务全部 API 路由。
@@ -74,6 +75,9 @@ interface RequestLogInfo {
   path: string;
   status: number;
   durationMs: number;
+  dbOperations?: number;
+  dbDurationMs?: number;
+  authDurationMs?: number;
   error?: string;
   stack?: string;
 }
@@ -153,29 +157,45 @@ export function assertContentLengthBelow(req: Request, cap: number): void {
 export function withRoute<Ctx>(
   handler: (req: NextRequest, ctx: Ctx) => Promise<Response>,
 ): (req: NextRequest, ctx: Ctx) => Promise<Response> {
-  return async (req, ctx) => {
-    const startedAt = Date.now();
-    const requestId = crypto.randomUUID();
-    const method = req.method;
-    // 兼容 NextRequest 与测试直调时的普通 Request(后者无 nextUrl)。
-    const path = new URL(req.url).pathname;
-    let res: Response;
-    try {
-      res = await handler(req, ctx);
-    } catch (e) {
-      const { status, message, stack } = classify(e);
+  return async (req, ctx) =>
+    requestMetrics.run({ dbOperations: 0, dbDurationMs: 0, authDurationMs: 0 }, async () => {
+      const startedAt = performance.now();
+      const requestId = crypto.randomUUID();
+      const method = req.method;
+      // 兼容 NextRequest 与测试直调时的普通 Request(后者无 nextUrl)。
+      const path = new URL(req.url).pathname;
+      let res: Response;
+      let failure: Pick<RequestLogInfo, 'error' | 'stack'> = {};
+      try {
+        res = await handler(req, ctx);
+      } catch (e) {
+        const { status, message, stack } = classify(e);
+        failure = { error: message, stack };
+        res = NextResponse.json({ error: message, requestId }, { status });
+      }
+      const round = (ms: number) => Math.round(ms * 10) / 10;
+      const durationMs = round(performance.now() - startedAt);
+      const metrics = requestMetrics.getStore()!;
+      res.headers.set('X-Request-Id', requestId);
+      res.headers.append(
+        'Server-Timing',
+        [
+          `app;dur=${durationMs}`,
+          `db;dur=${round(metrics.dbDurationMs)}`,
+          `auth;dur=${round(metrics.authDurationMs)}`,
+        ].join(', '),
+      );
       writeLog({
         requestId,
         method,
         path,
-        status,
-        durationMs: Date.now() - startedAt,
-        error: message,
-        stack,
+        status: res.status,
+        durationMs,
+        dbOperations: metrics.dbOperations,
+        dbDurationMs: round(metrics.dbDurationMs),
+        authDurationMs: round(metrics.authDurationMs),
+        ...failure,
       });
-      return NextResponse.json({ error: message, requestId }, { status });
-    }
-    writeLog({ requestId, method, path, status: res.status, durationMs: Date.now() - startedAt });
-    return res;
-  };
+      return res;
+    });
 }

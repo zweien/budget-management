@@ -36,12 +36,18 @@ export interface AttachmentInput {
   buffer: Buffer;
 }
 
-type AttachmentWithUploader = Prisma.RecordAttachmentGetPayload<{
-  include: { uploadedBy: { select: { id: true; name: true } } };
-}>;
+const metaSelect = {
+  id: true,
+  recordId: true,
+  fileName: true,
+  contentType: true,
+  sizeBytes: true,
+  createdAt: true,
+  uploadedBy: { select: { id: true, name: true } },
+} satisfies Prisma.RecordAttachmentSelect;
 
 /** 行 → AttachmentMeta(剔除 data)。 */
-function toMeta(row: AttachmentWithUploader): AttachmentMeta {
+function toMeta(row: AttachmentMeta): AttachmentMeta {
   return {
     id: row.id,
     recordId: row.recordId,
@@ -76,7 +82,7 @@ export async function listAttachments(
   const rows = await prisma.recordAttachment.findMany({
     where: { recordId },
     orderBy: { createdAt: 'asc' },
-    include: { uploadedBy: { select: { id: true, name: true } } },
+    select: metaSelect,
   });
   return rows.map(toMeta);
 }
@@ -106,7 +112,7 @@ export async function getAttachmentData(
   await requirePermission(user, 'project:view', row.record.projectId);
   const { record, ...rest } = row;
   void record;
-  return { meta: toMeta(rest as AttachmentWithUploader), data: row.data };
+  return { meta: toMeta(rest), data: row.data };
 }
 
 /**
@@ -144,7 +150,7 @@ export async function createAttachment(
         data: file.buffer,
         uploadedById: user.id,
       },
-      include: { uploadedBy: { select: { id: true, name: true } } },
+      select: metaSelect,
     });
     await recordAudit(tx, {
       projectId: record.projectId,
@@ -295,7 +301,7 @@ export async function listForExport(
     void uploadedBy;
     return {
       record,
-      attachment: toMeta({ ...meta, uploadedBy: r.uploadedBy } as AttachmentWithUploader),
+      attachment: toMeta({ ...meta, uploadedBy: r.uploadedBy }),
       data,
     };
   });

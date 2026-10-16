@@ -254,6 +254,27 @@ function ValuesFilter<TData>({
   );
 }
 
+/** 输入先留在控件，短暂停顿或失焦后提交；离散筛选仍即时生效。 */
+function useDebouncedCommit<T>(commit: (value: T) => void) {
+  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pending = React.useRef<{ value: T; commit: (value: T) => void } | null>(null);
+  const flush = React.useCallback(() => {
+    clearTimeout(timer.current);
+    const next = pending.current;
+    pending.current = null;
+    if (next) next.commit(next.value);
+  }, []);
+  React.useEffect(() => () => clearTimeout(timer.current), []);
+  return {
+    schedule: (value: T) => {
+      clearTimeout(timer.current);
+      pending.current = { value, commit };
+      timer.current = setTimeout(flush, 250);
+    },
+    flush,
+  };
+}
+
 function TextFilter<TData>({
   column,
   placeholder,
@@ -261,14 +282,18 @@ function TextFilter<TData>({
   column: Column<TData, unknown>;
   placeholder?: string;
 }) {
+  const { schedule, flush } = useDebouncedCommit<string>((value) =>
+    column.setFilterValue(value.trim() === '' ? undefined : value),
+  );
   return (
     <Input
       autoFocus
       defaultValue={(column.getFilterValue() as string | undefined) ?? ''}
       placeholder={placeholder ?? '包含…'}
-      onChange={(e) => {
-        const v = e.target.value;
-        column.setFilterValue(v.trim() === '' ? undefined : v);
+      onChange={(e) => schedule(e.target.value)}
+      onBlur={flush}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') flush();
       }}
     />
   );
@@ -276,9 +301,13 @@ function TextFilter<TData>({
 
 function RangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
   const v = (column.getFilterValue() as NumberRangeValue | undefined) ?? {};
+  const draft = React.useRef(v);
+  const { schedule, flush } = useDebouncedCommit<NumberRangeValue>((next) =>
+    column.setFilterValue(next.min || next.max ? next : undefined),
+  );
   const set = (patch: NumberRangeValue) => {
-    const next = { ...v, ...patch };
-    column.setFilterValue(next.min || next.max ? next : undefined);
+    draft.current = { ...draft.current, ...patch };
+    schedule(draft.current);
   };
   return (
     <div className="flex items-center gap-2">
@@ -288,6 +317,7 @@ function RangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
         placeholder="最小"
         className="h-8"
         onChange={(e) => set({ min: e.target.value })}
+        onBlur={flush}
       />
       <span className="text-mute">—</span>
       <Input
@@ -296,6 +326,7 @@ function RangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
         placeholder="最大"
         className="h-8"
         onChange={(e) => set({ max: e.target.value })}
+        onBlur={flush}
       />
     </div>
   );

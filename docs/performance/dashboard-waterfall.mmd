@@ -1,0 +1,20 @@
+sequenceDiagram
+  participant B as 浏览器
+  participant U as 身份接口
+  participant S as 汇总接口
+  participant D as 数据库
+  B->>B: 下载并执行页面 JS
+  par 顶栏 / 侧栏 / 页面各自查询
+    B->>U: GET 当前用户
+    U->>D: 读取用户有效状态
+    D-->>U: 用户
+    U-->>B: 当前用户
+  end
+  B->>B: 页面身份就绪后挂载指标组件
+  par 各指标组件查询
+    B->>S: GET 各类汇总
+    S->>D: 读取预算 / 聚合或读取业务记录
+    D-->>S: 结果
+    S-->>B: 指标
+  end
+  B->>B: 指标显示并可操作

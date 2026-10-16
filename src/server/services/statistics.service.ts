@@ -213,12 +213,12 @@ export async function customStatistics(
 
   // 2) 科目模糊检索:取项目(或全部)科目树,contains 匹配后展开为叶 ID 集合。
   //    无匹配 → 直接返回空结果(不再查记录)。
-  const subjectWhere: Prisma.BudgetSubjectWhereInput = filters.projectId
-    ? { projectId: filters.projectId }
-    : {};
-  const allSubjects = await prisma.budgetSubject.findMany({ where: subjectWhere });
   let subjectLeafIds: Set<string> | undefined;
   if (filters.subject) {
+    const allSubjects = await prisma.budgetSubject.findMany({
+      where: requestedProjectIds.length ? { projectId: { in: requestedProjectIds } } : {},
+      select: { id: true, code: true, name: true, parentId: true, isLeaf: true },
+    });
     subjectLeafIds = matchSubjects(allSubjects, filters.subject).leafIds;
     if (subjectLeafIds.size === 0) {
       return {

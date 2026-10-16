@@ -207,6 +207,8 @@ type RecordFormValues = z.infer<typeof recordSchema>;
 function UnifiedRecordsPageInner() {
   // ---- 元数据 ----
   const [projects, setProjects] = useState<ProjectWithPermissions[] | null>(null);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectsAttempt, setProjectsAttempt] = useState(0);
   const [subjectsByProject, setSubjectsByProject] = useState<Record<string, SubjectNode[]>>({});
 
   // ---- 录入卡片 ----
@@ -318,12 +320,12 @@ function UnifiedRecordsPageInner() {
         if (!cancelled) setProjects(list);
       })
       .catch((e: unknown) => {
-        if (!cancelled && e instanceof Error) toast.error(e.message);
+        if (!cancelled) setProjectsError(e instanceof Error ? e.message : '项目加载失败');
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [projectsAttempt]);
 
   /** 列 id(表头筛选)→ 服务端查询参数(筛选/排序语义全部下推 SQL)。 */
   const idByLabel = useMemo(() => {
@@ -467,40 +469,47 @@ function UnifiedRecordsPageInner() {
   // 请求序号:仅最新请求可落结果(与统计页同款守卫,防翻页/筛选连点时慢旧响应覆盖新结果)。
   const reqSeqRef = useRef(0);
   /** 列表重拉:服务端筛选/排序/分页,一次一页。 */
-  const reloadRecords = useCallback(async () => {
-    if (scope === 'writable' && writableIds.size === 0) {
-      setRecords([]);
-      setTotal(0);
-      setStats({ totalCount: 0, validCount: 0, amountSum: '0.00' });
-      setLoadingRecords(false);
-      return;
-    }
-    const seq = ++reqSeqRef.current;
-    setLoadingRecords(true);
-    try {
-      const data = await apiFetch<{
-        records: UnifiedRecordRow[];
-        total: number;
-        stats: { totalCount: number; validCount: number; amountSum: string };
-      }>(`/api/statistics/custom?${buildParams(page, pageSize).toString()}`);
-      if (seq !== reqSeqRef.current) return;
-      setRecords(data.records ?? []);
-      setTotal(data.total ?? 0);
-      setStats(data.stats ?? null);
-    } catch (e) {
-      if (seq === reqSeqRef.current && e instanceof Error) toast.error(e.message);
-    } finally {
-      if (seq === reqSeqRef.current) setLoadingRecords(false);
-    }
-  }, [buildParams, page, pageSize, scope, writableIds]);
+  const reloadRecords = useCallback(
+    async (signal?: AbortSignal) => {
+      const seq = ++reqSeqRef.current;
+      if (scope === 'writable' && writableIds.size === 0) {
+        setRecords([]);
+        setTotal(0);
+        setStats({ totalCount: 0, validCount: 0, amountSum: '0.00' });
+        setLoadingRecords(false);
+        return;
+      }
+      setLoadingRecords(true);
+      try {
+        const data = await apiFetch<{
+          records: UnifiedRecordRow[];
+          total: number;
+          stats: { totalCount: number; validCount: number; amountSum: string };
+        }>(`/api/statistics/custom?${buildParams(page, pageSize).toString()}`, { signal });
+        if (seq !== reqSeqRef.current || signal?.aborted) return;
+        setRecords(data.records ?? []);
+        setTotal(data.total ?? 0);
+        setStats(data.stats ?? null);
+      } catch (e) {
+        if (seq === reqSeqRef.current && !signal?.aborted && e instanceof Error)
+          toast.error(e.message);
+      } finally {
+        if (seq === reqSeqRef.current && !signal?.aborted) setLoadingRecords(false);
+      }
+    },
+    [buildParams, page, pageSize, scope, writableIds],
+  );
 
   useEffect(() => {
     // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中(异步)。
-    void reloadRecords();
+    const controller = new AbortController();
+    void reloadRecords(controller.signal);
+    return () => controller.abort();
   }, [reloadRecords]);
 
   // 值列候选:项目集合或权限范围变化时拉一次(跨项目接口,全局只读)。
   useEffect(() => {
+    if (projects === null || (scope === 'writable' && writableIds.size === 0)) return;
     let cancelled = false;
     const qs = new URLSearchParams();
     const ids = scope === 'writable' ? Array.from(writableIds) : Array.from(projectName.keys());
@@ -520,7 +529,7 @@ function UnifiedRecordsPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [projectName, scope, writableIds]);
+  }, [projectName, projects, scope, writableIds]);
 
   /** 可作废项目集(record:void 需 OWNER/ADMIN → canEdit;录入人员 HANDLER 不可批量作废,codex P1)。 */
   const voidableIds = useMemo(
@@ -1139,7 +1148,23 @@ function UnifiedRecordsPageInner() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {projects === null ? (
+          {projectsError ? (
+            <Alert variant="error">
+              <AlertDescription>
+                {projectsError}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setProjectsError(null);
+                    setProjectsAttempt((value) => value + 1);
+                  }}
+                >
+                  重新加载
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : projects === null ? (
             <Skeleton className="h-20 w-full" />
           ) : writableProjects.length === 0 ? (
             <Alert variant="info">

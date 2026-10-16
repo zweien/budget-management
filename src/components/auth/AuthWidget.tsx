@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api/client';
 import { MockUserSelector } from '@/components/auth/MockUserSelector';
 import { UserMenu } from '@/components/auth/UserMenu';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 
 interface Me {
   id: string;
@@ -21,6 +22,8 @@ interface Me {
  */
 export function AuthWidget() {
   const [me, setMe] = React.useState<Me | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  const [attempt, setAttempt] = React.useState(0);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -29,12 +32,28 @@ export function AuthWidget() {
         if (!cancelled) setMe(u);
       })
       .catch(() => {
-        // 401 时 apiFetch 已触发跳登录;其余错误保持骨架,不阻塞页面主体。
+        // 401 时 apiFetch 跳登录；网络错误提供重试，避免永久骨架。
+        if (!cancelled) setFailed(true);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
+
+  if (failed) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          setFailed(false);
+          setAttempt((value) => value + 1);
+        }}
+      >
+        身份加载失败，重试
+      </Button>
+    );
+  }
 
   if (!me) {
     return <Skeleton className="h-8 w-40" />;

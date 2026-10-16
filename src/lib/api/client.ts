@@ -202,8 +202,32 @@ function parseFilenameFromDisposition(header: string | null): string | null {
  * 调用前会 `await bootstrapMockUser()` 确保身份就绪,从而消除数据页与
  * 顶部选择器 bootstrap 之间的竞态。一旦就绪,header 永远会被注入。
  */
+const pendingReads = new Map<string, Promise<unknown>>();
+
 export async function apiFetch<T = unknown>(path: string, init: ApiFetchOptions = {}): Promise<T> {
   const mockUserId = await bootstrapMockUser();
+  // 只合并浏览器中没有自定义选项的并发 GET。完成即删除；不缓存身份或授权结果。
+  // 带 signal 的查询独立执行，避免一个调用者取消影响其他调用者。
+  if (typeof window === 'undefined' || Object.keys(init).length > 0) {
+    return performApiFetch<T>(path, init, mockUserId);
+  }
+  const key = `${mockUserId ?? 'sso'}:${path}`;
+  const existing = pendingReads.get(key);
+  if (existing) return existing as Promise<T>;
+  const request = performApiFetch<T>(path, init, mockUserId);
+  pendingReads.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (pendingReads.get(key) === request) pendingReads.delete(key);
+  }
+}
+
+async function performApiFetch<T>(
+  path: string,
+  init: ApiFetchOptions,
+  mockUserId: string | null,
+): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');

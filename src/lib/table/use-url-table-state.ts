@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ColumnFiltersState, SortingState } from '@tanstack/react-table';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 
 /**
  * §筛选状态 URL 同步(业务记录两页共用)。
  *
- * - 全部列筛选 + 排序打包为单个 `f` 参数(base64url JSON),`router.replace`
+ * - 全部列筛选 + 排序打包为单个 `f` 参数(base64url JSON),原生 replaceState
  *   回写(不堆浏览器历史);刷新/分享链接后筛选原样恢复。
  * - 进入时 `f` 优先;无 `f` 时回落到 legacyInit(兼容旧深链 ?subjectId=xx&year=yyyy
  *   与状态默认值),并在首次回写时把旧参数从 URL 中移除。
@@ -86,7 +86,6 @@ export interface UrlSyncedTableState {
  */
 export function useUrlSyncedTableState(legacyInit: UrlTableState): UrlSyncedTableState {
   const search = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
 
   // useState 初始化器只在首帧执行:URL `f` 优先,否则 legacy(深链种子/默认筛选)。
@@ -111,8 +110,13 @@ export function useUrlSyncedTableState(legacyInit: UrlTableState): UrlSyncedTabl
     params.delete('subjectId');
     params.delete('year');
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [columnFilters, sorting, router, pathname]);
+    // 只同步客户端表格状态，不触发一轮服务器导航；Next 同步 useSearchParams。
+    window.history.replaceState(
+      null,
+      '',
+      (qs ? `${pathname}?${qs}` : pathname) + window.location.hash,
+    );
+  }, [columnFilters, sorting, pathname]);
 
   return { columnFilters, sorting, setColumnFilters, setSorting };
 }

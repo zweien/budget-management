@@ -194,16 +194,6 @@ interface ProjectDetail {
   canEdit?: boolean;
 }
 
-interface LedgerResponse {
-  year: number;
-  nodes: Array<{
-    subjectId: string;
-    code: string;
-    name: string;
-    isLeaf: boolean;
-  }>;
-}
-
 /** 把 BusinessRecord.businessDate(可能是 ISO 或带 T 的字符串)统一为 YYYY-MM-DD 展示。 */
 function formatDate(s: string | null): string {
   if (!s) return '—';
@@ -343,15 +333,17 @@ function BusinessRecordsPageInner() {
     let cancelled = false;
     (async () => {
       try {
-        const [proj, ledger] = await Promise.all([
+        const [proj, subjectData] = await Promise.all([
           apiFetch<ProjectDetail>(`/api/projects/${projectId}`),
-          apiFetch<LedgerResponse>(`/api/projects/${projectId}/ledger`),
+          apiFetch<{
+            subjects: Array<{ id: string; code: string; name: string; isLeaf: boolean }>;
+          }>(`/api/projects/${projectId}/subjects`),
         ]);
         if (cancelled) return;
         setProject(proj);
-        const leaves: LeafSubject[] = (ledger.nodes ?? [])
+        const leaves: LeafSubject[] = (subjectData.subjects ?? [])
           .filter((n) => n.isLeaf)
-          .map((n) => ({ subjectId: n.subjectId, code: n.code, name: n.name }))
+          .map((n) => ({ subjectId: n.id, code: n.code, name: n.name }))
           .sort((a, b) => a.code.localeCompare(b.code));
         setLeafSubjects(leaves);
       } catch (e) {
