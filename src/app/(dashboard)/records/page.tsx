@@ -387,8 +387,10 @@ function UnifiedRecordsPageInner() {
   }, [loadRecords]);
 
   // 值列候选按范围加载；写入成功后也更新新年度、经办人与录入人。
+  const facetsSeq = useRef(0);
   const loadFacets = useCallback(
     async (signal?: AbortSignal) => {
+      const seq = ++facetsSeq.current;
       if (projects === null || (scope === 'writable' && writableIds.size === 0)) return;
       const qs = new URLSearchParams();
       const ids = scope === 'writable' ? Array.from(writableIds) : Array.from(projectName.keys());
@@ -398,7 +400,7 @@ function UnifiedRecordsPageInner() {
           `/api/statistics/custom-facets?${qs}`,
           { signal },
         );
-        if (!signal?.aborted) setFacets(f);
+        if (!signal?.aborted && seq === facetsSeq.current) setFacets(f);
       } catch {
         /* 候选拉取失败不阻断列表 */
       }

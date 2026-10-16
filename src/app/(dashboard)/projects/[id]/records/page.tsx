@@ -434,17 +434,20 @@ function BusinessRecordsPageInner() {
     void loadRecords(controller.signal);
     return () => controller.abort();
   }, [loadRecords]);
+  const facetsSeq = useRef(0);
   const loadFacets = useCallback(
     async (signal?: AbortSignal) => {
+      const seq = ++facetsSeq.current;
       try {
         const data = await apiFetch<{
           years: number[];
           creatorNames: string[];
           handlerNames: string[];
         }>(`/api/statistics/custom-facets?projectIds=${encodeURIComponent(projectId)}`, { signal });
-        if (!signal?.aborted) setFacets(data);
+        if (!signal?.aborted && seq === facetsSeq.current) setFacets(data);
       } catch (error) {
-        if (!signal?.aborted && error instanceof Error) toast.error(error.message);
+        if (!signal?.aborted && seq === facetsSeq.current && error instanceof Error)
+          toast.error(error.message);
       }
     },
     [projectId],
