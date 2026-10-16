@@ -63,6 +63,7 @@ export const GET = withRoute(async (req: NextRequest) => {
   const buffer = await exportStatistics(filters, user, {
     enteredAtOffsetMinutes,
     layout: recordsLayout ? 'records' : undefined,
+    refreshUser: requireUser,
   });
   return new NextResponse(buffer as unknown as BodyInit, {
     headers: {

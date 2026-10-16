@@ -84,18 +84,22 @@ const routes = [
   ['attachment-list', `/api/projects/${project.id}/records/${project.recordId}/attachments`],
 ];
 const browserRoutes = [
-      ['dashboard', '/'],
-      ['projects', '/projects'],
-      ['records', '/records'],
-      ['project', `/projects/${project.id}`],
-      ['ledger', `/projects/${project.id}/ledger`],
-      ['project-records', `/projects/${project.id}/records`],
-      ['statistics', '/statistics'],
-      ['imports', `/projects/${project.id}/imports`],
-    ];
+  ['dashboard', '/'],
+  ['projects', '/projects'],
+  ['records', '/records'],
+  ['project', `/projects/${project.id}`],
+  ['ledger', `/projects/${project.id}/ledger`],
+  ['project-records', `/projects/${project.id}/records`],
+  ['statistics', '/statistics'],
+  ['imports', `/projects/${project.id}/imports`],
+];
 const available = new Set([...routes, ...browserRoutes].map(([name]) => name));
 for (const name of only) if (!available.has(name)) throw new Error(`未知测量场景: ${name}`);
-if (!routes.some(([name]) => selected(name)) && !(browserSamples > 0 && browserRoutes.some(([name]) => selected(name)))) throw new Error('所选场景没有可执行样本');
+if (
+  !routes.some(([name]) => selected(name)) &&
+  !(browserSamples > 0 && browserRoutes.some(([name]) => selected(name)))
+)
+  throw new Error('所选场景没有可执行样本');
 for (const [name, route] of routes.filter(([name]) => selected(name))) {
   await get(route); // 预热另计，正式样本不含模块首次加载。
   const values = [];

@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { withRoute } from '@/lib/api/withRoute';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
+import { withExportSlot } from '@/server/exports/concurrency';
 import { dedupeName } from '@/lib/attachments/packagePath';
 import { countAndBytesForExport, listForExport } from '@/server/services/recordAttachment.service';
 
@@ -59,57 +60,61 @@ export const GET = withRoute(
     }
 
     // 双门通过,加载安全;载入后复查条数(count 与 load 之间有并发上传窗口)。
-    const rows = await listForExport(projectId, { budgetYear, subjectId }, user);
-    if (rows.length === 0) {
-      return NextResponse.json({ error: '所选范围内无附件' }, { status: 404 });
-    }
-    if (rows.length > EXPORT_MAX_ATTACHMENTS) {
-      return NextResponse.json(
-        { error: `导出附件过多(上限 ${EXPORT_MAX_ATTACHMENTS} 个),请缩小筛选范围` },
-        { status: 413 },
+    const large = totalBytes > 8 * 1024 * 1024;
+    return withExportSlot(large, async () => {
+      const exportUser = large ? await requireUser() : user;
+      const rows = await listForExport(projectId, { budgetYear, subjectId }, exportUser);
+      if (rows.length === 0) {
+        return NextResponse.json({ error: '所选范围内无附件' }, { status: 404 });
+      }
+      if (rows.length > EXPORT_MAX_ATTACHMENTS) {
+        return NextResponse.json(
+          { error: `导出附件过多(上限 ${EXPORT_MAX_ATTACHMENTS} 个),请缩小筛选范围` },
+          { status: 413 },
+        );
+      }
+
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { name: true },
+      });
+
+      const zip = new JSZip();
+      const used = new Map<string, number>(); // 去重计数(dedupeName 语义:登记原名与选中候选名)
+      for (const r of rows) {
+        const date = r.record.businessDate.toISOString().slice(0, 10); // yyyy-mm-dd
+        const safeSummary = (r.record.summary || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
+        // 与 safeSummary 同款消毒:替换路径分隔符/Windows 非法字符/NUL,
+        // 防止 ../evil.pdf 之类的 zip-slip(部分解压器会按条目相对路径写出工作目录之外)。
+        const safeName = r.attachment.fileName.replace(/[\\/:*?"<>|\0]/g, '_');
+        const base = `${date}_${safeSummary}_${safeName}`.replace(/\s+/g, '_');
+        // 安全审计修复(bm1-att-export-dedup-collision-drops-attachment):改用探测式
+        // dedupeName——此前手写后缀不检查候选名是否已被真实文件名占用,JSZip 对重复
+        // 条目名静默覆盖,会从导出档案中丢附件。与 package 路由同一实现。
+        const name = dedupeName(base, used);
+        zip.file(name, r.data);
+      }
+      // 后置不变式:档案条目数必须等于选中行数(覆盖即丢件,直接失败而非静默缺件)。
+      if (Object.keys(zip.files).length !== rows.length) {
+        return NextResponse.json(
+          { error: '导出归档条目数与选中附件数不一致,已中止(请重试或联系管理员)' },
+          { status: 500 },
+        );
+      }
+
+      const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+      const projectName = project?.name ?? projectId;
+      const zipName = encodeURIComponent(
+        `附件_${projectName}${budgetYear ? `_${budgetYear}` : ''}.zip`,
       );
-    }
-
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { name: true },
-    });
-
-    const zip = new JSZip();
-    const used = new Map<string, number>(); // 去重计数(dedupeName 语义:登记原名与选中候选名)
-    for (const r of rows) {
-      const date = r.record.businessDate.toISOString().slice(0, 10); // yyyy-mm-dd
-      const safeSummary = (r.record.summary || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
-      // 与 safeSummary 同款消毒:替换路径分隔符/Windows 非法字符/NUL,
-      // 防止 ../evil.pdf 之类的 zip-slip(部分解压器会按条目相对路径写出工作目录之外)。
-      const safeName = r.attachment.fileName.replace(/[\\/:*?"<>|\0]/g, '_');
-      const base = `${date}_${safeSummary}_${safeName}`.replace(/\s+/g, '_');
-      // 安全审计修复(bm1-att-export-dedup-collision-drops-attachment):改用探测式
-      // dedupeName——此前手写后缀不检查候选名是否已被真实文件名占用,JSZip 对重复
-      // 条目名静默覆盖,会从导出档案中丢附件。与 package 路由同一实现。
-      const name = dedupeName(base, used);
-      zip.file(name, r.data);
-    }
-    // 后置不变式:档案条目数必须等于选中行数(覆盖即丢件,直接失败而非静默缺件)。
-    if (Object.keys(zip.files).length !== rows.length) {
-      return NextResponse.json(
-        { error: '导出归档条目数与选中附件数不一致,已中止(请重试或联系管理员)' },
-        { status: 500 },
-      );
-    }
-
-    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
-    const projectName = project?.name ?? projectId;
-    const zipName = encodeURIComponent(
-      `附件_${projectName}${budgetYear ? `_${budgetYear}` : ''}.zip`,
-    );
-    return new NextResponse(buffer as unknown as BodyInit, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="attachments.zip"; filename*=UTF-8''${zipName}`,
-        'Cache-Control': 'no-store',
-      },
+      return new NextResponse(buffer as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="attachments.zip"; filename*=UTF-8''${zipName}`,
+          'Cache-Control': 'no-store',
+        },
+      });
     });
   },
 );

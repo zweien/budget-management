@@ -16,6 +16,7 @@
     "perf:measure": "node scripts/performance/measure.mjs",
     "perf:regression": "node scripts/performance/regression.mjs",
     "perf:workload": "node scripts/performance/workload.mjs",
+    "perf:interference": "node scripts/performance/interference.mjs",
     "db:seed": "tsx prisma/seed.ts",
     "db:migrate": "prisma migrate deploy",
     "prepare": "husky",

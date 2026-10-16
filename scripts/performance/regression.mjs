@@ -11,7 +11,13 @@ const { base, fixture, api } = runtime;
 const project = fixture.projects[0];
 const url = `${base.origin}/projects/${project.id}/records`;
 const only = process.env.PERF_REGRESSION_ONLY;
-const caseNames = ['pending-bulk', 'late-write-page', 'pagination-filter-export', 'clear-state-includes-void', 'saved-facet'];
+const caseNames = [
+  'pending-bulk',
+  'late-write-page',
+  'pagination-filter-export',
+  'clear-state-includes-void',
+  'saved-facet',
+];
 if (only && !caseNames.includes(only)) throw new Error(`未知回归场景: ${only}`);
 const result = { capturedAt: new Date().toISOString(), label: process.env.PERF_LABEL, cases: [] };
 const browser = await chromium.launch(browserOptions());
@@ -207,4 +213,8 @@ try {
 const output = process.env.PERF_OUTPUT ?? '.scratch/performance/regression.json';
 await mkdir(dirname(output), { recursive: true });
 await writeFile(output, JSON.stringify(result, null, 2) + '\n');
-if (result.cases.length !== (only ? 1 : caseNames.length) || result.cases.some((test) => !test.passed)) process.exitCode = 1;
+if (
+  result.cases.length !== (only ? 1 : caseNames.length) ||
+  result.cases.some((test) => !test.passed)
+)
+  process.exitCode = 1;

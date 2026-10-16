@@ -4,6 +4,8 @@ import { BusinessStatus, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
+import { HTTPError } from '@/lib/auth/session';
+import { withExportSlot } from '@/server/exports/concurrency';
 import { uuidv7 } from '@/lib/id';
 import {
   approveApplication,
@@ -348,6 +350,116 @@ describe('export.service (integration, real PG)', () => {
     } finally {
       env.MAX_EXPORT_ROWS = limit;
     }
+  });
+
+  it('exportStatistics: 固定成员后新增不混入，成员被删除时中止而不导出缺行文件', async () => {
+    const { project, leafA } = await seedApprovedProject('MEMBERS');
+    const firstId = uuidv7();
+    const record = {
+      projectId: project.id,
+      subjectId: leafA.id,
+      budgetYear: 2026,
+      amount: '1.00',
+      businessDate: new Date('2026-06-20T00:00:00Z'),
+      handler: '成员边界',
+      summary: '成员边界',
+      status: BusinessStatus.PAID,
+      createdById: adminId,
+    };
+    await prisma.businessRecord.create({ data: { ...record, id: firstId } });
+    let afterRead: (() => Promise<unknown>) | undefined;
+    // 在真实数据库完成一次读取后注入并发写入，不替换返回行或绕过PG。
+    prisma.$use(async (params, next) => {
+      const result = await next(params);
+      if (afterRead && params.model === 'BusinessRecord' && params.action === 'findMany') {
+        const mutate = afterRead;
+        afterRead = undefined;
+        await mutate();
+      }
+      return result;
+    });
+    try {
+      afterRead = () =>
+        prisma.businessRecord.create({ data: { ...record, id: uuidv7(), amount: '2.00' } });
+      const sheet = await readSheet(
+        await exportStatistics({ projectId: project.id }, adminUser(), { layout: 'records' }),
+      );
+      expect(sheet.rowCount).toBe(3);
+      expect(sheet.getCell('E3').value).toBe(1);
+      afterRead = () =>
+        prisma.businessRecord.create({ data: { ...record, id: uuidv7(), amount: '4.00' } });
+      const statistics = await readSheet(
+        await exportStatistics({ projectId: project.id }, adminUser()),
+      );
+      // 捕获的两条为1+2，之后新增的4不能只出现在汇总、不出现在明细。
+      expect(statistics.getCell('B6').value).toBe('3.00');
+      expect(statistics.rowCount).toBe(14);
+      afterRead = () => prisma.businessRecord.delete({ where: { id: firstId } });
+      await expect(
+        exportStatistics({ projectId: project.id }, adminUser(), { layout: 'records' }),
+      ).rejects.toMatchObject({ status: 409 });
+    } finally {
+      afterRead = undefined;
+    }
+  });
+
+  it('exportStatistics: 大导出出队后才复验身份，撤销身份不能读取文件且释放名额', async () => {
+    const { project, leafA } = await seedApprovedProject('REAUTH');
+    await prisma.businessRecord.createMany({
+      data: Array.from({ length: 5001 }, (_, i) => ({
+        id: uuidv7(),
+        projectId: project.id,
+        subjectId: leafA.id,
+        budgetYear: 2026,
+        amount: '1',
+        businessDate: new Date('2026-06-20T00:00:00Z'),
+        handler: '排队',
+        summary: `queue-${i}`,
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      })),
+    });
+    let release!: () => void;
+    const held = withExportSlot(
+      true,
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    let selected!: () => void;
+    const selectionDone = new Promise<void>((resolve) => {
+      selected = resolve;
+    });
+    let capture = true;
+    prisma.$use(async (params, next) => {
+      const result = await next(params);
+      if (capture && params.model === 'BusinessRecord' && params.action === 'findMany') {
+        capture = false;
+        selected();
+      }
+      return result;
+    });
+    let checked = 0;
+    const exported = exportStatistics({ projectId: project.id }, adminUser(), {
+      layout: 'records',
+      refreshUser: async () => {
+        checked++;
+        throw new HTTPError(401, '身份已撤销');
+      },
+    });
+    const denied = expect(exported).rejects.toMatchObject({ status: 401 });
+    try {
+      await selectionDone;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(checked).toBe(0);
+    } finally {
+      release();
+      await held;
+    }
+    await denied;
+    expect(checked).toBe(1);
+    await expect(withExportSlot(true, async () => 'released')).resolves.toBe('released');
   });
 
   it('exportStatistics: 跨项目(无 projectId)普通用户可导出(全局只读)', async () => {

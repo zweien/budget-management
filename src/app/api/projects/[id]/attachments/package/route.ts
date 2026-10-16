@@ -5,6 +5,7 @@ import { withRoute } from '@/lib/api/withRoute';
 import { env } from '@/lib/env';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
+import { withExportSlot } from '@/server/exports/concurrency';
 import { countAndBytesForExport, listForExport } from '@/server/services/recordAttachment.service';
 import {
   buildFolderPath,
@@ -54,63 +55,67 @@ export const GET = withRoute(
       );
     }
 
-    const rows = await listForExport(projectId, { budgetYear: year }, user);
-    if (rows.length === 0) {
-      return NextResponse.json({ error: '无附件' }, { status: 404 });
-    }
-
-    // 加载项目科目全树(年度无关),建 id→node map 供路径构建。
-    const subjects = await prisma.budgetSubject.findMany({
-      where: { projectId },
-      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-      select: { id: true, code: true, name: true, parentId: true, level: true, isLeaf: true },
-    });
-    const subjectById = new Map<string, SubjectNode>(subjects.map((s) => [s.id, s]));
-
-    const [project, leafNameById] = await Promise.all([
-      prisma.project.findUnique({ where: { id: projectId }, select: { name: true } }),
-      Promise.resolve(
-        new Map(subjects.filter((s) => s.isLeaf).map((s) => [s.id, s.name] as const)),
-      ),
-    ]);
-
-    const zip = new JSZip();
-    // per-folder 去重 map:folderPath → (filename → count)
-    const usedByFolder = new Map<string, Map<string, number>>();
-
-    for (const r of rows) {
-      const folder = buildFolderPath(r.record.subjectId, subjectById);
-      const ctx: TokenContext = {
-        date: r.record.businessDate.toISOString().slice(0, 10),
-        amount: r.record.amount.toFixed(2),
-        handler: r.record.handler,
-        subject: leafNameById.get(r.record.subjectId) ?? '',
-        summary: (r.record.summary || '').slice(0, 40),
-        status: r.record.status,
-        year: String(r.record.budgetYear),
-        original: r.attachment.fileName,
-      };
-      const baseName = renderFilename(template, ctx);
-      let used = usedByFolder.get(folder);
-      if (!used) {
-        used = new Map<string, number>();
-        usedByFolder.set(folder, used);
+    const large = totalBytes > 8 * 1024 * 1024;
+    return withExportSlot(large, async () => {
+      const exportUser = large ? await requireUser() : user;
+      const rows = await listForExport(projectId, { budgetYear: year }, exportUser);
+      if (rows.length === 0) {
+        return NextResponse.json({ error: '无附件' }, { status: 404 });
       }
-      const finalName = dedupeName(baseName, used);
-      const entry = folder ? `${folder}/${finalName}` : finalName;
-      zip.file(entry, r.data);
-    }
 
-    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
-    const projectName = project?.name ?? projectId;
-    const zipName = encodeURIComponent(`附件_${projectName}${year ? `_${year}` : ''}.zip`);
-    return new NextResponse(buffer as unknown as BodyInit, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="attachments.zip"; filename*=UTF-8''${zipName}`,
-        'Cache-Control': 'no-store',
-      },
+      // 加载项目科目全树(年度无关),建 id→node map 供路径构建。
+      const subjects = await prisma.budgetSubject.findMany({
+        where: { projectId },
+        orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+        select: { id: true, code: true, name: true, parentId: true, level: true, isLeaf: true },
+      });
+      const subjectById = new Map<string, SubjectNode>(subjects.map((s) => [s.id, s]));
+
+      const [project, leafNameById] = await Promise.all([
+        prisma.project.findUnique({ where: { id: projectId }, select: { name: true } }),
+        Promise.resolve(
+          new Map(subjects.filter((s) => s.isLeaf).map((s) => [s.id, s.name] as const)),
+        ),
+      ]);
+
+      const zip = new JSZip();
+      // per-folder 去重 map:folderPath → (filename → count)
+      const usedByFolder = new Map<string, Map<string, number>>();
+
+      for (const r of rows) {
+        const folder = buildFolderPath(r.record.subjectId, subjectById);
+        const ctx: TokenContext = {
+          date: r.record.businessDate.toISOString().slice(0, 10),
+          amount: r.record.amount.toFixed(2),
+          handler: r.record.handler,
+          subject: leafNameById.get(r.record.subjectId) ?? '',
+          summary: (r.record.summary || '').slice(0, 40),
+          status: r.record.status,
+          year: String(r.record.budgetYear),
+          original: r.attachment.fileName,
+        };
+        const baseName = renderFilename(template, ctx);
+        let used = usedByFolder.get(folder);
+        if (!used) {
+          used = new Map<string, number>();
+          usedByFolder.set(folder, used);
+        }
+        const finalName = dedupeName(baseName, used);
+        const entry = folder ? `${folder}/${finalName}` : finalName;
+        zip.file(entry, r.data);
+      }
+
+      const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+      const projectName = project?.name ?? projectId;
+      const zipName = encodeURIComponent(`附件_${projectName}${year ? `_${year}` : ''}.zip`);
+      return new NextResponse(buffer as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="attachments.zip"; filename*=UTF-8''${zipName}`,
+          'Cache-Control': 'no-store',
+        },
+      });
     });
   },
 );
