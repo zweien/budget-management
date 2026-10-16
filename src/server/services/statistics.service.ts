@@ -7,7 +7,7 @@ import {
   denyApiKeyCrossProject,
   assertApiKeyProjectsInScope,
 } from '@/lib/auth/permissions';
-import { D, ZERO, fromStored, sumAmounts } from '@/lib/decimal';
+import { D, ZERO, fromStored } from '@/lib/decimal';
 import { computeOccupancy, executionRate } from '@/lib/budget';
 
 /**
@@ -62,6 +62,8 @@ export interface CustomStatisticsFilters {
   handlers?: string[];
   /** 科目名集合(in,精确)。 */
   subjectNames?: string[];
+  /** 项目记录页按科目 ID 精确筛选，避免同名科目混入；空集哨兵仍为零行。 */
+  subjectIds?: string[];
   /** 录入人姓名集合(in)。 */
   creatorNames?: string[];
   /** 备注(contains,忽略大小写)。 */
@@ -264,6 +266,11 @@ export async function customStatistics(
   if (yearVals.none && yearsIn.length === 0) where.budgetYear = { in: [] };
   else if (yearsIn.length > 0) where.budgetYear = { in: yearsIn };
   if (subjectLeafIds) where.subjectId = { in: [...subjectLeafIds] };
+  if (filters.subjectIds) {
+    const selected = splitValuesNone(filters.subjectIds);
+    const ids = selected.none && !selected.values.length ? [] : selected.values;
+    where.subjectId = { in: subjectLeafIds ? ids.filter((id) => subjectLeafIds.has(id)) : ids };
+  }
   // voidOnly:仅看作废;statuses 与 includeVoid 并存 = status IN … OR isVoid(作废不改 status)。
   const statusesIn = [...statusVals.values, ...(filters.status ? [filters.status] : [])];
   if (filters.voidOnly) {
@@ -371,10 +378,10 @@ export async function customStatistics(
             ? { createdAt: sort.dir }
             : { [sort.field]: sort.dir };
     orderBy = [
-      ...(sort.field === 'remark'
+      ...(['remark', 'docNo', 'completedDate'].includes(sort.field)
         ? [
             {
-              remark: { sort: sort.dir, nulls: 'last' },
+              [sort.field]: { sort: sort.dir, nulls: 'last' },
             } as Prisma.BusinessRecordOrderByWithRelationInput,
           ]
         : [base as Prisma.BusinessRecordOrderByWithRelationInput]),
@@ -390,17 +397,34 @@ export async function customStatistics(
       ? { skip: (Math.max(1, filters.page) - 1) * filters.pageSize, take: filters.pageSize }
       : {};
 
-  const rows = await prisma.businessRecord.findMany({
-    where,
-    orderBy,
-    ...paginate,
-    include: {
-      project: { select: { id: true, code: true, name: true } },
-      subject: { select: { id: true, code: true, name: true } },
-      createdBy: { select: { name: true } },
-      _count: { select: { attachments: true } },
-    },
-  });
+  orderBy.push({ id: 'desc' });
+  // 预算仍沿用现有项目/单年度口径；多值筛选的预算含义不在性能改造中更改。
+  const sbWhere: Prisma.SubjectBudgetWhereInput = filters.projectId
+    ? { projectId: filters.projectId }
+    : { project: { archivedAt: null } };
+  if (filters.budgetYear !== undefined) sbWhere.year = filters.budgetYear;
+  const [rows, occRows, totalCount, budgetAgg] = await Promise.all([
+    prisma.businessRecord.findMany({
+      where,
+      orderBy,
+      ...paginate,
+      include: {
+        project: { select: { id: true, code: true, name: true } },
+        subject: { select: { id: true, code: true, name: true } },
+        createdBy: { select: { name: true } },
+        _count: { select: { attachments: true } },
+      },
+    }),
+    prisma.businessRecord.groupBy({
+      by: ['status'],
+      // 与筛选求交集，不能覆盖 voidOnly=true 后统计到筛选外的有效记录。
+      where: { AND: [where, { isVoid: false }] },
+      _sum: { amount: true },
+      _count: { id: true },
+    }),
+    prisma.businessRecord.count({ where }),
+    prisma.subjectBudget.aggregate({ where: sbWhere, _sum: { currentAmount: true } }),
+  ]);
   const records = rows.map(({ createdBy, _count, ...r }) => ({
     ...r,
     creatorName: createdBy?.name ?? null,
@@ -408,11 +432,6 @@ export async function customStatistics(
   }));
 
   // 4) 合计与占用:SQL 聚合下推(筛选全集,不再全量取回内存计算)。
-  const occRows = await prisma.businessRecord.groupBy({
-    by: ['status'],
-    where: { ...where, isVoid: false },
-    _sum: { amount: true },
-  });
   const paidD = fromStored(
     occRows.find((r) => r.status === 'PAID')?._sum.amount?.toFixed(2) ?? '0',
   );
@@ -424,31 +443,15 @@ export async function customStatistics(
   );
   const occ = { paid: paidD, payable: payableD, totalOccupied: paidD.plus(payableD) };
 
-  const [totalCount, validAgg] = await Promise.all([
-    prisma.businessRecord.count({ where }),
-    prisma.businessRecord.aggregate({
-      where: { ...where, isVoid: false },
-      _count: { id: true },
-      _sum: { amount: true },
-    }),
-  ]);
   const stats: CustomStatisticsStats = {
     totalCount,
-    validCount: validAgg._count.id,
-    amountSum: fromStored(validAgg._sum.amount?.toFixed(2) ?? '0').toFixed(2),
+    validCount: occRows.reduce((count, row) => count + row._count.id, 0),
+    amountSum: occ.totalOccupied.toFixed(2),
   };
 
   // 5) 预算:筛选项目/年度对应的 subject_budgets.currentAmount 之和。
   //    跨项目(无 projectId)分支排除已归档项目,与记录口径一致;未指定年度时预算为全年度口径。
-  const sbWhere: Prisma.SubjectBudgetWhereInput = {};
-  if (filters.projectId) {
-    sbWhere.projectId = filters.projectId;
-  } else {
-    sbWhere.project = { archivedAt: null };
-  }
-  if (filters.budgetYear !== undefined) sbWhere.year = filters.budgetYear;
-  const subjectBudgets = await prisma.subjectBudget.findMany({ where: sbWhere });
-  const currentBudget = sumAmounts(subjectBudgets.map((sb) => fromStored(sb.currentAmount)));
+  const currentBudget = fromStored(budgetAgg._sum.currentAmount ?? '0');
 
   // 6) 结余 / 执行率。
   const balance = currentBudget.minus(occ.totalOccupied);
@@ -589,21 +592,29 @@ export async function crossProjectStatistics(
   // 2) 一次性查预算 + 记录,再按项目分组,避免 N+1。
   // 指定年度时同时取年度预算:年度视图的预算口径 = Σ 年度预算(§codex 修复)——
   // 只编项目总预算、未编年度预算的项目在该年贡献 0 预算,与年度口径的占用一致。
-  const [projectBudgets, annualBudgets, records] = await Promise.all([
+  const [projectBudgets, annualBudgets, groups] = await Promise.all([
     prisma.projectBudget.findMany({ where: { projectId: { in: projectIds } } }),
     filters.year !== undefined
       ? prisma.annualBudget.findMany({
           where: { projectId: { in: projectIds }, year: filters.year },
         })
       : Promise.resolve([]),
-    prisma.businessRecord.findMany({
+    prisma.businessRecord.groupBy({
+      by: ['projectId', 'status'],
       where: {
         projectId: { in: projectIds },
         isVoid: false,
         ...(filters.year !== undefined ? { budgetYear: filters.year } : {}),
       },
+      _sum: { amount: true },
     }),
   ]);
+  const records = groups.map((group) => ({
+    projectId: group.projectId,
+    status: group.status,
+    amount: group._sum.amount ?? ZERO,
+    isVoid: false,
+  }));
 
   const budgetByProject = new Map(projectBudgets.map((pb) => [pb.projectId, pb]));
   const annualByProject = new Map(annualBudgets.map((ab) => [ab.projectId, ab]));
@@ -1146,10 +1157,9 @@ export async function customStatisticsFacets(
 
   const [yearRows, handlerRows, creatorRows, subjects] = await Promise.all([
     prisma.businessRecord.groupBy({ by: ['budgetYear'], where: scopeWhere }),
-    prisma.businessRecord.findMany({
+    prisma.businessRecord.groupBy({
+      by: ['handler'],
       where: scopeWhere,
-      select: { handler: true },
-      distinct: ['handler'],
     }),
     prisma.businessRecord.groupBy({ by: ['createdById'], where: scopeWhere }),
     prisma.budgetSubject.findMany({

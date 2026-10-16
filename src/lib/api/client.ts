@@ -209,7 +209,13 @@ export async function apiFetch<T = unknown>(path: string, init: ApiFetchOptions 
   // 只合并浏览器中没有自定义选项的并发 GET。完成即删除；不缓存身份或授权结果。
   // 带 signal 的查询独立执行，避免一个调用者取消影响其他调用者。
   if (typeof window === 'undefined' || Object.keys(init).length > 0) {
-    return performApiFetch<T>(path, init, mockUserId);
+    const mutation = !['GET', 'HEAD'].includes((init.method ?? 'GET').toUpperCase());
+    try {
+      return await performApiFetch<T>(path, init, mockUserId);
+    } finally {
+      // 写入后刷新必须启动新读取；网络失败也不能假定服务端没有提交。
+      if (mutation) pendingReads.clear();
+    }
   }
   const key = `${mockUserId ?? 'sso'}:${path}`;
   const existing = pendingReads.get(key);

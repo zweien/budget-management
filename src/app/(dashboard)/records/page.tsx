@@ -21,14 +21,13 @@ import { z } from 'zod';
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { buildRecordQuery } from '@/lib/table/record-query';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
-import type { DateRangeFilterValue } from '@/lib/table/filter-fns';
 import { describeDateRangeValue, exportRecordsToXlsx } from '@/lib/table/export-records-xlsx';
-import { VALUES_FILTER_NONE } from '@/lib/table/filter-fns';
 import { useUrlSyncedTableState } from '@/lib/table/use-url-table-state';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -335,134 +334,13 @@ function UnifiedRecordsPageInner() {
   }, [projectName]);
 
   const buildParams = useCallback(
-    (targetPage: number, targetPageSize: number) => {
-      const sp = new URLSearchParams();
-      const projectIds: string[] = [];
-      for (const f of columnFilters) {
-        const v = f.value as unknown;
-        // 值清单哨兵:取消全选 = 显式空集(契约=零行)。空数组发 __none__,
-        // 服务端归一化为该维度匹配零行;未筛选(undefined)不发参数。
-        switch (f.id) {
-          case 'project': {
-            const labels = v as string[];
-            if (labels.length === 0) {
-              projectIds.push(VALUES_FILTER_NONE);
-              break;
-            }
-            for (const label of labels) {
-              const id = idByLabel.get(label);
-              if (id) projectIds.push(id);
-            }
-            break;
-          }
-          case 'budgetYear': {
-            const years = v as number[];
-            if (years.length === 0) {
-              sp.append('budgetYears', VALUES_FILTER_NONE);
-              break;
-            }
-            for (const y of years) sp.append('budgetYears', String(y));
-            break;
-          }
-          case 'subject': {
-            const names = v as string[];
-            if (names.length === 0) {
-              sp.append('subjectNames', VALUES_FILTER_NONE);
-              break;
-            }
-            for (const n of names) sp.append('subjectNames', n);
-            break;
-          }
-          case 'status': {
-            // 勾选 __void__ = 作废可见:statuses + includeVoid(OR isVoid);
-            // 仅勾 __void__ = voidOnly;全部取消(空集) = statuses 哨兵(零行)。
-            const arr = v as string[];
-            const statuses = arr.filter((st) => st !== '__void__');
-            const hasVoid = arr.length !== statuses.length;
-            if (arr.length === 0) {
-              sp.append('statuses', VALUES_FILTER_NONE);
-              break;
-            }
-            for (const st of statuses) sp.append('statuses', st);
-            if (hasVoid) sp.set('includeVoid', '1');
-            if (statuses.length === 0 && hasVoid) sp.set('voidOnly', '1');
-            break;
-          }
-          case 'handler': {
-            const hs = v as string[];
-            if (hs.length === 0) {
-              sp.append('handlers', VALUES_FILTER_NONE);
-              break;
-            }
-            for (const h of hs) sp.append('handlers', h);
-            break;
-          }
-          case 'summary':
-            sp.set('summary', String(v));
-            break;
-          case 'remark':
-            sp.set('remark', String(v));
-            break;
-          case 'amount': {
-            const r = v as { min?: string; max?: string };
-            if (r.min) sp.set('amountFrom', r.min);
-            if (r.max) sp.set('amountTo', r.max);
-            break;
-          }
-          case 'businessDate': {
-            const r = v as DateRangeFilterValue;
-            if (r.from) sp.set('businessDateFrom', format(new Date(r.from), 'yyyy-MM-dd'));
-            if (r.to) sp.set('businessDateTo', format(new Date(r.to), 'yyyy-MM-dd'));
-            break;
-          }
-          case 'enteredAt': {
-            // 时区感知(codex P2):传本地时刻瞬间(起=当日 0 点含,止=次日 0 点独占)。
-            const r = v as DateRangeFilterValue;
-            const boundaryIso = (d: Date, endOfDay: boolean) => {
-              const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-              return new Date(start.getTime() + (endOfDay ? 86_400_000 : 0)).toISOString();
-            };
-            if (r.from) sp.set('enteredAtFrom', boundaryIso(new Date(r.from), false));
-            if (r.to) sp.set('enteredAtTo', boundaryIso(new Date(r.to), true));
-            break;
-          }
-          case 'completedDate': {
-            const r = v as DateRangeFilterValue;
-            if (r.empty) sp.set('completedDateEmpty', '1');
-            if (r.from) sp.set('completedDateFrom', format(new Date(r.from), 'yyyy-MM-dd'));
-            if (r.to) sp.set('completedDateTo', format(new Date(r.to), 'yyyy-MM-dd'));
-            break;
-          }
-          case 'creatorName': {
-            const cs = v as string[];
-            if (cs.length === 0) {
-              sp.append('creatorNames', VALUES_FILTER_NONE);
-              break;
-            }
-            for (const c of cs) sp.append('creatorNames', c);
-            break;
-          }
-        }
-      }
-      // 权限范围(writable)转服务端项目过滤;显式项目筛选与可写集取交集(范围语义不放大)。
-      // 哨兵(取消全选)不受交集影响,原样穿透。
-      if (scope === 'writable' && !projectIds.includes(VALUES_FILTER_NONE)) {
-        const allowed = projectIds.length
-          ? projectIds.filter((id) => writableIds.has(id))
-          : Array.from(writableIds);
-        for (const id of allowed) sp.append('projectIds', id);
-      } else {
-        for (const id of projectIds) sp.append('projectIds', id);
-      }
-      const firstSort = sorting[0];
-      if (firstSort) {
-        sp.set('sortField', firstSort.id);
-        sp.set('sortDir', firstSort.desc ? 'desc' : 'asc');
-      }
-      sp.set('page', String(targetPage));
-      sp.set('pageSize', String(targetPageSize));
-      return sp;
-    },
+    (targetPage: number, targetPageSize: number) =>
+      buildRecordQuery(columnFilters, sorting, {
+        page: targetPage,
+        pageSize: targetPageSize,
+        projectIdByLabel: idByLabel,
+        writableProjectIds: scope === 'writable' ? writableIds : undefined,
+      }),
     [columnFilters, sorting, scope, writableIds, idByLabel],
   );
 

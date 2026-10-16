@@ -132,30 +132,50 @@ if (browserSamples > 0) {
         });
         const page = await context.newPage();
         const requests = [];
+        const sampleErrors = [];
         page.on('request', (req) => {
           const url = new URL(req.url());
           if (url.pathname.startsWith('/api/'))
             requests.push(url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, ':id'));
         });
-        page.on('pageerror', (error) => result.errors.push({ name, error: error.message }));
+        page.on('pageerror', (error) => sampleErrors.push(error.message));
+        page.on('response', (response) => {
+          const url = new URL(response.url());
+          if (url.pathname.startsWith('/api/') && response.status() >= 400) {
+            sampleErrors.push(
+              `${url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, ':id')} HTTP ${response.status()}`,
+            );
+          }
+        });
         const start = performance.now();
         try {
           await page.goto(new URL(path, base).href, { waitUntil: 'domcontentloaded' });
           await page.waitForFunction(
-            () => {
+            ({ minimumRows }) => {
               const main = document.querySelector('main');
               return (
                 main &&
                 main.textContent.trim().length > 0 &&
                 !main.querySelector('[data-slot="skeleton"]') &&
-                !main.textContent.includes('加载中')
+                !main.textContent.includes('加载中') &&
+                !main.textContent.includes('无法访问该项目') &&
+                !main.textContent.includes('加载失败') &&
+                main.querySelectorAll('tbody tr').length >= minimumRows
               );
+            },
+            {
+              minimumRows: ['records', 'project-records'].includes(name)
+                ? 2
+                : ['projects', 'ledger', 'statistics'].includes(name)
+                  ? 1
+                  : 0,
             },
             { timeout: 60_000 },
           );
           await page.evaluate(
             () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
           );
+          if (sampleErrors.length) throw new Error(sampleErrors.join('; '));
           values.push(performance.now() - start);
           const metrics = await page.evaluate(() => ({
             domNodes: document.querySelectorAll('*').length,

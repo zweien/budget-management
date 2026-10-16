@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import {
@@ -19,12 +19,8 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 
 import {
-  getSortedRowModel,
   flexRender,
   getCoreRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
   useReactTable,
   type ColumnDef,
   type ColumnFiltersState,
@@ -32,7 +28,8 @@ import {
 
 import { apiFetch } from '@/lib/api/client';
 import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
-import { D } from '@/lib/decimal';
+import { buildRecordQuery } from '@/lib/table/record-query';
+import { TablePagination } from '@/components/ui/table-pagination';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
 import type { VisibilityState } from '@tanstack/react-table';
@@ -177,7 +174,7 @@ interface BusinessRecordHistoryRow {
   reason: string | null;
 }
 
-/** 叶科目(用于筛选 + 新增表单的科目下拉,从 ledger nodes 中 isLeaf=true 取得)。 */
+/** 叶科目(用于筛选 + 新增表单的科目下拉)。 */
 interface LeafSubject {
   subjectId: string;
   code: string;
@@ -252,10 +249,24 @@ function BusinessRecordsPageInner() {
   const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
   // 业务记录列表。
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState({ totalCount: 0, validCount: 0, amountSum: '0.00' });
+  const [facets, setFacets] = useState<{
+    years: number[];
+    creatorNames: string[];
+    handlerNames: string[];
+  } | null>(null);
   // Excel 式表头筛选(TanStack columnFilters)+ 单列排序,状态同步到 URL(可刷新/分享)。
   // 初始值:URL `f` 参数优先;否则回落 legacy 深链(?subjectId=xx&year=yyyy)+ 状态默认值
   // (默认排除已作废,勾选「已作废」才显示)。
-  const { columnFilters, sorting, setColumnFilters, setSorting } = useUrlSyncedTableState({
+  const {
+    columnFilters,
+    sorting,
+    setColumnFilters: setUrlFilters,
+    setSorting: setUrlSorting,
+  } = useUrlSyncedTableState({
     columnFilters: (() => {
       const init: ColumnFiltersState = [
         { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
@@ -271,6 +282,20 @@ function BusinessRecordsPageInner() {
     })(),
     sorting: [],
   });
+  const setColumnFilters: typeof setUrlFilters = useCallback(
+    (next) => {
+      setUrlFilters(next);
+      setPage(1);
+    },
+    [setUrlFilters],
+  );
+  const setSorting: typeof setUrlSorting = useCallback(
+    (next) => {
+      setUrlSorting(next);
+      setPage(1);
+    },
+    [setUrlSorting],
+  );
   // 加载/错误。
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingMeta, setLoadingMeta] = useState(true);
@@ -360,26 +385,62 @@ function BusinessRecordsPageInner() {
     };
   }, [projectId]);
 
-  /** 全量拉取(含作废;表头筛选全部在客户端,Excel 式即时过滤)。 */
-  const reloadRecords = useCallback(async () => {
-    setLoadingRecords(true);
-    try {
-      const data = await apiFetch<{ records: BusinessRecordRow[] }>(
-        `/api/projects/${projectId}/records?includeVoid=1`,
-      );
-      setRecords(data.records ?? []);
-    } catch (e) {
-      if (e instanceof Error) toast.error(e.message);
-    } finally {
-      setLoadingRecords(false);
-    }
-  }, [projectId]);
-
-  // 拉取业务记录(随筛选变化重拉;筛选事件已重置 loading,此处只发请求)。
+  const buildParams = useCallback(
+    (targetPage: number, targetSize: number) =>
+      buildRecordQuery(columnFilters, sorting, {
+        page: targetPage,
+        pageSize: targetSize,
+        projectId,
+      }),
+    [columnFilters, sorting, projectId],
+  );
+  const requestSeq = useRef(0);
+  /** 只取当前页；合计由服务端按筛选全集计算。 */
+  const reloadRecords = useCallback(
+    async (signal?: AbortSignal) => {
+      const seq = ++requestSeq.current;
+      setLoadingRecords(true);
+      try {
+        const data = await apiFetch<{
+          records: BusinessRecordRow[];
+          total: number;
+          stats: { totalCount: number; validCount: number; amountSum: string };
+        }>(`/api/statistics/custom?${buildParams(page, pageSize)}`, { signal });
+        if (seq !== requestSeq.current || signal?.aborted) return;
+        setRecords(data.records);
+        setTotal(data.total);
+        setStats(data.stats);
+        const lastPage = Math.max(1, Math.ceil(data.total / pageSize));
+        if (page > lastPage) setPage(lastPage);
+      } catch (e) {
+        if (!signal?.aborted && seq === requestSeq.current && e instanceof Error)
+          toast.error(e.message);
+      } finally {
+        if (!signal?.aborted && seq === requestSeq.current) setLoadingRecords(false);
+      }
+    },
+    [buildParams, page, pageSize],
+  );
   useEffect(() => {
-    // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中。
-    void reloadRecords();
+    const controller = new AbortController();
+    void reloadRecords(controller.signal);
+    return () => controller.abort();
   }, [reloadRecords]);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ years: number[]; creatorNames: string[]; handlerNames: string[] }>(
+      `/api/statistics/custom-facets?projectIds=${encodeURIComponent(projectId)}`,
+    )
+      .then((data) => {
+        if (!cancelled) setFacets(data);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled && error instanceof Error) toast.error(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   /** 打开"新增"Dialog。 */
   const openCreate = () => {
@@ -654,18 +715,9 @@ function BusinessRecordsPageInner() {
 
   /** 科目/年度列的稳定候选(不受本列筛选影响)。 */
   const subjectOptions = useMemo(() => leafSubjects.map((s) => s.subjectId), [leafSubjects]);
-  const yearOptions = useMemo(
-    () => Array.from(new Set(records.map((r) => r.budgetYear))).sort((a, b) => b - a),
-    [records],
-  );
-  /** 录入人列稳定候选(有名字才进清单;缺失者以「—」由 faceted 兜底)。 */
-  const creatorOptions = useMemo(
-    () =>
-      Array.from(new Set(records.map((r) => r.creatorName).filter((v): v is string => !!v))).sort(
-        (a, b) => a.localeCompare(b, 'zh-Hans-CN'),
-      ),
-    [records],
-  );
+  const yearOptions = useMemo(() => facets?.years ?? [], [facets]);
+  const creatorOptions = useMemo(() => facets?.creatorNames ?? [], [facets]);
+  const handlerOptions = useMemo(() => facets?.handlerNames ?? [], [facets]);
 
   /**
    * 从 TanStack columnFilters 派生当前生效的年度/科目筛选(用于"导出附件 zip",
@@ -895,6 +947,7 @@ function BusinessRecordsPageInner() {
             column={column}
             title="状态"
             type="values"
+            options={[...BUSINESS_STATUSES, '__void__']}
             valueLabels={STATUS_FILTER_LABELS}
             sortable
           />
@@ -921,7 +974,13 @@ function BusinessRecordsPageInner() {
         id: 'handler',
         accessorKey: 'handler',
         header: ({ column }) => (
-          <HeaderFilter column={column} title="经办人" type="values" sortable />
+          <HeaderFilter
+            column={column}
+            title="经办人"
+            type="values"
+            options={handlerOptions}
+            sortable
+          />
         ),
         filterFn: multiSelectStrict<BusinessRecordRow>(),
       },
@@ -1026,7 +1085,17 @@ function BusinessRecordsPageInner() {
         cell: ({ row }) => <RowActions row={row.original} />,
       },
     ],
-    [subjectLabels, yearOptions, creatorOptions, project?.canEdit, selectedIds],
+    [
+      subjectLabels,
+      subjectOptions,
+      subjectMap,
+      yearOptions,
+      creatorOptions,
+      handlerOptions,
+      project?.canEdit,
+      project?.canWriteRecords,
+      selectedIds,
+    ],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
@@ -1038,10 +1107,8 @@ function BusinessRecordsPageInner() {
     onColumnFiltersChange: setColumnFilters,
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFacetedRowModel: getFacetedRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
+    manualFiltering: true,
+    manualSorting: true,
     enableSortingRemoval: true,
     enableMultiSort: false,
   });
@@ -1055,26 +1122,26 @@ function BusinessRecordsPageInner() {
 
   // §总计行:对当前表头筛选结果统计(所见即所总,便于筛选后直接看合计);
   // 作废记录不计入(与执行统计口径一致),有作废行混入时在标签上注明。
-  const filteredRows = table.getFilteredRowModel().rows;
-  let totalValidCount = 0;
-  let totalVoidCount = 0;
-  let amountSum = new D(0);
-  for (const r of filteredRows) {
-    if (r.original.isVoid) {
-      totalVoidCount++;
-      continue;
-    }
-    totalValidCount++;
-    amountSum = amountSum.plus(new D(r.original.amount));
-  }
+  const filteredRows = table.getRowModel().rows;
+  const totalValidCount = stats.validCount;
+  const totalVoidCount = stats.totalCount - stats.validCount;
+  const amountSum = stats.amountSum;
 
   // §筛选结果导出 Excel:所见即所导(当前筛选可见行,作废行按状态注明)。
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const handleExportXlsx = async () => {
     setExportingXlsx(true);
     try {
+      const all: BusinessRecordRow[] = [];
+      for (let cursor = 1; ; cursor++) {
+        const data = await apiFetch<{ records: BusinessRecordRow[]; total: number }>(
+          `/api/statistics/custom?${buildParams(cursor, 500)}`,
+        );
+        all.push(...data.records);
+        if (!data.records.length || all.length >= data.total) break;
+      }
       await exportRecordsToXlsx(
-        filteredRows.map(({ original: o }) => ({
+        all.map((o) => ({
           budgetYear: o.budgetYear,
           subject: subjectMap.get(o.subjectId)?.name ?? o.subjectId.slice(0, 8),
           businessDate: o.businessDate,
@@ -1093,7 +1160,7 @@ function BusinessRecordsPageInner() {
           title: project ? `${project.name} 业务记录(筛选结果)` : undefined,
         },
       );
-      toast.success(`已导出 ${filteredRows.length} 条记录`);
+      toast.success(`已导出 ${all.length} 条记录`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '导出失败');
     } finally {
@@ -1274,7 +1341,7 @@ function BusinessRecordsPageInner() {
                 {table.getVisibleLeafColumns().map((col, idx) => (
                   <TableCell key={col.id} className="py-1.5">
                     {col.id === 'amount' ? (
-                      <span className="block text-right tabular-nums">{amountSum.toFixed(2)}</span>
+                      <span className="block text-right tabular-nums">{amountSum}</span>
                     ) : idx === 0 ? (
                       <span className="whitespace-nowrap tabular-nums">
                         总计 {totalValidCount} 笔{totalVoidCount > 0 ? '(作废不计)' : ''}
@@ -1314,12 +1381,17 @@ function BusinessRecordsPageInner() {
             )}
           </TableBody>
         </Table>
-        {!loadingRecords && table.getRowModel().rows.length > 0 ? (
-          <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
-            共 {table.getRowModel().rows.length} 条记录
-            {columnFilters.length > 0 ? '(已应用表头筛选)' : ''}
-          </div>
-        ) : null}
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          loading={loadingRecords}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* 新增/修改 Dialog(react-hook-form + zod) */}

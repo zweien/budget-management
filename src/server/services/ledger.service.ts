@@ -63,7 +63,7 @@ export async function getProjectTotalLedger(
 ): Promise<ProjectTotalLedger> {
   await requirePermission(user, 'project:view', projectId);
 
-  const [project, projectBudget, subjects, subjectTotalBudgets, subjectBudgets, records] =
+  const [project, projectBudget, subjects, subjectTotalBudgets, subjectBudgets, groups] =
     await Promise.all([
       prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
       prisma.projectBudget.findUnique({ where: { projectId } }),
@@ -74,8 +74,18 @@ export async function getProjectTotalLedger(
       prisma.subjectTotalBudget.findMany({ where: { projectId } }),
       // 全年度科目预算:包干制的科目总口径 = Σ 各年度(Q6a,与结余统计同口径)。
       prisma.subjectBudget.findMany({ where: { projectId } }),
-      prisma.businessRecord.findMany({ where: { projectId, isVoid: false } }),
+      prisma.businessRecord.groupBy({
+        by: ['subjectId', 'status'],
+        where: { projectId, isVoid: false },
+        _sum: { amount: true },
+      }),
     ]);
+  const records = groups.map((group) => ({
+    subjectId: group.subjectId,
+    status: group.status,
+    amount: group._sum.amount ?? ZERO,
+    isVoid: false,
+  }));
 
   // 页头汇总条:分母 = 项目总预算(真正的批复口径),与科目计划合计无关。
   const projectTotal = projectBudget ? fromStored(projectBudget.currentAmount) : ZERO;
@@ -260,7 +270,7 @@ export async function getProjectLedger(
   await requirePermission(user, 'project:view', projectId);
 
   // 1) 科目树(全部,按编制顺序排序)+ 该年度 subject_budgets + 科目总预算(B模型) + 该年度非作废 business_records。
-  const [project, subjects, subjectBudgets, subjectTotalBudgets, records] = await Promise.all([
+  const [project, subjects, subjectBudgets, subjectTotalBudgets, groups] = await Promise.all([
     prisma.project.findUnique({ where: { id: projectId }, select: { budgetMode: true } }),
     prisma.budgetSubject.findMany({
       where: { projectId },
@@ -272,10 +282,18 @@ export async function getProjectLedger(
     prisma.subjectTotalBudget.findMany({
       where: { projectId },
     }),
-    prisma.businessRecord.findMany({
+    prisma.businessRecord.groupBy({
+      by: ['subjectId', 'status'],
       where: { projectId, budgetYear: year, isVoid: false },
+      _sum: { amount: true },
     }),
   ]);
+  const records = groups.map((group) => ({
+    subjectId: group.subjectId,
+    status: group.status,
+    amount: group._sum.amount ?? ZERO,
+    isVoid: false,
+  }));
 
   // §包干制(LUMP_SUM):无科目总预算层,总口径回退为该科目各年度 SubjectBudget 之和
   // (Q6a,与结余统计同口径)——需全年度科目预算另行汇总。

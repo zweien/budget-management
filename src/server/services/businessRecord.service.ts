@@ -5,7 +5,6 @@ import { HTTPError } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { D, ZERO, fromStored, toStored } from '@/lib/decimal';
-import { computeOccupancy } from '@/lib/budget';
 import { recordAudit } from '@/server/audit/interceptor';
 import { snapshotRow } from '@/server/audit/snapshot';
 import { checkDuplicates, type DuplicateConflict } from '@/server/services/duplicateCheck.service';
@@ -191,7 +190,7 @@ function parseCompletedDate(s: string | null | undefined, businessDate: Date): D
 /**
  * §8.4 计算某年度某叶科目:在追加 `extraAmount` 的情况下是否超预算。
  * - currentBudget 来自 subject_budgets.currentAmount(审批生效后置位)。
- * - 现有占用走 computeOccupancy(已有非作废记录的实时聚合)。
+ * - 现有占用直接聚合非作废记录金额，与四态占用口径一致。
  * - 超预算仍允许保存(§8.4),仅返回预警标志。
  *
  * 返回 { overBudget, currentBudget, projectedOccupied }。
@@ -202,24 +201,18 @@ async function computeOverBudget(
   subjectId: string,
   extraAmount: D,
 ): Promise<{ overBudget: boolean; currentBudget: D; projectedOccupied: D }> {
-  const [subjectBudget, records] = await Promise.all([
+  const [subjectBudget, aggregate] = await Promise.all([
     prisma.subjectBudget.findUnique({
       where: { projectId_year_subjectId: { projectId, year: budgetYear, subjectId } },
     }),
-    prisma.businessRecord.findMany({
+    prisma.businessRecord.aggregate({
       where: { projectId, budgetYear, subjectId, isVoid: false },
+      _sum: { amount: true },
     }),
   ]);
 
   const currentBudget = subjectBudget ? fromStored(subjectBudget.currentAmount) : ZERO;
-  const occ = computeOccupancy({
-    records: records.map((r) => ({
-      amount: r.amount,
-      status: r.status,
-      isVoid: r.isVoid,
-    })),
-  });
-  const projectedOccupied = occ.totalOccupied.plus(extraAmount);
+  const projectedOccupied = fromStored(aggregate._sum.amount ?? '0').plus(extraAmount);
   // §8.4 现有占用 + 本次金额 > 当前预算 → 超预算预警(仍保存)。
   const overBudget = projectedOccupied.gt(currentBudget);
   return { overBudget, currentBudget, projectedOccupied };
@@ -642,20 +635,17 @@ async function computeOverBudgetExcluding(
   extraAmount: D,
   excludeRecordId: string,
 ): Promise<{ overBudget: boolean }> {
-  const [subjectBudget, records] = await Promise.all([
+  const [subjectBudget, aggregate] = await Promise.all([
     prisma.subjectBudget.findUnique({
       where: { projectId_year_subjectId: { projectId, year: budgetYear, subjectId } },
     }),
-    prisma.businessRecord.findMany({
-      where: { projectId, budgetYear, subjectId, isVoid: false },
+    prisma.businessRecord.aggregate({
+      where: { projectId, budgetYear, subjectId, isVoid: false, id: { not: excludeRecordId } },
+      _sum: { amount: true },
     }),
   ]);
   const currentBudget = subjectBudget ? fromStored(subjectBudget.currentAmount) : ZERO;
-  const others = records.filter((r) => r.id !== excludeRecordId);
-  const occ = computeOccupancy({
-    records: others.map((r) => ({ amount: r.amount, status: r.status, isVoid: r.isVoid })),
-  });
-  const projected = occ.totalOccupied.plus(extraAmount);
+  const projected = fromStored(aggregate._sum.amount ?? '0').plus(extraAmount);
   return { overBudget: projected.gt(currentBudget) };
 }
 

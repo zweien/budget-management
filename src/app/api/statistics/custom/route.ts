@@ -62,7 +62,13 @@ export const GET = withRoute(async (req: NextRequest) => {
   }
 
   // ---- v0.15 扩展:服务端筛选/排序/分页(全局录入页驱动) ----
-  for (const key of ['projectIds', 'subjectNames', 'handlers', 'creatorNames'] as const) {
+  for (const key of [
+    'projectIds',
+    'subjectNames',
+    'subjectIds',
+    'handlers',
+    'creatorNames',
+  ] as const) {
     const values = sp.getAll(key).filter(Boolean);
     if (values.length > 0) filters[key] = values;
   }

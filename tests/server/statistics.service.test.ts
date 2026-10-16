@@ -934,6 +934,21 @@ describe('statistics.service (integration, real PG)', () => {
     );
     expect(voidOnlyRows.total).toBe(1);
     expect(voidOnlyRows.records[0]?.summary).toBe('csp-c');
+    expect(voidOnlyRows.stats.validCount).toBe(0);
+    expect(voidOnlyRows.stats.amountSum).toBe('0.00');
+    expect(voidOnlyRows.summary.totalOccupied).toBe('0.00');
+    const bySubjectId = await customStatistics(
+      { projectId: project.id, subjectIds: [leafA.id], page: 1, pageSize: 1 },
+      adminUser(),
+    );
+    expect(bySubjectId.total).toBe(1);
+    expect(bySubjectId.stats.amountSum).toBe('100.00');
+    expect(bySubjectId.records[0].summary).toBe('csp-a');
+    const noSubject = await customStatistics(
+      { projectId: project.id, subjectIds: [VALUES_FILTER_NONE] },
+      adminUser(),
+    );
+    expect(noSubject.total).toBe(0);
   });
 
   it('customStatistics: 无完成日期 / 金额区间筛选', async () => {
