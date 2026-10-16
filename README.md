@@ -125,6 +125,8 @@ npm run dev                   # http://localhost:3000
 
 ## 🚀 生产部署
 
+> 内网部署（对接已有 Authentik SSO）的完整步骤——Authentik Provider 配置、数据库准备、镜像构建/离线导入、环境变量说明、首个管理员引导与升级流程——见 **[部署指南](./docs/deployment.md)**。
+
 ```bash
 docker build -t budget-management .
 docker run -d -p 3000:3000 \
@@ -293,6 +295,7 @@ npm test                       # 344 项集成测试(直连真实 PostgreSQL)
 - [产品需求文档 PRD V1.0](./prd/预算管理系统_V1.0_PRD.md)
 - [更新日志](./CHANGELOG.md) · [仓库工作约定](./AGENTS.md) · [设计规范](./DESIGN.md)
 - [领域术语表](./CONTEXT.md) · [ADR 0001：服务账号 + API Key 机器认证](./docs/adr/0001-service-account-api-key.md) · [ADR 0002：重复数据防护](./docs/adr/0002-duplicate-prevention.md)
+- [生产部署指南（内网 + Authentik SSO）](./docs/deployment.md)
 - 功能设计文档（附件上传 / 按科目打包 / 附件预览）：[docs/superpowers/specs](./docs/superpowers/specs)
 
 ## 📝 License
