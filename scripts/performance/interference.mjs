@@ -289,7 +289,30 @@ try {
             ? await staged(kind === 'parse')
             : null;
           const summaries = await Promise.all(
-            sessions.map((session) => prepare(session, action, round)),
+            sessions.map(async (session) => {
+              try {
+                return await prepare(session, action, round);
+              } catch (error) {
+                const ui = await session.page.evaluate(() => ({
+                  url: location.pathname + location.search,
+                  text: document.querySelector('main')?.textContent?.slice(0, 2000),
+                  rows: document.querySelectorAll('main tbody tr').length,
+                  busy: document.querySelectorAll('main [aria-busy="true"]').length,
+                  skeletons: document.querySelectorAll('main [data-slot="skeleton"]').length,
+                }));
+                result.errors.push({
+                  kind,
+                  action,
+                  round,
+                  user: session.user + 1,
+                  stage: 'prepare',
+                  error: error.message,
+                  ui,
+                  browserErrors: session.errors,
+                });
+                throw error;
+              }
+            }),
           );
           const heavyStart = performance.now();
           const heavyPromise = (async () => {
