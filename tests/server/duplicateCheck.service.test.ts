@@ -26,9 +26,18 @@ describe('duplicateCheck.service (integration, real PG)', () => {
   let adminId: string;
   let projectId: string;
   let leafId: string;
+  let captureCandidates = false;
+  const candidateCounts: number[] = [];
 
   beforeAll(async () => {
     await prisma.$connect();
+    prisma.$use(async (params, next) => {
+      const result = await next(params);
+      if (captureCandidates && params.model === 'BusinessRecord' && params.action === 'findMany') {
+        candidateCounts.push(result.length);
+      }
+      return result;
+    });
     adminId = uuidv7();
     await prisma.user.create({
       data: { id: adminId, name: 'dup-admin', role: UserRole.ADMIN },
@@ -186,6 +195,57 @@ describe('duplicateCheck.service (integration, real PG)', () => {
     expect(r.suspected).toBe(false);
   });
 
+  it('无编号查重只取相同日期/金额候选，保留摘要归一化与既有编号记录的提示', async () => {
+    await prisma.businessRecord.createMany({
+      data: Array.from({ length: 100 }, () => ({
+        id: uuidv7(),
+        projectId,
+        subjectId: leafId,
+        budgetYear: 2026,
+        amount: '321.00',
+        businessDate: new Date('2026-08-02'),
+        handler: '测试',
+        summary: '无关候选',
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      })),
+    });
+    const hit = await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId,
+        subjectId: leafId,
+        budgetYear: 2026,
+        amount: '345.67',
+        businessDate: new Date('2026-08-02'),
+        handler: '测试',
+        summary: '  候选\t摘要  ',
+        docNo: 'FP-EXISTING',
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      },
+    });
+    candidateCounts.length = 0;
+    captureCandidates = true;
+    try {
+      const [verdict] = await checkDuplicates(projectId, [
+        {
+          rowKey: 'candidate',
+          docNo: null,
+          budgetYear: 2026,
+          amount: '345.67',
+          businessDate: '2026-08-02',
+          summary: '候选 摘要',
+        },
+      ]);
+      expect(verdict.suspected).toBe(true);
+      expect(verdict.conflicts[0].recordId).toBe(hit.id);
+      expect(candidateCounts).toEqual([1]);
+    } finally {
+      captureCandidates = false;
+    }
+  });
+
   it('excludeRecordId:编辑场景排除自身', async () => {
     const rec = await seedRecord({ docNo: 'SELF-1' });
     const [self] = await checkDuplicates(
@@ -204,6 +264,31 @@ describe('duplicateCheck.service (integration, real PG)', () => {
     );
     expect(self.hard).toBe(false);
     expect(self.suspected).toBe(false);
+  });
+
+  it('超过500种金额和日期的批次仍能命中末行，不截断候选或改变指纹', async () => {
+    const rec = await seedRecord({ summary: '大批次 末行' });
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      rowKey: `large-${i}`,
+      docNo: null,
+      budgetYear: 2026,
+      amount: `${200 + i}.00`,
+      businessDate: new Date(Date.UTC(2023, 0, i + 1)).toISOString().slice(0, 10),
+      summary: `无关 ${i}`,
+    }));
+    rows.push({
+      rowKey: 'last',
+      docNo: null,
+      budgetYear: 2026,
+      amount: '100.00',
+      businessDate: '2026-08-01',
+      summary: ' 大批次\t末行 ',
+    });
+    const results = await checkDuplicates(projectId, rows);
+    expect(results).toHaveLength(501);
+    expect(results.at(-1)?.suspected).toBe(true);
+    expect(results.at(-1)?.conflicts[0].recordId).toBe(rec.id);
+    expect(results.slice(0, 500).every((r) => !r.suspected && !r.hard)).toBe(true);
   });
 
   it('DB 部分唯一索引兜底:同项目同号未作废插入被拒;作废后可插', async () => {

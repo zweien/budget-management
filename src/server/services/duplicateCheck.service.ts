@@ -216,8 +216,27 @@ export async function checkDuplicates(
   );
   if (fpRows.length > 0) {
     const yearSet = new Set(fpRows.map((r) => r.budgetYear as number));
+    // 指纹相等必然同金额、同日期：先在数据库缩小候选，避免单条保存搬回整年记录。
+    // 大批次分别最多加500个参数；超出时仅省略该条件，最终指纹比较仍保持原口径。
+    const amounts = [...new Set(fpRows.map((r) => r.amount!))];
+    const dateStrings = [...new Set(fpRows.map((r) => r.businessDate!))];
+    const dates = dateStrings.map((date) => new Date(`${date}T00:00:00Z`));
+    const narrowAmounts = amounts.length <= 500 && amounts.every((v) => /^-?\d+\.\d{2}$/.test(v));
+    const narrowDates =
+      dates.length <= 500 &&
+      dates.every(
+        (date, i) =>
+          Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === dateStrings[i],
+      );
     const existing = await prisma.businessRecord.findMany({
-      where: { projectId, isVoid: false, budgetYear: { in: [...yearSet] }, ...exclude },
+      where: {
+        projectId,
+        isVoid: false,
+        budgetYear: { in: [...yearSet] },
+        ...(narrowAmounts ? { amount: { in: amounts } } : {}),
+        ...(narrowDates ? { businessDate: { in: dates } } : {}),
+        ...exclude,
+      },
       select: {
         id: true,
         docNo: true,
