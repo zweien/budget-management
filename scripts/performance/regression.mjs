@@ -75,6 +75,11 @@ try {
         '写后刷新卸载了已有记录行',
       );
       assert.equal(await page.locator('main [aria-busy="true"]').count(), 1);
+      assert.ok(
+        await page.getByRole('button', { name: '修改', exact: true }).first().isDisabled(),
+        '后台刷新期间允许打开旧值编辑',
+      );
+      assert.ok(await page.getByRole('button', { name: '状态', exact: true }).first().isDisabled());
       assert.ok(await page.getByRole('button', { name: '导出筛选结果', exact: true }).isDisabled());
     } finally {
       release();

@@ -397,7 +397,7 @@ function BusinessRecordsPageInner() {
     [columnFilters, sorting, projectId],
   );
   const queryKey = buildParams(page, pageSize).toString();
-  const resultsReady = !loadingRecords && loadedQueryKey === queryKey;
+  const resultsReady = !loadingRecords && !recordsError && loadedQueryKey === queryKey;
   // 同一页写后刷新保留已呈现的行，避免卸载/重建全部单元格；换筛选仍等待新结果。
   const showCurrentResults = resultsReady || (loadingRecords && loadedQueryKey === queryKey);
   const requestSeq = useRef(0);
@@ -794,12 +794,17 @@ function BusinessRecordsPageInner() {
         <div className="flex gap-1">
           {project?.canWriteRecords ? (
             <>
-              <Button variant="ghost" size="sm" onClick={() => openEdit(row)} disabled={row.isVoid}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => openEdit(row)}
+                disabled={!resultsReady || row.isVoid}
+              >
                 修改
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" disabled={row.isVoid}>
+                  <Button variant="ghost" size="sm" disabled={!resultsReady || row.isVoid}>
                     状态
                     <ChevronDown />
                   </Button>
@@ -825,7 +830,7 @@ function BusinessRecordsPageInner() {
                 setVoidReason('');
                 setVoidError(null);
               }}
-              disabled={row.isVoid}
+              disabled={!resultsReady || row.isVoid}
             >
               作废
             </Button>
@@ -836,7 +841,7 @@ function BusinessRecordsPageInner() {
         </div>
       );
     },
-    [project?.canWriteRecords, project?.canEdit, openEdit, switchStatus, openHistory],
+    [project?.canWriteRecords, project?.canEdit, resultsReady, openEdit, switchStatus, openHistory],
   );
 
   // Excel 式表头筛选:列定义(values=值清单勾选,text=包含,range=金额,dateRange=日期)。
