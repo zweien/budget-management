@@ -1,0 +1,130 @@
+{
+  "createdAt": "2026-10-16T23:47:22.961Z",
+  "applicationCommit": "f06e96b57877b9e4b8181a51beafcfe6f359034c",
+  "driverCommit": "13342efed6c72d078e3b6f55f93f2f686830763a",
+  "baselineCommit": "7ac7921e17f2f3e23d9f23740b79322ced6581ef",
+  "environment": {
+    "arch": "arm64",
+    "logicalCpus": 20,
+    "memoryBytes": 130660872192,
+    "node": "v24.16.0",
+    "postgresql": "16",
+    "chromium": "156.0.8078.4",
+    "network": "same-host loopback",
+    "productionStandalone": true,
+    "syntheticDataOnly": true
+  },
+  "checks": [
+    {
+      "command": "DATABASE_URL=<dedicated test DB> MOCK_AUTH=true NODE_ENV=test npm test",
+      "exitCode": 0,
+      "files": 48,
+      "tests": 407
+    },
+    {
+      "command": "npm run check-types",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run lint",
+      "exitCode": 0,
+      "warnings": 4
+    },
+    {
+      "command": "node scripts/performance/app.mjs build <optimized worktree>",
+      "applicationCommit": "f06e96b57877b9e4b8181a51beafcfe6f359034c",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run lint (delivery scripts and documentation included)",
+      "exitCode": 0,
+      "warnings": 4
+    },
+    {
+      "command": "node --check scripts/performance/*.mjs (each file)",
+      "exitCode": 0
+    },
+    {
+      "command": "verify application src/prisma/tests unchanged since f06e96b",
+      "exitCode": 0
+    },
+    {
+      "command": "verify local documentation links and semantic JSON copies",
+      "exitCode": 0
+    }
+  ],
+  "benchmarks": [
+    {
+      "artifact": "final-main-workload.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-interference.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-zip-100.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-import-check.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-regression.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-equivalence.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-explore.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-import-sizes.json",
+      "exitCode": 0
+    },
+    {
+      "artifact": "final-audit.json",
+      "exitCode": 0
+    }
+  ],
+  "failuresRetained": [
+    {
+      "artifact": "final-interference-incomplete.json",
+      "exitCode": 1,
+      "reason": "page preparation timeout; incomplete cases; independent and full rerun passed, root cause unconfirmed"
+    },
+    {
+      "artifact": "chunked-zip-100.json",
+      "exitCode": 2
+    },
+    {
+      "artifact": "priority-zip-100.json",
+      "exitCode": 2
+    }
+  ],
+  "scriptsSha256": {
+    "scripts/performance/app.mjs": "460cd480580d6273d013a67cdbbea1a9d594636d9f73bc05029fc953a9938619",
+    "scripts/performance/audit.mjs": "3d1c3b9be43a0b5d4bfdc0def39de1e2bce40cd0728a08c451f3e6b8bd534d82",
+    "scripts/performance/equivalence.mjs": "9e240cd336aaaf44204242f0e9ac6cb4a03f96856285cdb175877dcf8c457ba6",
+    "scripts/performance/explore.mjs": "8f4562bc5245cc5c207a186ed0f2bb00e804314004e5149117b889d1661f97ca",
+    "scripts/performance/import-sizes.mjs": "ec0a041e8e0dd1ce4d554408ecb0266cdab1ff33a1fac90fc5896db61be524df",
+    "scripts/performance/interference.mjs": "bf453c272f76fa1c96c789b3023fb247f4d35cfb3685c191be481abc2cc8bf72",
+    "scripts/performance/measure.mjs": "1be2e62996fc48e6a3e7152f1964a00245a26c98f95774b92cf36db4514629c0",
+    "scripts/performance/regression.mjs": "0d82b432a1ed9ce42d7e2861d566dd5c3cc0fed98b48dced39118b4119f32603",
+    "scripts/performance/runtime.mjs": "cc8d016f1fc2e83b7e1af0ac50a01d215831783f3091a7d08f564b0a70577483",
+    "scripts/performance/workload.mjs": "09d4129b7eaa91d42c142f00363fc1f902c9dedcf9c92f67826bac206b855650"
+  },
+  "reviews": {
+    "Standards": {
+      "unresolvedRequiredFindings": 0
+    },
+    "Spec": {
+      "unresolvedRequiredFindings": 0
+    }
+  },
+  "checkOutput": "check-output.txt"
+}

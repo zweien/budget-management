@@ -1,0 +1,4844 @@
+{
+  "capturedAt": "2026-10-16T14:56:04.165Z",
+  "label": "d0425de",
+  "users": 10,
+  "environment": "same-host Chromium and production server; desktop 1440x1000, Asia/Shanghai; warm server, independent user sessions",
+  "projects": 10,
+  "originalRowsPerProject": 10000,
+  "phases": [
+    {
+      "phase": "normal",
+      "groups": [
+        {
+          "name": "navigate-dashboard",
+          "ms": {
+            "n": 20,
+            "p50": 240.53245400000014,
+            "p95": 308.52222900000015,
+            "max": 338.9857099999999
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "navigate-projects",
+          "ms": {
+            "n": 20,
+            "p50": 166.39469199999985,
+            "p95": 188.81972700000006,
+            "max": 219.0906199999995
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "navigate-records",
+          "ms": {
+            "n": 20,
+            "p50": 312.1040319999993,
+            "p95": 385.27715400000034,
+            "max": 415.90840600000047
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "navigate-project",
+          "ms": {
+            "n": 20,
+            "p50": 200.97908299999835,
+            "p95": 217.77250099999992,
+            "max": 247.7711989999998
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "navigate-ledger",
+          "ms": {
+            "n": 20,
+            "p50": 170.67836499999976,
+            "p95": 220.95203700000002,
+            "max": 238.42905299999984
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "navigate-project-records",
+          "ms": {
+            "n": 20,
+            "p50": 228.65636499999982,
+            "p95": 300.34257400000024,
+            "max": 309.1692640000001
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "filter",
+          "ms": {
+            "n": 60,
+            "p50": 420.26915500000086,
+            "p95": 470.39192100000037,
+            "max": 509.3187560000006
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "save-confirmation",
+          "ms": {
+            "n": 20,
+            "p50": 445,
+            "p95": 504.10000002384186,
+            "max": 524.2999999523163
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "navigate-statistics",
+          "ms": {
+            "n": 20,
+            "p50": 216.31784599999992,
+            "p95": 366.28584799999953,
+            "max": 382.2546679999996
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        },
+        {
+          "name": "navigate-imports",
+          "ms": {
+            "n": 20,
+            "p50": 189.3283049999991,
+            "p95": 351.6610839999994,
+            "max": 408.2164780000003
+          },
+          "duringHeavy": {
+            "n": 0,
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        }
+      ],
+      "actions": [
+        {
+          "name": "navigate-dashboard",
+          "user": 1,
+          "start": 2446.510434,
+          "end": 2659.278799,
+          "ms": 212.76836500000036,
+          "driverMs": 212.76836500000036,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 2,
+          "start": 2568.274222,
+          "end": 2775.910429,
+          "ms": 207.636207,
+          "driverMs": 207.636207,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 3,
+          "start": 2687.35086,
+          "end": 2927.772506,
+          "ms": 240.42164599999978,
+          "driverMs": 240.42164599999978,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 1,
+          "start": 2838.762732,
+          "end": 3025.315911,
+          "ms": 186.553179,
+          "driverMs": 186.553179,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 4,
+          "start": 2810.028964,
+          "end": 3109.583887,
+          "ms": 299.5549229999997,
+          "driverMs": 299.5549229999997,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 5,
+          "start": 2926.907266,
+          "end": 3175.662466,
+          "ms": 248.75520000000006,
+          "driverMs": 248.75520000000006,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 2,
+          "start": 3026.411727,
+          "end": 3192.806419,
+          "ms": 166.39469199999985,
+          "driverMs": 166.39469199999985,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 6,
+          "start": 3047.936031,
+          "end": 3292.112851,
+          "ms": 244.17681999999968,
+          "driverMs": 244.17681999999968,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 3,
+          "start": 3248.158936,
+          "end": 3410.679647,
+          "ms": 162.52071100000012,
+          "driverMs": 162.52071100000012,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 7,
+          "start": 3168.234796,
+          "end": 3425.650866,
+          "ms": 257.41606999999976,
+          "driverMs": 257.41606999999976,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 4,
+          "start": 3289.231927,
+          "end": 3476.746096,
+          "ms": 187.51416900000004,
+          "driverMs": 187.51416900000004,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 1,
+          "start": 3204.825989,
+          "end": 3528.882755,
+          "ms": 324.05676600000015,
+          "driverMs": 324.05676600000015,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 8,
+          "start": 3288.49215,
+          "end": 3559.246309,
+          "ms": 270.7541590000001,
+          "driverMs": 270.7541590000001,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 5,
+          "start": 3425.070604,
+          "end": 3593.885023,
+          "ms": 168.81441899999982,
+          "driverMs": 168.81441899999982,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 2,
+          "start": 3442.776674,
+          "end": 3725.494288,
+          "ms": 282.7176139999997,
+          "driverMs": 282.7176139999997,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 9,
+          "start": 3420.003313,
+          "end": 3758.989023,
+          "ms": 338.9857099999999,
+          "driverMs": 338.9857099999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 6,
+          "start": 3611.976958,
+          "end": 3778.029996,
+          "ms": 166.05303800000002,
+          "driverMs": 166.05303800000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 7,
+          "start": 3605.154992,
+          "end": 3793.68014,
+          "ms": 188.52514799999972,
+          "driverMs": 188.52514799999972,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 10,
+          "start": 3535.229362,
+          "end": 3843.751591,
+          "ms": 308.52222900000015,
+          "driverMs": 308.52222900000015,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 1,
+          "start": 3709.275627,
+          "end": 3927.048128,
+          "ms": 217.77250099999992,
+          "driverMs": 217.77250099999992,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 4,
+          "start": 3657.292339,
+          "end": 3942.689855,
+          "ms": 285.397516,
+          "driverMs": 285.397516,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 8,
+          "start": 3809.12683,
+          "end": 3991.898242,
+          "ms": 182.77141200000005,
+          "driverMs": 182.77141200000005,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 3,
+          "start": 3730.11291,
+          "end": 4094.418308,
+          "ms": 364.30539799999997,
+          "driverMs": 364.30539799999997,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 5,
+          "start": 3843.999992,
+          "end": 4164.95385,
+          "ms": 320.95385799999985,
+          "driverMs": 320.95385799999985,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 10,
+          "start": 4024.008455,
+          "end": 4176.099587,
+          "ms": 152.09113199999956,
+          "driverMs": 152.09113199999956,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 2,
+          "start": 3974.756673,
+          "end": 4176.212459,
+          "ms": 201.45578600000044,
+          "driverMs": 201.45578600000044,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 1,
+          "start": 4107.038494,
+          "end": 4297.922388,
+          "ms": 190.8838939999996,
+          "driverMs": 190.8838939999996,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 7,
+          "start": 3973.089764,
+          "end": 4297.944902,
+          "ms": 324.85513800000035,
+          "driverMs": 324.85513800000035,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 9,
+          "start": 4078.869051,
+          "end": 4297.959671,
+          "ms": 219.0906199999995,
+          "driverMs": 219.0906199999995,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 4,
+          "start": 4127.489816,
+          "end": 4375.261015,
+          "ms": 247.7711989999998,
+          "driverMs": 247.7711989999998,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 6,
+          "start": 4098.313939,
+          "end": 4514.222345,
+          "ms": 415.90840600000047,
+          "driverMs": 415.90840600000047,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 5,
+          "start": 4414.77608,
+          "end": 4595.612213,
+          "ms": 180.8361330000007,
+          "driverMs": 180.8361330000007,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 3,
+          "start": 4413.783807,
+          "end": 4595.62943,
+          "ms": 181.84562300000016,
+          "driverMs": 181.84562300000016,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 8,
+          "start": 4242.619379,
+          "end": 4610.284277,
+          "ms": 367.664898,
+          "driverMs": 367.664898,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 2,
+          "start": 4425.846356,
+          "end": 4626.374705,
+          "ms": 200.52834900000016,
+          "driverMs": 200.52834900000016,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 7,
+          "start": 4478.079693,
+          "end": 4693.472662,
+          "ms": 215.39296900000045,
+          "driverMs": 215.39296900000045,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 10,
+          "start": 4356.687736,
+          "end": 4741.96489,
+          "ms": 385.27715400000034,
+          "driverMs": 385.27715400000034,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 4,
+          "start": 4554.798247,
+          "end": 4775.750284,
+          "ms": 220.95203700000002,
+          "driverMs": 220.95203700000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 1,
+          "start": 4477.864943,
+          "end": 4778.207517,
+          "ms": 300.34257400000024,
+          "driverMs": 300.34257400000024,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 9,
+          "start": 4618.014958,
+          "end": 4994.202894,
+          "ms": 376.18793600000026,
+          "driverMs": 376.18793600000026,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 6,
+          "start": 4833.786289,
+          "end": 5028.638058,
+          "ms": 194.85176899999988,
+          "driverMs": 194.85176899999988,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 7,
+          "start": 4872.775943,
+          "end": 5042.976436,
+          "ms": 170.20049300000028,
+          "driverMs": 170.20049300000028,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 5,
+          "start": 4845.06069,
+          "end": 5043.157424,
+          "ms": 198.09673399999974,
+          "driverMs": 198.09673399999974,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 8,
+          "start": 4859.997603,
+          "end": 5075.198112,
+          "ms": 215.20050900000024,
+          "driverMs": 215.20050900000024,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 10,
+          "start": 4922.041054,
+          "end": 5125.605681,
+          "ms": 203.56462699999975,
+          "driverMs": 203.56462699999975,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 3,
+          "start": 4920.996825,
+          "end": 5159.425878,
+          "ms": 238.42905299999984,
+          "driverMs": 238.42905299999984,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 2,
+          "start": 4876.265707,
+          "end": 5165.385931,
+          "ms": 289.12022400000023,
+          "driverMs": 289.12022400000023,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 4,
+          "start": 4956.616355,
+          "end": 5242.399833,
+          "ms": 285.7834780000003,
+          "driverMs": 285.7834780000003,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 9,
+          "start": 5313.955122,
+          "end": 5476.161476,
+          "ms": 162.20635399999992,
+          "driverMs": 162.20635399999992,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 7,
+          "start": 5223.197841,
+          "end": 5495.600876,
+          "ms": 272.4030350000003,
+          "driverMs": 272.4030350000003,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 8,
+          "start": 5324.864603,
+          "end": 5510.354193,
+          "ms": 185.48959000000013,
+          "driverMs": 185.48959000000013,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 6,
+          "start": 5347.970627,
+          "end": 5510.381235,
+          "ms": 162.41060800000014,
+          "driverMs": 162.41060800000014,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 5066.676899,
+          "end": 5510.684935,
+          "ms": 444.0080360000002,
+          "driverMs": 444.0080360000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 10,
+          "start": 5304.993672,
+          "end": 5512.953867,
+          "ms": 207.96019500000057,
+          "driverMs": 207.96019500000057,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 5,
+          "start": 5292.952868,
+          "end": 5526.092278,
+          "ms": 233.13940999999977,
+          "driverMs": 233.13940999999977,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 3,
+          "start": 5479.327027,
+          "end": 5788.496291,
+          "ms": 309.1692640000001,
+          "driverMs": 309.1692640000001,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 10,
+          "start": 5692.789551,
+          "end": 5894.291883,
+          "ms": 201.50233200000002,
+          "driverMs": 201.50233200000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 5503.024161,
+          "end": 5942.562881,
+          "ms": 439.53871999999956,
+          "driverMs": 439.53871999999956,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 9,
+          "start": 5795.833571,
+          "end": 5944.246127,
+          "ms": 148.41255600000022,
+          "driverMs": 148.41255600000022,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 5530.252807,
+          "end": 5958.6876,
+          "ms": 428.43479300000035,
+          "driverMs": 428.43479300000035,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 8,
+          "start": 5760.242235,
+          "end": 5965.928377,
+          "ms": 205.68614200000047,
+          "driverMs": 205.68614200000047,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 6,
+          "start": 5829.860597,
+          "end": 6058.516962,
+          "ms": 228.65636499999982,
+          "driverMs": 228.65636499999982,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 5748.795582,
+          "end": 6142.282793,
+          "ms": 393.48721100000057,
+          "driverMs": 393.48721100000057,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 5801.566922,
+          "end": 6209.656336,
+          "ms": 408.08941400000003,
+          "driverMs": 408.08941400000003,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 5874.787392,
+          "end": 6309.018804,
+          "ms": 434.2314120000001,
+          "driverMs": 434.2314120000001,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 9,
+          "start": 6264.65187,
+          "end": 6492.992342,
+          "ms": 228.34047199999986,
+          "driverMs": 228.34047199999986,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 6138.468464,
+          "end": 6558.737619,
+          "ms": 420.26915500000086,
+          "driverMs": 420.26915500000086,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 6182.637513,
+          "end": 6575.580209,
+          "ms": 392.94269600000007,
+          "driverMs": 392.94269600000007,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 6200.655684,
+          "end": 6612.66265,
+          "ms": 412.0069659999999,
+          "driverMs": 412.0069659999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 6220.796009,
+          "end": 6676.639043,
+          "ms": 455.84303400000044,
+          "driverMs": 455.84303400000044,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 6301.042618,
+          "end": 6692.541187,
+          "ms": 391.4985689999994,
+          "driverMs": 391.4985689999994,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 6437.42906,
+          "end": 6830.208737,
+          "ms": 392.77967699999954,
+          "driverMs": 392.77967699999954,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 6473.987515,
+          "end": 6877.865502,
+          "ms": 403.87798699999985,
+          "driverMs": 403.87798699999985,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 6487.100213,
+          "end": 6909.311143,
+          "ms": 422.2109300000002,
+          "driverMs": 422.2109300000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 6607.63781,
+          "end": 7042.598406,
+          "ms": 434.9605959999999,
+          "driverMs": 434.9605959999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 6840.602937,
+          "end": 7242.43511,
+          "ms": 401.8321730000007,
+          "driverMs": 401.8321730000007,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 6883.605846,
+          "end": 7275.292971,
+          "ms": 391.68712499999947,
+          "driverMs": 391.68712499999947,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 6857.257546,
+          "end": 7292.813141,
+          "ms": 435.5555949999998,
+          "driverMs": 435.5555949999998,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 6907.568469,
+          "end": 7314.580181,
+          "ms": 407.01171200000044,
+          "driverMs": 407.01171200000044,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 6950.325842,
+          "end": 7353.452948,
+          "ms": 403.1271059999999,
+          "driverMs": 403.1271059999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 6971.878356,
+          "end": 7425.018941,
+          "ms": 453.1405850000001,
+          "driverMs": 453.1405850000001,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 7101.717937,
+          "end": 7492.11397,
+          "ms": 390.396033,
+          "driverMs": 390.396033,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 7132.663369,
+          "end": 7542.138506,
+          "ms": 409.47513700000036,
+          "driverMs": 409.47513700000036,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 7366.612688,
+          "end": 7755.447051,
+          "ms": 388.83436299999994,
+          "driverMs": 388.83436299999994,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 7551.985998,
+          "end": 8000.743225,
+          "ms": 448.75722700000006,
+          "driverMs": 448.75722700000006,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 7532.942129,
+          "end": 8003.33405,
+          "ms": 470.39192100000037,
+          "driverMs": 470.39192100000037,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 7621.804069,
+          "end": 8052.464192,
+          "ms": 430.66012300000057,
+          "driverMs": 430.66012300000057,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 7550.656903,
+          "end": 8052.7056,
+          "ms": 502.0486970000002,
+          "driverMs": 502.0486970000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 1,
+          "start": 7548.885009765625,
+          "end": 8073.184814453125,
+          "ms": 524.2999999523163,
+          "driverMs": 778.3754440000002,
+          "observedMs": 528.7999999523163,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 7861.929937,
+          "end": 8267.199103,
+          "ms": 405.26916600000095,
+          "driverMs": 405.26916600000095,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 1,
+          "start": 8078.532217,
+          "end": 8283.524666,
+          "ms": 204.9924489999994,
+          "driverMs": 204.9924489999994,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 4,
+          "start": 7908.68505859375,
+          "end": 8412.78515625,
+          "ms": 504.10000002384186,
+          "driverMs": 760.3762030000007,
+          "observedMs": 508.9000000357628,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 2,
+          "start": 8024.5849609375,
+          "end": 8497.68505859375,
+          "ms": 473.10000002384186,
+          "driverMs": 721.6037299999998,
+          "observedMs": 518.1000000238419,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 7,
+          "start": 8084.48486328125,
+          "end": 8499.885009765625,
+          "ms": 415.4000000357628,
+          "driverMs": 754.8743870000008,
+          "observedMs": 519.8000000119209,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 4,
+          "start": 8418.085789,
+          "end": 8742.650779,
+          "ms": 324.56498999999894,
+          "driverMs": 324.56498999999894,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 1,
+          "start": 8463.044409,
+          "end": 8814.705493,
+          "ms": 351.6610839999994,
+          "driverMs": 351.6610839999994,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 8376.830418,
+          "end": 8838.511994,
+          "ms": 461.68157600000086,
+          "driverMs": 461.68157600000086,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 5,
+          "start": 8400.98486328125,
+          "end": 8835.784912109375,
+          "ms": 434.80000001192093,
+          "driverMs": 621.1750649999994,
+          "observedMs": 440.10000002384186,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 2,
+          "start": 8543.014009,
+          "end": 8925.268677,
+          "ms": 382.2546679999996,
+          "driverMs": 382.2546679999996,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 7,
+          "start": 8604.999727,
+          "end": 8971.285575,
+          "ms": 366.28584799999953,
+          "driverMs": 366.28584799999953,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 5,
+          "start": 8841.835011,
+          "end": 9062.767959,
+          "ms": 220.9329480000015,
+          "driverMs": 220.9329480000015,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 4,
+          "start": 8921.914682,
+          "end": 9213.412421,
+          "ms": 291.49773900000037,
+          "driverMs": 291.49773900000037,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 10,
+          "start": 8767.385009765625,
+          "end": 9255.885009765625,
+          "ms": 488.5,
+          "driverMs": 756.1645509999998,
+          "observedMs": 493.19999998807907,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 1,
+          "start": 8994.597644,
+          "end": 9295.229053,
+          "ms": 300.6314089999996,
+          "driverMs": 300.6314089999996,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 6,
+          "start": 8847.5849609375,
+          "end": 9292.5849609375,
+          "ms": 445,
+          "driverMs": 615.4428339999995,
+          "observedMs": 450.4000000357628,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 3,
+          "start": 8802.5849609375,
+          "end": 9283.385009765625,
+          "ms": 480.80000001192093,
+          "driverMs": 768.5060630000007,
+          "observedMs": 505.39999997615814,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 8,
+          "start": 8799.18505859375,
+          "end": 9293.284912109375,
+          "ms": 494.10000002384186,
+          "driverMs": 811.714777000001,
+          "observedMs": 508.69999998807907,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 2,
+          "start": 9174.782326,
+          "end": 9391.750855,
+          "ms": 216.96852899999976,
+          "driverMs": 216.96852899999976,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 7,
+          "start": 9150.907741,
+          "end": 9391.776617,
+          "ms": 240.86887599999864,
+          "driverMs": 240.86887599999864,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 10,
+          "start": 9261.293425,
+          "end": 9436.079579,
+          "ms": 174.78615399999944,
+          "driverMs": 174.78615399999944,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 8,
+          "start": 9309.114954,
+          "end": 9525.4328,
+          "ms": 216.31784599999992,
+          "driverMs": 216.31784599999992,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 6,
+          "start": 9299.266357,
+          "end": 9525.583641,
+          "ms": 226.31728399999884,
+          "driverMs": 226.31728399999884,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 3,
+          "start": 9308.899483,
+          "end": 9542.157654,
+          "ms": 233.2581710000013,
+          "driverMs": 233.2581710000013,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 5,
+          "start": 9312.758088,
+          "end": 9608.529595,
+          "ms": 295.7715069999995,
+          "driverMs": 295.7715069999995,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 1,
+          "start": 9544.958189,
+          "end": 9659.138842,
+          "ms": 114.18065299999944,
+          "driverMs": 114.18065299999944,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 4,
+          "start": 9392.856911,
+          "end": 9659.155099,
+          "ms": 266.29818799999885,
+          "driverMs": 266.29818799999885,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 7,
+          "start": 9572.697875,
+          "end": 9773.105753,
+          "ms": 200.40787799999998,
+          "driverMs": 200.40787799999998,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 10,
+          "start": 9615.990915,
+          "end": 9805.31922,
+          "ms": 189.3283049999991,
+          "driverMs": 189.3283049999991,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 2,
+          "start": 9642.197365,
+          "end": 9838.359077,
+          "ms": 196.16171199999917,
+          "driverMs": 196.16171199999917,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 9,
+          "start": 9451.284912109375,
+          "end": 9875.18505859375,
+          "ms": 423.89999997615814,
+          "driverMs": 604.1656160000002,
+          "observedMs": 457.39999997615814,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 8,
+          "start": 9774.845754,
+          "end": 9947.013512,
+          "ms": 172.1677579999996,
+          "driverMs": 172.1677579999996,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 6,
+          "start": 9845.695317,
+          "end": 10016.379186,
+          "ms": 170.6838690000004,
+          "driverMs": 170.6838690000004,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 5,
+          "start": 9858.042013,
+          "end": 10042.335716,
+          "ms": 184.29370299999937,
+          "driverMs": 184.29370299999937,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 4,
+          "start": 9908.920189,
+          "end": 10076.995615,
+          "ms": 168.07542599999942,
+          "driverMs": 168.07542599999942,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 3,
+          "start": 9861.766384,
+          "end": 10094.856559,
+          "ms": 233.09017499999936,
+          "driverMs": 233.09017499999936,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 9,
+          "start": 9909.420861,
+          "end": 10110.340164,
+          "ms": 200.91930299999876,
+          "driverMs": 200.91930299999876,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 7,
+          "start": 10022.840344,
+          "end": 10210.604051,
+          "ms": 187.76370700000007,
+          "driverMs": 187.76370700000007,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 1,
+          "start": 9908.757938,
+          "end": 10225.393562,
+          "ms": 316.63562399999864,
+          "driverMs": 316.63562399999864,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 10,
+          "start": 9984.88511,
+          "end": 10225.417564,
+          "ms": 240.53245400000014,
+          "driverMs": 240.53245400000014,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 2,
+          "start": 10158.70688,
+          "end": 10259.768387,
+          "ms": 101.06150700000035,
+          "driverMs": 101.06150700000035,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 8,
+          "start": 10196.863648,
+          "end": 10359.527312,
+          "ms": 162.6636639999997,
+          "driverMs": 162.6636639999997,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 5,
+          "start": 10362.287077,
+          "end": 10504.418774,
+          "ms": 142.1316969999989,
+          "driverMs": 142.1316969999989,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 6,
+          "start": 10336.180297,
+          "end": 10534.481077,
+          "ms": 198.30077999999958,
+          "driverMs": 198.30077999999958,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 4,
+          "start": 10327.232976,
+          "end": 10550.97598,
+          "ms": 223.74300399999993,
+          "driverMs": 223.74300399999993,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 3,
+          "start": 10415.746942,
+          "end": 10592.856847,
+          "ms": 177.10990499999934,
+          "driverMs": 177.10990499999934,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 10,
+          "start": 10475.36921,
+          "end": 10664.188937,
+          "ms": 188.81972700000006,
+          "driverMs": 188.81972700000006,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 1,
+          "start": 10475.145979,
+          "end": 10676.125062,
+          "ms": 200.97908299999835,
+          "driverMs": 200.97908299999835,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 9,
+          "start": 10430.780917,
+          "end": 10691.863355,
+          "ms": 261.08243799999946,
+          "driverMs": 261.08243799999946,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 7,
+          "start": 10460.521839,
+          "end": 10710.037712,
+          "ms": 249.51587299999846,
+          "driverMs": 249.51587299999846,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 8,
+          "start": 10678.925325,
+          "end": 10825.673916,
+          "ms": 146.74859099999958,
+          "driverMs": 146.74859099999958,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 2,
+          "start": 10579.822938,
+          "end": 10826.076663,
+          "ms": 246.2537250000005,
+          "driverMs": 246.2537250000005,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 6,
+          "start": 10713.880636,
+          "end": 10827.460033,
+          "ms": 113.57939699999952,
+          "driverMs": 113.57939699999952,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 3,
+          "start": 10773.048186,
+          "end": 10908.552842,
+          "ms": 135.50465599999916,
+          "driverMs": 135.50465599999916,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 4,
+          "start": 10801.15428,
+          "end": 10941.838811,
+          "ms": 140.68453099999897,
+          "driverMs": 140.68453099999897,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 1,
+          "start": 10926.058275,
+          "end": 11048.838114,
+          "ms": 122.77983900000072,
+          "driverMs": 122.77983900000072,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 7,
+          "start": 10960.259296,
+          "end": 11108.557541,
+          "ms": 148.29824499999995,
+          "driverMs": 148.29824499999995,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 5,
+          "start": 10823.89612,
+          "end": 11108.578822,
+          "ms": 284.68270200000006,
+          "driverMs": 284.68270200000006,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 10,
+          "start": 10914.105829,
+          "end": 11226.209861,
+          "ms": 312.1040319999993,
+          "driverMs": 312.1040319999993,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 9,
+          "start": 11012.32355,
+          "end": 11260.225606,
+          "ms": 247.9020560000008,
+          "driverMs": 247.9020560000008,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 6,
+          "start": 11006.917676,
+          "end": 11277.90745,
+          "ms": 270.9897740000015,
+          "driverMs": 270.9897740000015,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 2,
+          "start": 11145.766871,
+          "end": 11325.01586,
+          "ms": 179.2489889999997,
+          "driverMs": 179.2489889999997,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 4,
+          "start": 11193.0639,
+          "end": 11364.638692,
+          "ms": 171.57479200000125,
+          "driverMs": 171.57479200000125,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 3,
+          "start": 11087.802151,
+          "end": 11391.785315,
+          "ms": 303.9831639999993,
+          "driverMs": 303.9831639999993,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 8,
+          "start": 11144.875212,
+          "end": 11441.962342,
+          "ms": 297.0871299999999,
+          "driverMs": 297.0871299999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 7,
+          "start": 11359.199376,
+          "end": 11525.116293,
+          "ms": 165.91691699999865,
+          "driverMs": 165.91691699999865,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 1,
+          "start": 11298.766463,
+          "end": 11527.334886,
+          "ms": 228.56842300000062,
+          "driverMs": 228.56842300000062,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 5,
+          "start": 11427.878604,
+          "end": 11576.457347,
+          "ms": 148.57874300000003,
+          "driverMs": 148.57874300000003,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-projects",
+          "user": 9,
+          "start": 11440.10278,
+          "end": 11625.058959,
+          "ms": 184.9561790000007,
+          "driverMs": 184.9561790000007,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 6,
+          "start": 11458.206172,
+          "end": 11675.375722,
+          "ms": 217.16955000000053,
+          "driverMs": 217.16955000000053,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 10,
+          "start": 11475.924003,
+          "end": 11693.41183,
+          "ms": 217.48782699999902,
+          "driverMs": 217.48782699999902,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 3,
+          "start": 11571.785474,
+          "end": 11775.334165,
+          "ms": 203.54869099999996,
+          "driverMs": 203.54869099999996,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 4,
+          "start": 11614.32056,
+          "end": 11811.628571,
+          "ms": 197.30801099999917,
+          "driverMs": 197.30801099999917,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 2,
+          "start": 11645.080924,
+          "end": 11825.845597,
+          "ms": 180.76467299999968,
+          "driverMs": 180.76467299999968,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 8,
+          "start": 11761.80448,
+          "end": 11893.313882,
+          "ms": 131.50940199999968,
+          "driverMs": 131.50940199999968,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 6,
+          "start": 11854.759296,
+          "end": 12025.437661,
+          "ms": 170.67836499999976,
+          "driverMs": 170.67836499999976,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 7,
+          "start": 11774.786417,
+          "end": 12025.584838,
+          "ms": 250.79842100000133,
+          "driverMs": 250.79842100000133,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 5,
+          "start": 11895.840703,
+          "end": 12041.917123,
+          "ms": 146.07641999999942,
+          "driverMs": 146.07641999999942,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 10,
+          "start": 11942.805151,
+          "end": 12108.519351,
+          "ms": 165.71420000000035,
+          "driverMs": 165.71420000000035,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 3,
+          "start": 11955.427209,
+          "end": 12126.466237,
+          "ms": 171.03902800000105,
+          "driverMs": 171.03902800000105,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-records",
+          "user": 9,
+          "start": 11804.753033,
+          "end": 12129.090265,
+          "ms": 324.33723199999986,
+          "driverMs": 324.33723199999986,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 11868.289077,
+          "end": 12325.163971,
+          "ms": 456.8748940000005,
+          "driverMs": 456.8748940000005,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 2,
+          "start": 12146.106626,
+          "end": 12342.416315,
+          "ms": 196.3096889999997,
+          "driverMs": 196.3096889999997,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 8,
+          "start": 12213.511707,
+          "end": 12361.738331,
+          "ms": 148.2266240000008,
+          "driverMs": 148.2266240000008,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 6,
+          "start": 12204.766191,
+          "end": 12463.000571,
+          "ms": 258.2343799999999,
+          "driverMs": 258.2343799999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 12125.179817,
+          "end": 12510.017182,
+          "ms": 384.8373649999994,
+          "driverMs": 384.8373649999994,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project",
+          "user": 9,
+          "start": 12309.329575,
+          "end": 12526.919984,
+          "ms": 217.59040900000036,
+          "driverMs": 217.59040900000036,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 5,
+          "start": 12362.02019,
+          "end": 12583.698002,
+          "ms": 221.6778119999999,
+          "driverMs": 221.6778119999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 3,
+          "start": 12306.647207,
+          "end": 12594.075113,
+          "ms": 287.4279060000008,
+          "driverMs": 287.4279060000008,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 10,
+          "start": 12358.044585,
+          "end": 12625.881817,
+          "ms": 267.83723199999986,
+          "driverMs": 267.83723199999986,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 12340.659144,
+          "end": 12741.666495,
+          "ms": 401.0073510000002,
+          "driverMs": 401.0073510000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 9,
+          "start": 12707.759509,
+          "end": 12809.199569,
+          "ms": 101.44006000000081,
+          "driverMs": 101.44006000000081,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 8,
+          "start": 12682.437261,
+          "end": 12858.422501,
+          "ms": 175.98523999999998,
+          "driverMs": 175.98523999999998,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 12622.670471,
+          "end": 13058.34137,
+          "ms": 435.67089900000065,
+          "driverMs": 435.67089900000065,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 12717.574695,
+          "end": 13092.076361,
+          "ms": 374.5016660000001,
+          "driverMs": 374.5016660000001,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 12769.261164,
+          "end": 13158.953455,
+          "ms": 389.6922910000012,
+          "driverMs": 389.6922910000012,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 12758.200649,
+          "end": 13175.185557,
+          "ms": 416.98490800000036,
+          "driverMs": 416.98490800000036,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 9,
+          "start": 12988.856905,
+          "end": 13184.268887,
+          "ms": 195.41198199999963,
+          "driverMs": 195.41198199999963,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 12837.381316,
+          "end": 13208.966199,
+          "ms": 371.58488299999954,
+          "driverMs": 371.58488299999954,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 12945.089178,
+          "end": 13358.443801,
+          "ms": 413.35462299999926,
+          "driverMs": 413.35462299999926,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 12969.687875,
+          "end": 13392.208681,
+          "ms": 422.52080600000045,
+          "driverMs": 422.52080600000045,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 13070.689858,
+          "end": 13458.565838,
+          "ms": 387.8759800000007,
+          "driverMs": 387.8759800000007,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 13235.06717,
+          "end": 13625.033623,
+          "ms": 389.9664529999991,
+          "driverMs": 389.9664529999991,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 13336.334146,
+          "end": 13775.884531,
+          "ms": 439.55038500000046,
+          "driverMs": 439.55038500000046,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 13369.620036,
+          "end": 13776.079375,
+          "ms": 406.4593389999991,
+          "driverMs": 406.4593389999991,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 13433.028631,
+          "end": 13825.781587,
+          "ms": 392.75295600000027,
+          "driverMs": 392.75295600000027,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 13437.084881,
+          "end": 13841.955349,
+          "ms": 404.87046799999916,
+          "driverMs": 404.87046799999916,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 13420.058855,
+          "end": 13842.116991,
+          "ms": 422.05813600000147,
+          "driverMs": 422.05813600000147,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 13467.385199,
+          "end": 13891.879782,
+          "ms": 424.4945829999997,
+          "driverMs": 424.4945829999997,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 13652.232122,
+          "end": 14041.532548,
+          "ms": 389.3004259999998,
+          "driverMs": 389.3004259999998,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 13648.029239,
+          "end": 14076.166973,
+          "ms": 428.1377339999999,
+          "driverMs": 428.1377339999999,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 13745.173226,
+          "end": 14145.291895,
+          "ms": 400.1186689999995,
+          "driverMs": 400.1186689999995,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 13900.462408,
+          "end": 14331.438519,
+          "ms": 430.97611099999995,
+          "driverMs": 430.97611099999995,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 14048.504284,
+          "end": 14510.367279,
+          "ms": 461.8629949999995,
+          "driverMs": 461.8629949999995,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 14099.891741,
+          "end": 14544.672099,
+          "ms": 444.780358,
+          "driverMs": 444.780358,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 14101.222692,
+          "end": 14545.097727,
+          "ms": 443.87503500000093,
+          "driverMs": 443.87503500000093,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 14228.32555,
+          "end": 14711.151565,
+          "ms": 482.82601500000055,
+          "driverMs": 482.82601500000055,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 14336.148523,
+          "end": 14768.164255,
+          "ms": 432.01573199999984,
+          "driverMs": 432.01573199999984,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 14353.178229,
+          "end": 14779.264597,
+          "ms": 426.0863680000002,
+          "driverMs": 426.0863680000002,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 4,
+          "start": 14362.885009765625,
+          "end": 14779.385009765625,
+          "ms": 416.5,
+          "driverMs": 595.0620289999988,
+          "observedMs": 421.69999998807907,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 1,
+          "start": 14363.385009765625,
+          "end": 14779.284912109375,
+          "ms": 415.9000000357628,
+          "driverMs": 670.2823409999983,
+          "observedMs": 424.30000001192093,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 4,
+          "start": 14785.500077,
+          "end": 14948.338985,
+          "ms": 162.83890799999972,
+          "driverMs": 162.83890799999972,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 1,
+          "start": 14788.314117,
+          "end": 14969.262961,
+          "ms": 180.94884400000046,
+          "driverMs": 180.94884400000046,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 14671.953753,
+          "end": 15109.530025,
+          "ms": 437.57627200000024,
+          "driverMs": 437.57627200000024,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 7,
+          "start": 14699.684814453125,
+          "end": 15131.784912109375,
+          "ms": 432.10000002384186,
+          "driverMs": 641.7982699999993,
+          "observedMs": 437.2000000476837,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 14825.305529,
+          "end": 15334.624285,
+          "ms": 509.3187560000006,
+          "driverMs": 509.3187560000006,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 7,
+          "start": 15137.461932,
+          "end": 15466.734814,
+          "ms": 329.2728819999993,
+          "driverMs": 329.2728819999993,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 4,
+          "start": 15197.79631,
+          "end": 15547.178957,
+          "ms": 349.38264700000036,
+          "driverMs": 349.38264700000036,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 2,
+          "start": 15118.78515625,
+          "end": 15589.28515625,
+          "ms": 470.5,
+          "driverMs": 656.0811080000003,
+          "observedMs": 476,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 1,
+          "start": 15219.004466,
+          "end": 15627.220944,
+          "ms": 408.2164780000003,
+          "driverMs": 408.2164780000003,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 6,
+          "start": 15116.18505859375,
+          "end": 15606.98486328125,
+          "ms": 490.80000001192093,
+          "driverMs": 756.524367,
+          "observedMs": 522.6000000238419,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 3,
+          "start": 15277.0849609375,
+          "end": 15777.68505859375,
+          "ms": 500.60000002384186,
+          "driverMs": 729.3551489999991,
+          "observedMs": 541.7000000476837,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 5,
+          "start": 15397.784912109375,
+          "end": 15834.284912109375,
+          "ms": 436.5,
+          "driverMs": 638.5275759999986,
+          "observedMs": 441.89999997615814,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 2,
+          "start": 15595.20549,
+          "end": 15924.460628,
+          "ms": 329.25513800000044,
+          "driverMs": 329.25513800000044,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 10,
+          "start": 15392.5849609375,
+          "end": 15879.485107421875,
+          "ms": 486.9000000357628,
+          "driverMs": 757.5712829999993,
+          "observedMs": 527.9000000357628,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 7,
+          "start": 15717.01325,
+          "end": 15942.413082,
+          "ms": 225.39983199999915,
+          "driverMs": 225.39983199999915,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 6,
+          "start": 15639.14518,
+          "end": 15943.137657,
+          "ms": 303.9924769999998,
+          "driverMs": 303.9924769999998,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 3,
+          "start": 15819.07167,
+          "end": 16000.932942,
+          "ms": 181.8612720000001,
+          "driverMs": 181.8612720000001,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 5,
+          "start": 15843.443664,
+          "end": 16037.963844,
+          "ms": 194.52017999999953,
+          "driverMs": 194.52017999999953,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 10,
+          "start": 15924.526184,
+          "end": 16144.4174,
+          "ms": 219.891216,
+          "driverMs": 219.891216,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 8,
+          "start": 15765.684814453125,
+          "end": 16177.684814453125,
+          "ms": 412,
+          "driverMs": 610.6121349999994,
+          "observedMs": 416.60000002384186,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 6,
+          "start": 16123.028337,
+          "end": 16289.309214,
+          "ms": 166.28087700000106,
+          "driverMs": 166.28087700000106,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 3,
+          "start": 16181.436061,
+          "end": 16326.048641,
+          "ms": 144.61257999999907,
+          "driverMs": 144.61257999999907,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "save-confirmation",
+          "user": 9,
+          "start": 15911.485107421875,
+          "end": 16294.485107421875,
+          "ms": 383,
+          "driverMs": 616.1537119999994,
+          "observedMs": 443.5,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 8,
+          "start": 16183.037062,
+          "end": 16374.940063,
+          "ms": 191.9030010000006,
+          "driverMs": 191.9030010000006,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 2,
+          "start": 16243.809437,
+          "end": 16426.75446,
+          "ms": 182.94502300000022,
+          "driverMs": 182.94502300000022,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 9,
+          "start": 16355.16997,
+          "end": 16491.551835,
+          "ms": 136.38186499999756,
+          "driverMs": 136.38186499999756,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 5,
+          "start": 16358.711865,
+          "end": 16513.290297,
+          "ms": 154.57843200000025,
+          "driverMs": 154.57843200000025,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 10,
+          "start": 16394.425882,
+          "end": 16524.640623,
+          "ms": 130.21474099999978,
+          "driverMs": 130.21474099999978,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 9,
+          "start": 16671.715124,
+          "end": 16825.150025,
+          "ms": 153.43490100000054,
+          "driverMs": 153.43490100000054,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-imports",
+          "user": 8,
+          "start": 16695.313612,
+          "end": 16858.171897,
+          "ms": 162.85828499999843,
+          "driverMs": 162.85828499999843,
+          "overlappedHeavy": false
+        }
+      ],
+      "rssBytes": {
+        "initial": 1429127168,
+        "peak": 1431097344,
+        "final": 1418506240,
+        "samples": 148
+      }
+    },
+    {
+      "phase": "mixed",
+      "groups": [
+        {
+          "name": "navigate-dashboard",
+          "ms": {
+            "n": 20,
+            "p50": 286.682337000002,
+            "p95": 410.6129069999988,
+            "max": 437.7779320000009
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 286.682337000002,
+            "p95": 410.6129069999988,
+            "max": 437.7779320000009
+          }
+        },
+        {
+          "name": "navigate-projects",
+          "ms": {
+            "n": 20,
+            "p50": 198.3121080000019,
+            "p95": 343.9760840000017,
+            "max": 378.8222840000017
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 198.3121080000019,
+            "p95": 343.9760840000017,
+            "max": 378.8222840000017
+          }
+        },
+        {
+          "name": "navigate-records",
+          "ms": {
+            "n": 20,
+            "p50": 360.5669940000007,
+            "p95": 468.21797199999855,
+            "max": 542.6340229999987
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 360.5669940000007,
+            "p95": 468.21797199999855,
+            "max": 542.6340229999987
+          }
+        },
+        {
+          "name": "navigate-project",
+          "ms": {
+            "n": 20,
+            "p50": 205.67409399999815,
+            "p95": 353.3006459999997,
+            "max": 387.26645199999984
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 205.67409399999815,
+            "p95": 353.3006459999997,
+            "max": 387.26645199999984
+          }
+        },
+        {
+          "name": "navigate-ledger",
+          "ms": {
+            "n": 20,
+            "p50": 183.6045860000013,
+            "p95": 247.56966599999942,
+            "max": 321.2966809999998
+          },
+          "duringHeavy": {
+            "n": 19,
+            "p50": 184.90230299999894,
+            "p95": 321.2966809999998,
+            "max": 321.2966809999998
+          }
+        },
+        {
+          "name": "navigate-project-records",
+          "ms": {
+            "n": 20,
+            "p50": 256.92525399999795,
+            "p95": 329.05637299999944,
+            "max": 335.5941759999987
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 256.92525399999795,
+            "p95": 329.05637299999944,
+            "max": 335.5941759999987
+          }
+        },
+        {
+          "name": "filter",
+          "ms": {
+            "n": 60,
+            "p50": 436.63768199999686,
+            "p95": 501.52630999999747,
+            "max": 553.601204999999
+          },
+          "duringHeavy": {
+            "n": 60,
+            "p50": 436.63768199999686,
+            "p95": 501.52630999999747,
+            "max": 553.601204999999
+          }
+        },
+        {
+          "name": "save-confirmation",
+          "ms": {
+            "n": 20,
+            "p50": 509,
+            "p95": 593.9000000357628,
+            "max": 594.3000000119209
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 509,
+            "p95": 593.9000000357628,
+            "max": 594.3000000119209
+          }
+        },
+        {
+          "name": "navigate-statistics",
+          "ms": {
+            "n": 20,
+            "p50": 274.66102200000023,
+            "p95": 486.39455299999827,
+            "max": 499.11309699999765
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 274.66102200000023,
+            "p95": 486.39455299999827,
+            "max": 499.11309699999765
+          }
+        },
+        {
+          "name": "navigate-imports",
+          "ms": {
+            "n": 20,
+            "p50": 240.58232900000075,
+            "p95": 366.1514070000012,
+            "max": 368.4696070000027
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 240.58232900000075,
+            "p95": 366.1514070000012,
+            "max": 368.4696070000027
+          }
+        }
+      ],
+      "actions": [
+        {
+          "name": "navigate-dashboard",
+          "user": 1,
+          "start": 17212.946864,
+          "end": 17491.794048,
+          "ms": 278.8471839999984,
+          "driverMs": 278.8471839999984,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 2,
+          "start": 17331.173077,
+          "end": 17592.080896,
+          "ms": 260.907819,
+          "driverMs": 260.907819,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 3,
+          "start": 17450.889004,
+          "end": 17677.273589,
+          "ms": 226.3845849999998,
+          "driverMs": 226.3845849999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 1,
+          "start": 17672.825666,
+          "end": 17824.904014,
+          "ms": 152.0783479999991,
+          "driverMs": 152.0783479999991,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 4,
+          "start": 17566.373743,
+          "end": 17858.406685,
+          "ms": 292.03294200000164,
+          "driverMs": 292.03294200000164,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 5,
+          "start": 17688.636892,
+          "end": 17975.319229,
+          "ms": 286.682337000002,
+          "driverMs": 286.682337000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 2,
+          "start": 17841.771581,
+          "end": 18024.834996,
+          "ms": 183.06341500000053,
+          "driverMs": 183.06341500000053,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 6,
+          "start": 17811.27277,
+          "end": 18143.802602,
+          "ms": 332.52983200000017,
+          "driverMs": 332.52983200000017,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 3,
+          "start": 17997.334957,
+          "end": 18192.231498,
+          "ms": 194.8965410000019,
+          "driverMs": 194.8965410000019,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 4,
+          "start": 18037.824614,
+          "end": 18241.585974,
+          "ms": 203.76136000000042,
+          "driverMs": 203.76136000000042,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 7,
+          "start": 17932.111106,
+          "end": 18259.575423,
+          "ms": 327.4643169999981,
+          "driverMs": 327.4643169999981,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 1,
+          "start": 18004.971073,
+          "end": 18359.613375,
+          "ms": 354.6423020000002,
+          "driverMs": 354.6423020000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 5,
+          "start": 18226.293758,
+          "end": 18441.374003,
+          "ms": 215.080245000001,
+          "driverMs": 215.080245000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 8,
+          "start": 18047.905049,
+          "end": 18458.517956,
+          "ms": 410.6129069999988,
+          "driverMs": 410.6129069999988,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 9,
+          "start": 18189.277113,
+          "end": 18627.055045,
+          "ms": 437.7779320000009,
+          "driverMs": 437.7779320000009,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 2,
+          "start": 18274.821924,
+          "end": 18659.545858,
+          "ms": 384.72393400000146,
+          "driverMs": 384.72393400000146,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 7,
+          "start": 18438.742327,
+          "end": 18692.425865,
+          "ms": 253.68353800000114,
+          "driverMs": 253.68353800000114,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 10,
+          "start": 18297.153961,
+          "end": 18692.444762,
+          "ms": 395.2908009999992,
+          "driverMs": 395.2908009999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 6,
+          "start": 18464.182599,
+          "end": 18741.396012,
+          "ms": 277.2134130000013,
+          "driverMs": 277.2134130000013,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 4,
+          "start": 18420.782,
+          "end": 18841.435068,
+          "ms": 420.6530679999996,
+          "driverMs": 420.6530679999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 1,
+          "start": 18539.397263,
+          "end": 18841.542723,
+          "ms": 302.14545999999973,
+          "driverMs": 302.14545999999973,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 3,
+          "start": 18512.263776,
+          "end": 18908.0817,
+          "ms": 395.81792399999904,
+          "driverMs": 395.81792399999904,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 8,
+          "start": 18707.842778,
+          "end": 18980.352923,
+          "ms": 272.5101450000002,
+          "driverMs": 272.5101450000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 10,
+          "start": 18872.00222,
+          "end": 19215.978304,
+          "ms": 343.9760840000017,
+          "driverMs": 343.9760840000017,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 5,
+          "start": 18691.744589,
+          "end": 19234.378612,
+          "ms": 542.6340229999987,
+          "driverMs": 542.6340229999987,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 2,
+          "start": 18909.614728,
+          "end": 19296.88118,
+          "ms": 387.26645199999984,
+          "driverMs": 387.26645199999984,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 7,
+          "start": 18871.799774,
+          "end": 19325.522798,
+          "ms": 453.7230240000026,
+          "driverMs": 453.7230240000026,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 9,
+          "start": 18946.848572,
+          "end": 19325.670856,
+          "ms": 378.8222840000017,
+          "driverMs": 378.8222840000017,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 1,
+          "start": 19021.966317,
+          "end": 19343.262998,
+          "ms": 321.2966809999998,
+          "driverMs": 321.2966809999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 4,
+          "start": 19021.747567,
+          "end": 19375.048213,
+          "ms": 353.3006459999997,
+          "driverMs": 353.3006459999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 3,
+          "start": 19228.293942,
+          "end": 19475.637209,
+          "ms": 247.3432670000002,
+          "driverMs": 247.3432670000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 6,
+          "start": 19060.916129,
+          "end": 19529.134101,
+          "ms": 468.21797199999855,
+          "driverMs": 468.21797199999855,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 8,
+          "start": 19230.058521,
+          "end": 19575.084978,
+          "ms": 345.02645699999994,
+          "driverMs": 345.02645699999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 5,
+          "start": 19483.928792,
+          "end": 19674.733657,
+          "ms": 190.80486500000188,
+          "driverMs": 190.80486500000188,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 7,
+          "start": 19504.851232,
+          "end": 19710.525326,
+          "ms": 205.67409399999815,
+          "driverMs": 205.67409399999815,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 2,
+          "start": 19547.010678,
+          "end": 19741.89237,
+          "ms": 194.88169200000266,
+          "driverMs": 194.88169200000266,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 4,
+          "start": 19554.994944,
+          "end": 19757.897705,
+          "ms": 202.9027610000012,
+          "driverMs": 202.9027610000012,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 10,
+          "start": 19397.241281,
+          "end": 19792.256352,
+          "ms": 395.0150710000016,
+          "driverMs": 395.0150710000016,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 1,
+          "start": 19523.77111,
+          "end": 19859.365286,
+          "ms": 335.5941759999987,
+          "driverMs": 335.5941759999987,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 9,
+          "start": 19645.272482,
+          "end": 19978.276569,
+          "ms": 333.00408700000116,
+          "driverMs": 333.00408700000116,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 3,
+          "start": 19794.797319,
+          "end": 19978.30321,
+          "ms": 183.50589099999706,
+          "driverMs": 183.50589099999706,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 6,
+          "start": 19848.822885,
+          "end": 20026.088144,
+          "ms": 177.2652589999998,
+          "driverMs": 177.2652589999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 8,
+          "start": 19825.262175,
+          "end": 20026.111954,
+          "ms": 200.84977900000013,
+          "driverMs": 200.84977900000013,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 7,
+          "start": 19889.78854,
+          "end": 20074.690843,
+          "ms": 184.90230299999894,
+          "driverMs": 184.90230299999894,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 5,
+          "start": 19925.044222,
+          "end": 20124.766167,
+          "ms": 199.72194500000114,
+          "driverMs": 199.72194500000114,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 10,
+          "start": 19971.931769,
+          "end": 20175.091683,
+          "ms": 203.15991399999984,
+          "driverMs": 203.15991399999984,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 4,
+          "start": 19938.381543,
+          "end": 20222.968943,
+          "ms": 284.58740000000034,
+          "driverMs": 284.58740000000034,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 2,
+          "start": 19991.994346,
+          "end": 20243.164904,
+          "ms": 251.17055800000162,
+          "driverMs": 251.17055800000162,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 8,
+          "start": 20276.021405,
+          "end": 20410.479784,
+          "ms": 134.4583789999997,
+          "driverMs": 134.4583789999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 9,
+          "start": 20297.796909,
+          "end": 20444.512906,
+          "ms": 146.71599699999933,
+          "driverMs": 146.71599699999933,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 6,
+          "start": 20345.772032,
+          "end": 20511.142289,
+          "ms": 165.37025699999867,
+          "driverMs": 165.37025699999867,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 7,
+          "start": 20254.007101,
+          "end": 20526.104628,
+          "ms": 272.0975270000017,
+          "driverMs": 272.0975270000017,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 10,
+          "start": 20355.208809,
+          "end": 20558.690711,
+          "ms": 203.48190199999954,
+          "driverMs": 203.48190199999954,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 3,
+          "start": 20297.986762,
+          "end": 20577.127837,
+          "ms": 279.14107499999955,
+          "driverMs": 279.14107499999955,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 20161.930486,
+          "end": 20595.737727,
+          "ms": 433.8072409999986,
+          "driverMs": 433.8072409999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 5,
+          "start": 20374.804059,
+          "end": 20662.078546,
+          "ms": 287.2744870000024,
+          "driverMs": 287.2744870000024,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 8,
+          "start": 20659.998458,
+          "end": 20910.873541,
+          "ms": 250.87508300000263,
+          "driverMs": 250.87508300000263,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 9,
+          "start": 20776.854726,
+          "end": 20926.561383,
+          "ms": 149.7066569999988,
+          "driverMs": 149.7066569999988,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 20507.103369,
+          "end": 20963.87632,
+          "ms": 456.772950999999,
+          "driverMs": 456.772950999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 10,
+          "start": 20739.110689,
+          "end": 20977.869571,
+          "ms": 238.75888199999827,
+          "driverMs": 238.75888199999827,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 20572.911049,
+          "end": 21041.808905,
+          "ms": 468.89785600000323,
+          "driverMs": 468.89785600000323,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 6,
+          "start": 20831.05912,
+          "end": 21050.65182,
+          "ms": 219.59269999999742,
+          "driverMs": 219.59269999999742,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 20875.389939,
+          "end": 21310.080261,
+          "ms": 434.69032199999856,
+          "driverMs": 434.69032199999856,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 20854.948026,
+          "end": 21310.405259,
+          "ms": 455.457233000001,
+          "driverMs": 455.457233000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 21034.277901,
+          "end": 21428.580813,
+          "ms": 394.3029119999992,
+          "driverMs": 394.3029119999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 21012.535087,
+          "end": 21428.771913,
+          "ms": 416.2368260000003,
+          "driverMs": 416.2368260000003,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 9,
+          "start": 21246.35995,
+          "end": 21491.229391,
+          "ms": 244.86944100000255,
+          "driverMs": 244.86944100000255,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 21221.308215,
+          "end": 21658.897943,
+          "ms": 437.589727999999,
+          "driverMs": 437.589727999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 21249.88378,
+          "end": 21659.165512,
+          "ms": 409.28173199999947,
+          "driverMs": 409.28173199999947,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 21231.794117,
+          "end": 21675.76775,
+          "ms": 443.9736329999978,
+          "driverMs": 443.9736329999978,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 21313.290103,
+          "end": 21741.409372,
+          "ms": 428.1192689999989,
+          "driverMs": 428.1192689999989,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 21605.442478,
+          "end": 22016.88616,
+          "ms": 411.44368199999735,
+          "driverMs": 411.44368199999735,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 21472.526248,
+          "end": 22025.086888,
+          "ms": 552.5606400000033,
+          "driverMs": 552.5606400000033,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 21585.569994,
+          "end": 22041.346064,
+          "ms": 455.7760699999999,
+          "driverMs": 455.7760699999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 21703.958554,
+          "end": 22108.472359,
+          "ms": 404.5138049999987,
+          "driverMs": 404.5138049999987,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 21701.395331,
+          "end": 22141.675827,
+          "ms": 440.2804959999994,
+          "driverMs": 440.2804959999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 21871.486137,
+          "end": 22292.274254,
+          "ms": 420.78811700000006,
+          "driverMs": 420.78811700000006,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 21919.241325,
+          "end": 22376.078296,
+          "ms": 456.83697100000063,
+          "driverMs": 456.83697100000063,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 21981.684625,
+          "end": 22417.055664,
+          "ms": 435.37103899999784,
+          "driverMs": 435.37103899999784,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 21982.74439,
+          "end": 22460.47196,
+          "ms": 477.7275699999991,
+          "driverMs": 477.7275699999991,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 22069.450206,
+          "end": 22515.088333,
+          "ms": 445.63812699999835,
+          "driverMs": 445.63812699999835,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 22285.293781,
+          "end": 22674.95191,
+          "ms": 389.65812899999946,
+          "driverMs": 389.65812899999946,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 22301.029899,
+          "end": 22745.58701,
+          "ms": 444.55711099999826,
+          "driverMs": 444.55711099999826,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 22432.251362,
+          "end": 22891.198887,
+          "ms": 458.9475249999996,
+          "driverMs": 458.9475249999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 22469.857438,
+          "end": 22910.553881,
+          "ms": 440.6964430000007,
+          "driverMs": 440.6964430000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 22550.295148,
+          "end": 23051.821458,
+          "ms": 501.52630999999747,
+          "driverMs": 501.52630999999747,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 22670.711777,
+          "end": 23124.847915,
+          "ms": 454.136137999998,
+          "driverMs": 454.136137999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 22734.935498,
+          "end": 23225.293926,
+          "ms": 490.35842799999955,
+          "driverMs": 490.35842799999955,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 1,
+          "start": 22632.68505859375,
+          "end": 23145.284912109375,
+          "ms": 512.6000000238419,
+          "driverMs": 863.2270900000003,
+          "observedMs": 625.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 1,
+          "start": 23258.762131,
+          "end": 23500.032025,
+          "ms": 241.26989400000093,
+          "driverMs": 241.26989400000093,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 23098.794323,
+          "end": 23577.634445,
+          "ms": 478.84012200000143,
+          "driverMs": 478.84012200000143,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 2,
+          "start": 23060.0849609375,
+          "end": 23569.0849609375,
+          "ms": 509,
+          "driverMs": 713.1475129999999,
+          "observedMs": 517.4000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 4,
+          "start": 23023.985107421875,
+          "end": 23577.784912109375,
+          "ms": 553.8000000119209,
+          "driverMs": 882.3600220000008,
+          "observedMs": 616.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 2,
+          "start": 23578.538584,
+          "end": 23877.061984,
+          "ms": 298.5233999999982,
+          "driverMs": 298.5233999999982,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 23432.142768,
+          "end": 23985.743973,
+          "ms": 553.601204999999,
+          "driverMs": 553.601204999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 3,
+          "start": 23508.18505859375,
+          "end": 24012.68505859375,
+          "ms": 504.5,
+          "driverMs": 700.8172660000018,
+          "observedMs": 509.10000002384186,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 7,
+          "start": 23438.18505859375,
+          "end": 24008.18505859375,
+          "ms": 570,
+          "driverMs": 932.8996320000006,
+          "observedMs": 593.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 4,
+          "start": 23640.80773,
+          "end": 24047.537695,
+          "ms": 406.72996499999863,
+          "driverMs": 406.72996499999863,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 1,
+          "start": 23679.797064,
+          "end": 24048.266671,
+          "ms": 368.4696070000027,
+          "driverMs": 368.4696070000027,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 5,
+          "start": 23524.885009765625,
+          "end": 24040.284912109375,
+          "ms": 515.4000000357628,
+          "driverMs": 864.6747529999993,
+          "observedMs": 638.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 8,
+          "start": 23946.48486328125,
+          "end": 24366.784912109375,
+          "ms": 420.30000001192093,
+          "driverMs": 720.990939000003,
+          "observedMs": 439.5,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 10,
+          "start": 23787.885009765625,
+          "end": 24327.585205078125,
+          "ms": 539.6999999880791,
+          "driverMs": 767.798912000002,
+          "observedMs": 601.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 2,
+          "start": 24126.893462,
+          "end": 24493.044869,
+          "ms": 366.1514070000012,
+          "driverMs": 366.1514070000012,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 4,
+          "start": 24227.4606,
+          "end": 24493.130955,
+          "ms": 265.670355000002,
+          "driverMs": 265.670355000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 7,
+          "start": 24032.145696,
+          "end": 24494.656014,
+          "ms": 462.51031800000055,
+          "driverMs": 462.51031800000055,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 3,
+          "start": 24017.864666,
+          "end": 24516.977763,
+          "ms": 499.11309699999765,
+          "driverMs": 499.11309699999765,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 5,
+          "start": 24163.377864,
+          "end": 24517.114203,
+          "ms": 353.7363390000028,
+          "driverMs": 353.7363390000028,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 1,
+          "start": 24228.223946,
+          "end": 24596.515845,
+          "ms": 368.29189900000347,
+          "driverMs": 368.29189900000347,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 10,
+          "start": 24389.301507,
+          "end": 24663.962529,
+          "ms": 274.66102200000023,
+          "driverMs": 274.66102200000023,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 8,
+          "start": 24386.249419,
+          "end": 24690.140978,
+          "ms": 303.8915589999997,
+          "driverMs": 303.8915589999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 7,
+          "start": 24673.881146,
+          "end": 24890.380092,
+          "ms": 216.4989459999997,
+          "driverMs": 216.4989459999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 4,
+          "start": 24672.806452,
+          "end": 24891.131741,
+          "ms": 218.32528900000034,
+          "driverMs": 218.32528900000034,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 2,
+          "start": 24743.206929,
+          "end": 24962.265402,
+          "ms": 219.05847300000096,
+          "driverMs": 219.05847300000096,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 6,
+          "start": 24310.98486328125,
+          "end": 24905.284912109375,
+          "ms": 594.3000000119209,
+          "driverMs": 926.123636999997,
+          "observedMs": 674.5,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 5,
+          "start": 24768.199124,
+          "end": 25008.781453,
+          "ms": 240.58232900000075,
+          "driverMs": 240.58232900000075,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 1,
+          "start": 24849.028651,
+          "end": 25009.331329,
+          "ms": 160.30267800000001,
+          "driverMs": 160.30267800000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 9,
+          "start": 24573.5849609375,
+          "end": 24977.98486328125,
+          "ms": 404.4000000357628,
+          "driverMs": 596.2099120000021,
+          "observedMs": 449,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 3,
+          "start": 24848.669908,
+          "end": 25075.127521,
+          "ms": 226.45761299999867,
+          "driverMs": 226.45761299999867,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 10,
+          "start": 24848.9794,
+          "end": 25075.261274,
+          "ms": 226.28187400000024,
+          "driverMs": 226.28187400000024,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 6,
+          "start": 24987.895271,
+          "end": 25191.584067,
+          "ms": 203.68879599999855,
+          "driverMs": 203.68879599999855,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 8,
+          "start": 24939.840415,
+          "end": 25212.652837,
+          "ms": 272.8124220000027,
+          "driverMs": 272.8124220000027,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 9,
+          "start": 25022.870647,
+          "end": 25291.292557,
+          "ms": 268.42191000000093,
+          "driverMs": 268.42191000000093,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 7,
+          "start": 25069.832118,
+          "end": 25359.525916,
+          "ms": 289.69379800000024,
+          "driverMs": 289.69379800000024,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 4,
+          "start": 25140.897279,
+          "end": 25367.47202,
+          "ms": 226.57474100000036,
+          "driverMs": 226.57474100000036,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 2,
+          "start": 25281.979004,
+          "end": 25458.24719,
+          "ms": 176.2681859999975,
+          "driverMs": 176.2681859999975,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 5,
+          "start": 25259.281471,
+          "end": 25524.682464,
+          "ms": 265.4009930000029,
+          "driverMs": 265.4009930000029,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 10,
+          "start": 25255.278441,
+          "end": 25524.702929,
+          "ms": 269.42448800000057,
+          "driverMs": 269.42448800000057,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 1,
+          "start": 25259.39655,
+          "end": 25591.699167,
+          "ms": 332.30261699999755,
+          "driverMs": 332.30261699999755,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 3,
+          "start": 25394.849939,
+          "end": 25641.649283,
+          "ms": 246.7993439999991,
+          "driverMs": 246.7993439999991,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 8,
+          "start": 25461.776109,
+          "end": 25694.671311,
+          "ms": 232.8952019999997,
+          "driverMs": 232.8952019999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 7,
+          "start": 25608.92055,
+          "end": 25757.861541,
+          "ms": 148.94099099999949,
+          "driverMs": 148.94099099999949,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 6,
+          "start": 25510.817813,
+          "end": 25791.94881,
+          "ms": 281.1309970000002,
+          "driverMs": 281.1309970000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 9,
+          "start": 25611.02928,
+          "end": 25925.249002,
+          "ms": 314.21972200000164,
+          "driverMs": 314.21972200000164,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 10,
+          "start": 25774.207074,
+          "end": 25968.279257,
+          "ms": 194.07218299999658,
+          "driverMs": 194.07218299999658,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 4,
+          "start": 25617.774841,
+          "end": 25978.341835,
+          "ms": 360.5669940000007,
+          "driverMs": 360.5669940000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 3,
+          "start": 25821.76124,
+          "end": 26042.898362,
+          "ms": 221.1371220000001,
+          "driverMs": 221.1371220000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 5,
+          "start": 25844.611199,
+          "end": 26042.923307,
+          "ms": 198.3121080000019,
+          "driverMs": 198.3121080000019,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 1,
+          "start": 25841.485331,
+          "end": 26091.17328,
+          "ms": 249.6879489999992,
+          "driverMs": 249.6879489999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 2,
+          "start": 25777.786076,
+          "end": 26126.577995,
+          "ms": 348.7919189999993,
+          "driverMs": 348.7919189999993,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 8,
+          "start": 26013.865679,
+          "end": 26207.803965,
+          "ms": 193.93828600000052,
+          "driverMs": 193.93828600000052,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 7,
+          "start": 26012.692066,
+          "end": 26413.521757,
+          "ms": 400.829690999999,
+          "driverMs": 400.829690999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 6,
+          "start": 26112.499939,
+          "end": 26458.10541,
+          "ms": 345.60547099999894,
+          "driverMs": 345.60547099999894,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 1,
+          "start": 26341.619022,
+          "end": 26508.186142,
+          "ms": 166.5671199999997,
+          "driverMs": 166.5671199999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 4,
+          "start": 26227.808185,
+          "end": 26508.209503,
+          "ms": 280.40131799999654,
+          "driverMs": 280.40131799999654,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 9,
+          "start": 26244.875414,
+          "end": 26593.355857,
+          "ms": 348.4804430000004,
+          "driverMs": 348.4804430000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 10,
+          "start": 26218.142465,
+          "end": 26645.611627,
+          "ms": 427.4691619999976,
+          "driverMs": 427.4691619999976,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 2,
+          "start": 26446.528684,
+          "end": 26675.934619,
+          "ms": 229.40593499999886,
+          "driverMs": 229.40593499999886,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 3,
+          "start": 26223.230078,
+          "end": 26691.132781,
+          "ms": 467.90270299999975,
+          "driverMs": 467.90270299999975,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 5,
+          "start": 26363.148926,
+          "end": 26710.191275,
+          "ms": 347.0423489999994,
+          "driverMs": 347.0423489999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 6,
+          "start": 26638.155683,
+          "end": 26841.662563,
+          "ms": 203.50688000000082,
+          "driverMs": 203.50688000000082,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 8,
+          "start": 26527.882134,
+          "end": 26877.460409,
+          "ms": 349.57827499999985,
+          "driverMs": 349.57827499999985,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 7,
+          "start": 26663.715115,
+          "end": 26877.488379,
+          "ms": 213.77326399999947,
+          "driverMs": 213.77326399999947,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 4,
+          "start": 26758.190959,
+          "end": 26957.891414,
+          "ms": 199.70045500000197,
+          "driverMs": 199.70045500000197,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 9,
+          "start": 26772.75348,
+          "end": 26958.313106,
+          "ms": 185.55962600000203,
+          "driverMs": 185.55962600000203,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 1,
+          "start": 26757.942383,
+          "end": 27009.144575,
+          "ms": 251.202191999997,
+          "driverMs": 251.202191999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 3,
+          "start": 26870.843144,
+          "end": 27041.580281,
+          "ms": 170.73713700000008,
+          "driverMs": 170.73713700000008,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 10,
+          "start": 26895.391566,
+          "end": 27078.427139,
+          "ms": 183.03557300000102,
+          "driverMs": 183.03557300000102,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 2,
+          "start": 26995.763316,
+          "end": 27141.787107,
+          "ms": 146.02379099999962,
+          "driverMs": 146.02379099999962,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 5,
+          "start": 27029.882459,
+          "end": 27157.79281,
+          "ms": 127.91035099999863,
+          "driverMs": 127.91035099999863,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 7,
+          "start": 27126.790798,
+          "end": 27274.689753,
+          "ms": 147.89895499999693,
+          "driverMs": 147.89895499999693,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 6,
+          "start": 27022.366352,
+          "end": 27358.973026,
+          "ms": 336.60667399999875,
+          "driverMs": 336.60667399999875,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 9,
+          "start": 27137.817264,
+          "end": 27398.376388,
+          "ms": 260.55912399999943,
+          "driverMs": 260.55912399999943,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 8,
+          "start": 27196.974941,
+          "end": 27412.150121,
+          "ms": 215.17517999999836,
+          "driverMs": 215.17517999999836,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 3,
+          "start": 27221.69259,
+          "end": 27426.640493,
+          "ms": 204.94790300000022,
+          "driverMs": 204.94790300000022,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 4,
+          "start": 27207.794785,
+          "end": 27493.039284,
+          "ms": 285.24449900000036,
+          "driverMs": 285.24449900000036,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 10,
+          "start": 27328.410435,
+          "end": 27541.761255,
+          "ms": 213.35081999999966,
+          "driverMs": 213.35081999999966,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 5,
+          "start": 27477.768781,
+          "end": 27725.338447,
+          "ms": 247.56966599999942,
+          "driverMs": 247.56966599999942,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 6,
+          "start": 27538.827063,
+          "end": 27744.687617,
+          "ms": 205.86055399999896,
+          "driverMs": 205.86055399999896,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 9,
+          "start": 27577.846991,
+          "end": 27759.178645,
+          "ms": 181.33165400000144,
+          "driverMs": 181.33165400000144,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 7,
+          "start": 27523.901287,
+          "end": 27780.826541,
+          "ms": 256.92525399999795,
+          "driverMs": 256.92525399999795,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 2,
+          "start": 27462.239269,
+          "end": 27791.295642,
+          "ms": 329.05637299999944,
+          "driverMs": 329.05637299999944,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 27352.881668,
+          "end": 27807.790673,
+          "ms": 454.9090049999977,
+          "driverMs": 454.9090049999977,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 3,
+          "start": 27606.032579,
+          "end": 27874.353507,
+          "ms": 268.320928000001,
+          "driverMs": 268.320928000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 8,
+          "start": 27731.872971,
+          "end": 27874.376948,
+          "ms": 142.5039770000003,
+          "driverMs": 142.5039770000003,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 10,
+          "start": 27791.880784,
+          "end": 28027.334346,
+          "ms": 235.45356199999878,
+          "driverMs": 235.45356199999878,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 9,
+          "start": 27942.562881,
+          "end": 28090.99723,
+          "ms": 148.4343489999992,
+          "driverMs": 148.4343489999992,
+          "overlappedHeavy": false
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 6,
+          "start": 27924.074311,
+          "end": 28107.678897,
+          "ms": 183.6045860000013,
+          "driverMs": 183.6045860000013,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 27823.485203,
+          "end": 28224.798014,
+          "ms": 401.3128109999998,
+          "driverMs": 401.3128109999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 5,
+          "start": 28044.801904,
+          "end": 28274.864874,
+          "ms": 230.06296999999904,
+          "driverMs": 230.06296999999904,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 28068.828788,
+          "end": 28461.304813,
+          "ms": 392.47602499999994,
+          "driverMs": 392.47602499999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 8,
+          "start": 28193.828517,
+          "end": 28465.080964,
+          "ms": 271.25244699999894,
+          "driverMs": 271.25244699999894,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 6,
+          "start": 28287.235443,
+          "end": 28520.290016,
+          "ms": 233.05457299999762,
+          "driverMs": 233.05457299999762,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 28119.17677,
+          "end": 28541.345409,
+          "ms": 422.16863900000317,
+          "driverMs": 422.16863900000317,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 9,
+          "start": 28270.938041,
+          "end": 28541.520252,
+          "ms": 270.5822109999972,
+          "driverMs": 270.5822109999972,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 28134.381812,
+          "end": 28541.833441,
+          "ms": 407.45162899999923,
+          "driverMs": 407.45162899999923,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 28201.442535,
+          "end": 28624.49456,
+          "ms": 423.05202500000087,
+          "driverMs": 423.05202500000087,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 28356.780648,
+          "end": 28791.611876,
+          "ms": 434.8312279999991,
+          "driverMs": 434.8312279999991,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 28503.329306,
+          "end": 28908.322838,
+          "ms": 404.9935320000004,
+          "driverMs": 404.9935320000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 28658.001904,
+          "end": 29075.036927,
+          "ms": 417.03502300000036,
+          "driverMs": 417.03502300000036,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 28816.22339,
+          "end": 29245.947419,
+          "ms": 429.7240290000009,
+          "driverMs": 429.7240290000009,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 28768.787407,
+          "end": 29258.032946,
+          "ms": 489.24553899999955,
+          "driverMs": 489.24553899999955,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 28734.385332,
+          "end": 29274.91277,
+          "ms": 540.5274379999973,
+          "driverMs": 540.5274379999973,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 28821.841133,
+          "end": 29275.144753,
+          "ms": 453.3036199999988,
+          "driverMs": 453.3036199999988,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 28837.20385,
+          "end": 29275.387921,
+          "ms": 438.1840709999997,
+          "driverMs": 438.1840709999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 28840.08111,
+          "end": 29275.431684,
+          "ms": 435.35057400000005,
+          "driverMs": 435.35057400000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 28921.486131,
+          "end": 29358.123813,
+          "ms": 436.63768199999686,
+          "driverMs": 436.63768199999686,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 29049.309532,
+          "end": 29474.684237,
+          "ms": 425.374705000002,
+          "driverMs": 425.374705000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 29200.822259,
+          "end": 29678.110456,
+          "ms": 477.28819699999804,
+          "driverMs": 477.28819699999804,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 29332.783067,
+          "end": 29737.613836,
+          "ms": 404.83076900000015,
+          "driverMs": 404.83076900000015,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 29516.011325,
+          "end": 29909.15565,
+          "ms": 393.1443250000011,
+          "driverMs": 393.1443250000011,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 29516.897879,
+          "end": 29925.776449,
+          "ms": 408.87857000000076,
+          "driverMs": 408.87857000000076,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 29530.932637,
+          "end": 29957.999613,
+          "ms": 427.06697599999825,
+          "driverMs": 427.06697599999825,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 29566.537654,
+          "end": 29992.975196,
+          "ms": 426.43754199999967,
+          "driverMs": 426.43754199999967,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 29585.329443,
+          "end": 30026.831491,
+          "ms": 441.5020480000021,
+          "driverMs": 441.5020480000021,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 29637.886945,
+          "end": 30059.010268,
+          "ms": 421.12332300000344,
+          "driverMs": 421.12332300000344,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 29783.287304,
+          "end": 30240.073024,
+          "ms": 456.78571999999986,
+          "driverMs": 456.78571999999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 1,
+          "start": 29741.885009765625,
+          "end": 30242.68505859375,
+          "ms": 500.7999999523163,
+          "driverMs": 675.6717499999977,
+          "observedMs": 531.5,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 30051.076997,
+          "end": 30483.447696,
+          "ms": 432.37069899999915,
+          "driverMs": 432.37069899999915,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 1,
+          "start": 30274.192792,
+          "end": 30505.100936,
+          "ms": 230.90814399999726,
+          "driverMs": 230.90814399999726,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 30252.20777,
+          "end": 30705.628565,
+          "ms": 453.4207949999982,
+          "driverMs": 453.4207949999982,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 30253.266751,
+          "end": 30706.217836,
+          "ms": 452.9510850000006,
+          "driverMs": 452.9510850000006,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 30302.552167,
+          "end": 30761.574897,
+          "ms": 459.02272999999695,
+          "driverMs": 459.02272999999695,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 4,
+          "start": 30357.0849609375,
+          "end": 30904.28515625,
+          "ms": 547.2000000476837,
+          "driverMs": 899.707524999998,
+          "observedMs": 572,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 3,
+          "start": 30545.284912109375,
+          "end": 31008.985107421875,
+          "ms": 463.69999998807907,
+          "driverMs": 653.2226010000013,
+          "observedMs": 469.5,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 7,
+          "start": 30459.284912109375,
+          "end": 30945.985107421875,
+          "ms": 486.69999998807907,
+          "driverMs": 722.786927000001,
+          "observedMs": 560.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 1,
+          "start": 30755.697249,
+          "end": 31104.744625,
+          "ms": 349.0473759999986,
+          "driverMs": 349.0473759999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 2,
+          "start": 30641.985107421875,
+          "end": 31164.18505859375,
+          "ms": 522.1999999880791,
+          "driverMs": 701.8851439999999,
+          "observedMs": 538.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 4,
+          "start": 30929.686614,
+          "end": 31300.404159,
+          "ms": 370.71754500000316,
+          "driverMs": 370.71754500000316,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 7,
+          "start": 31020.19055,
+          "end": 31442.380615,
+          "ms": 422.19006499999887,
+          "driverMs": 422.19006499999887,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 3,
+          "start": 31015.897757,
+          "end": 31444.326838,
+          "ms": 428.42908100000204,
+          "driverMs": 428.42908100000204,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 10,
+          "start": 30852.385009765625,
+          "end": 31446.284912109375,
+          "ms": 593.9000000357628,
+          "driverMs": 801.1928880000014,
+          "observedMs": 599.4000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 10,
+          "start": 31453.610501,
+          "end": 31615.917262,
+          "ms": 162.30676099999982,
+          "driverMs": 162.30676099999982,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 2,
+          "start": 31181.232572,
+          "end": 31667.627125,
+          "ms": 486.39455299999827,
+          "driverMs": 486.39455299999827,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 5,
+          "start": 31171.985107421875,
+          "end": 31724.0849609375,
+          "ms": 552.0999999642372,
+          "driverMs": 765.0606690000022,
+          "observedMs": 572.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 4,
+          "start": 31550.783866,
+          "end": 31847.802222,
+          "ms": 297.01835599999686,
+          "driverMs": 297.01835599999686,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 8,
+          "start": 31427.485107421875,
+          "end": 31857.885009765625,
+          "ms": 430.39999997615814,
+          "driverMs": 677.7868799999997,
+          "observedMs": 437.80000001192093,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 6,
+          "start": 31367.385009765625,
+          "end": 31842.784912109375,
+          "ms": 475.39999997615814,
+          "driverMs": 730.9265159999995,
+          "observedMs": 503.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 9,
+          "start": 31393.885009765625,
+          "end": 31849.5849609375,
+          "ms": 455.69999998807907,
+          "driverMs": 788.9901060000011,
+          "observedMs": 505.19999998807907,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 3,
+          "start": 31624.078932,
+          "end": 31933.745748,
+          "ms": 309.66681600000084,
+          "driverMs": 309.66681600000084,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 7,
+          "start": 31692.604918,
+          "end": 31933.763893,
+          "ms": 241.15897499999846,
+          "driverMs": 241.15897499999846,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 5,
+          "start": 31745.019547,
+          "end": 31977.134186,
+          "ms": 232.11463899999944,
+          "driverMs": 232.11463899999944,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 6,
+          "start": 31871.133877,
+          "end": 32057.820552,
+          "ms": 186.68667500000083,
+          "driverMs": 186.68667500000083,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 8,
+          "start": 31865.803768,
+          "end": 32057.839802,
+          "ms": 192.03603399999702,
+          "driverMs": 192.03603399999702,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 10,
+          "start": 31865.897022,
+          "end": 32075.187736,
+          "ms": 209.29071399999884,
+          "driverMs": 209.29071399999884,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 9,
+          "start": 31899.40275,
+          "end": 32091.849338,
+          "ms": 192.44658799999888,
+          "driverMs": 192.44658799999888,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 2,
+          "start": 31986.79381,
+          "end": 32192.559366,
+          "ms": 205.7655560000021,
+          "driverMs": 205.7655560000021,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 6,
+          "start": 32238.632748,
+          "end": 32357.732427,
+          "ms": 119.09967899999901,
+          "driverMs": 119.09967899999901,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 9,
+          "start": 32272.3274,
+          "end": 32474.02877,
+          "ms": 201.7013700000025,
+          "driverMs": 201.7013700000025,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 5,
+          "start": 32297.328763,
+          "end": 32491.18738,
+          "ms": 193.85861699999805,
+          "driverMs": 193.85861699999805,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 8,
+          "start": 32377.944837,
+          "end": 32524.634512,
+          "ms": 146.68967500000144,
+          "driverMs": 146.68967500000144,
+          "overlappedHeavy": true
+        }
+      ],
+      "rssBytes": {
+        "initial": 1418506240,
+        "peak": 1766014976,
+        "final": 1660461056,
+        "samples": 160
+      }
+    }
+  ],
+  "sloViolations": [],
+  "coverageErrors": [],
+  "heavy": [
+    {
+      "name": "parse-mixed-2000",
+      "start": 463.407097,
+      "end": 768.788353,
+      "ms": 305.382648,
+      "bytes": 50
+    },
+    {
+      "name": "confirm-2000",
+      "start": 17187.041969,
+      "end": 17747.729045,
+      "ms": 560.6872679999979,
+      "bytes": 65,
+      "created": 2000
+    },
+    {
+      "name": "export-year",
+      "start": 17747.739798,
+      "end": 18883.338689,
+      "ms": 1135.5992910000023,
+      "bytes": 709450
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 18883.343794,
+      "end": 20775.640407,
+      "ms": 1892.296821,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 20925.307253,
+      "end": 21672.654427,
+      "ms": 747.3473660000018,
+      "bytes": 709450
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 21672.658747,
+      "end": 22013.875947,
+      "ms": 341.2176639999998,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 22164.103102,
+      "end": 22899.027479,
+      "ms": 734.9248249999982,
+      "bytes": 709450
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 22899.033688,
+      "end": 23254.497468,
+      "ms": 355.4643079999987,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 23403.803826,
+      "end": 24199.059975,
+      "ms": 795.2563730000002,
+      "bytes": 709452
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 24199.065911,
+      "end": 24802.358862,
+      "ms": 603.2935589999979,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 24952.208824,
+      "end": 26091.88211,
+      "ms": 1139.673365999999,
+      "bytes": 709452
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 26091.885118,
+      "end": 27942.397926,
+      "ms": 1850.5130160000008,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 28091.865623,
+      "end": 28886.893388,
+      "ms": 795.0278289999987,
+      "bytes": 709452
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 28886.896492,
+      "end": 29214.95912,
+      "ms": 328.0627879999993,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 29365.299818,
+      "end": 30104.424375,
+      "ms": 739.1246370000008,
+      "bytes": 709452
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 30104.428439,
+      "end": 30460.301158,
+      "ms": 355.87284700000237,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 30610.504727,
+      "end": 31449.803052,
+      "ms": 839.2984690000012,
+      "bytes": 709452
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 31449.809436,
+      "end": 31847.21892,
+      "ms": 397.4096759999993,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-year",
+      "start": 31996.879062,
+      "end": 32761.533624,
+      "ms": 764.6547219999993,
+      "bytes": 709452
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 32761.539641,
+      "end": 33059.949449,
+      "ms": 298.41009600000325,
+      "bytes": 25166800
+    }
+  ],
+  "errors": [],
+  "rowsAtStart": 134500,
+  "chromium": "156.0.8078.4"
+}

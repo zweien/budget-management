@@ -1,0 +1,28 @@
+{
+  "capturedAt": "2026-10-16T06:35:47.153Z",
+  "label": "baseline",
+  "node": "v24.16.0",
+  "projects": 10,
+  "rowsPerProject": 10000,
+  "api": [],
+  "browser": [
+    {
+      "name": "project-records",
+      "navigation": "fresh-context full navigation; warm server",
+      "ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "details": []
+    }
+  ],
+  "errors": [
+    {
+      "name": "project-records",
+      "error": "/api/statistics/custom HTTP 503; /api/statistics/custom-facets HTTP 503"
+    }
+  ],
+  "chromium": "156.0.8078.4"
+}

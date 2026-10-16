@@ -1,0 +1,3393 @@
+{
+  "capturedAt": "2026-10-16T23:40:04.394Z",
+  "label": "f06e96b",
+  "users": 10,
+  "exportConcurrency": 1,
+  "rounds": 10,
+  "pageSize": null,
+  "cases": [
+    {
+      "kind": "zip",
+      "action": "create",
+      "ms": {
+        "n": 100,
+        "p50": 742.5999999642372,
+        "p95": 776.1999999880791,
+        "max": 805.5999999642372
+      },
+      "overlapped": 100,
+      "actions": [
+        {
+          "user": 1,
+          "start": 2523.39990234375,
+          "end": 3280.300048828125,
+          "ms": 756.9000000357628,
+          "observedMs": 760.9000000357628,
+          "driverMs": 791.2016750000003,
+          "stagesMs": {
+            "writeResponse": 121.73573165625021,
+            "refreshResponse": 420.8244166562499,
+            "dialogClosed": 651.6066646562499,
+            "recordsPainted": 739.3847746562501
+          },
+          "uiReadyMs": 756.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 2524,
+          "end": 3274.300048828125,
+          "ms": 750.3000000119209,
+          "observedMs": 757.6999999880791,
+          "driverMs": 788.3761300000001,
+          "stagesMs": {
+            "writeResponse": 115.51301000000012,
+            "refreshResponse": 371.0939050000002,
+            "dialogClosed": 575.290814,
+            "recordsPainted": 727.3658019999998
+          },
+          "uiReadyMs": 750.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 2523,
+          "end": 3269.199951171875,
+          "ms": 746.1999999880791,
+          "observedMs": 750.3999999761581,
+          "driverMs": 779.8807259999999,
+          "stagesMs": {
+            "writeResponse": 112.35697900000014,
+            "refreshResponse": 375.4584450000002,
+            "dialogClosed": 481.6124289999998,
+            "recordsPainted": 720.0080710000002
+          },
+          "uiReadyMs": 746.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 2538.800048828125,
+          "end": 3281.699951171875,
+          "ms": 742.9000000357628,
+          "observedMs": 748.8000000119209,
+          "driverMs": 793.8592250000002,
+          "stagesMs": {
+            "writeResponse": 120.63551317187512,
+            "refreshResponse": 347.2190541718751,
+            "dialogClosed": 689.6723031718748,
+            "recordsPainted": 743.1670821718749
+          },
+          "uiReadyMs": 742.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 2523.099853515625,
+          "end": 3255.199951171875,
+          "ms": 732.1000000238419,
+          "observedMs": 733.1000000238419,
+          "driverMs": 762.8762699999997,
+          "stagesMs": {
+            "writeResponse": 111.18406248437486,
+            "refreshResponse": 387.49967348437485,
+            "dialogClosed": 420.2169334843752,
+            "recordsPainted": 666.747379484375
+          },
+          "uiReadyMs": 732.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 2522.699951171875,
+          "end": 3276.39990234375,
+          "ms": 753.7000000476837,
+          "observedMs": 757.7000000476837,
+          "driverMs": 786.8958090000001,
+          "stagesMs": {
+            "writeResponse": 113.46151182812491,
+            "refreshResponse": 387.74332582812485,
+            "dialogClosed": 589.303918828125,
+            "recordsPainted": 734.3745918281252
+          },
+          "uiReadyMs": 753.7000000476837,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 2522.800048828125,
+          "end": 3261.300048828125,
+          "ms": 738.5,
+          "observedMs": 742.2000000476837,
+          "driverMs": 771.0848229999997,
+          "stagesMs": {
+            "writeResponse": 115.71902417187493,
+            "refreshResponse": 393.9299111718751,
+            "dialogClosed": 489.07619917187503,
+            "recordsPainted": 687.4300701718748
+          },
+          "uiReadyMs": 738.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 2540.5,
+          "end": 3270.800048828125,
+          "ms": 730.2999999523163,
+          "observedMs": 734.3999999761581,
+          "driverMs": 781.1771469999999,
+          "stagesMs": {
+            "writeResponse": 104.11033600000019,
+            "refreshResponse": 377.3760830000001,
+            "dialogClosed": 478.9081649999998,
+            "recordsPainted": 705.0006659999999
+          },
+          "uiReadyMs": 730.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 2539.39990234375,
+          "end": 3248.199951171875,
+          "ms": 708.7999999523163,
+          "observedMs": 717.2999999523163,
+          "driverMs": 763.002375,
+          "stagesMs": {
+            "writeResponse": 100.90818365625,
+            "refreshResponse": 351.6534816562498,
+            "dialogClosed": 403.06666865624993,
+            "recordsPainted": 622.3507096562498
+          },
+          "uiReadyMs": 708.7999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 2523.2998046875,
+          "end": 3259.89990234375,
+          "ms": 736.6000000238419,
+          "observedMs": 740.6000000238419,
+          "driverMs": 769.7960510000003,
+          "stagesMs": {
+            "writeResponse": 113.36863531249992,
+            "refreshResponse": 405.63834631249983,
+            "dialogClosed": 440.56851831250015,
+            "recordsPainted": 683.9005963125
+          },
+          "uiReadyMs": 736.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 5073,
+          "end": 5715.199951171875,
+          "ms": 642.1999999880791,
+          "observedMs": 646.8000000119209,
+          "driverMs": 681.1201860000001,
+          "stagesMs": {
+            "writeResponse": 70.20560099999966,
+            "refreshResponse": 276.7458630000001,
+            "dialogClosed": 389.98779900000045,
+            "recordsPainted": 580.8023119999998
+          },
+          "uiReadyMs": 642.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 5072.599853515625,
+          "end": 5747.699951171875,
+          "ms": 675.1000000238419,
+          "observedMs": 679.8000000119209,
+          "driverMs": 711.1817209999999,
+          "stagesMs": {
+            "writeResponse": 79.5679814843752,
+            "refreshResponse": 312.7546424843749,
+            "dialogClosed": 541.8983674843748,
+            "recordsPainted": 644.0894524843752
+          },
+          "uiReadyMs": 675.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 5071.89990234375,
+          "end": 5750.39990234375,
+          "ms": 678.5,
+          "observedMs": 684.6000000238419,
+          "driverMs": 715.038501,
+          "stagesMs": {
+            "writeResponse": 64.51358965624968,
+            "refreshResponse": 268.8567166562498,
+            "dialogClosed": 623.3404166562505,
+            "recordsPainted": 678.6109276562502
+          },
+          "uiReadyMs": 678.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 5072.199951171875,
+          "end": 5687,
+          "ms": 614.8000000119209,
+          "observedMs": 623.8999999761581,
+          "driverMs": 654.5938750000005,
+          "stagesMs": {
+            "writeResponse": 77.55897382812509,
+            "refreshResponse": 306.9492588281246,
+            "dialogClosed": 340.3745338281251,
+            "recordsPainted": 525.323335828125
+          },
+          "uiReadyMs": 614.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 5087.800048828125,
+          "end": 5742.199951171875,
+          "ms": 654.3999999761581,
+          "observedMs": 661.6000000238419,
+          "driverMs": 707.864399,
+          "stagesMs": {
+            "writeResponse": 51.33698117187487,
+            "refreshResponse": 314.5018281718749,
+            "dialogClosed": 507.6709441718749,
+            "recordsPainted": 619.8383611718746
+          },
+          "uiReadyMs": 654.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 5090.89990234375,
+          "end": 5744.89990234375,
+          "ms": 654,
+          "observedMs": 658.5999999642372,
+          "driverMs": 707.8053719999998,
+          "stagesMs": {
+            "writeResponse": 51.95705165624986,
+            "refreshResponse": 284.25573465624984,
+            "dialogClosed": 517.3165636562499,
+            "recordsPainted": 621.80983165625
+          },
+          "uiReadyMs": 654,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 5071.300048828125,
+          "end": 5688.300048828125,
+          "ms": 617,
+          "observedMs": 622.2000000476837,
+          "driverMs": 651.7871160000004,
+          "stagesMs": {
+            "writeResponse": 64.54209417187485,
+            "refreshResponse": 291.1516531718753,
+            "dialogClosed": 384.0120311718747,
+            "recordsPainted": 528.9065651718747
+          },
+          "uiReadyMs": 617,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 5088.300048828125,
+          "end": 5710.900146484375,
+          "ms": 622.5999999642372,
+          "observedMs": 631.1999999880791,
+          "driverMs": 678.6852749999998,
+          "stagesMs": {
+            "writeResponse": 55.74499817187461,
+            "refreshResponse": 285.0421731718752,
+            "dialogClosed": 389.51220717187516,
+            "recordsPainted": 547.8562611718753
+          },
+          "uiReadyMs": 622.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 5072.699951171875,
+          "end": 5755.400146484375,
+          "ms": 682.6999999880791,
+          "observedMs": 689.6000000238419,
+          "driverMs": 720.0211790000003,
+          "stagesMs": {
+            "writeResponse": 79.21769082812534,
+            "refreshResponse": 295.05004982812534,
+            "dialogClosed": 632.0592148281248,
+            "recordsPainted": 683.1366038281249
+          },
+          "uiReadyMs": 682.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 5070.89990234375,
+          "end": 5690,
+          "ms": 619.0999999642372,
+          "observedMs": 623.5,
+          "driverMs": 652.2318480000004,
+          "stagesMs": {
+            "writeResponse": 62.76382565625045,
+            "refreshResponse": 351.0529716562496,
+            "dialogClosed": 358.32538365624987,
+            "recordsPainted": 532.6411866562503
+          },
+          "uiReadyMs": 619.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 7322.199951171875,
+          "end": 8057.699951171875,
+          "ms": 735.5,
+          "observedMs": 737.0999999642372,
+          "driverMs": 779.8224979999995,
+          "stagesMs": {
+            "writeResponse": 85.38714582812463,
+            "refreshResponse": 343.8278108281247,
+            "dialogClosed": 549.8403748281253,
+            "recordsPainted": 723.502950828125
+          },
+          "uiReadyMs": 735.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 7307.599853515625,
+          "end": 8035.199951171875,
+          "ms": 727.6000000238419,
+          "observedMs": 735.8000000119209,
+          "driverMs": 763.8102360000003,
+          "stagesMs": {
+            "writeResponse": 50.61138948437474,
+            "refreshResponse": 199.49448848437532,
+            "dialogClosed": 373.43314648437536,
+            "recordsPainted": 634.6042784843748
+          },
+          "uiReadyMs": 727.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 7321.60009765625,
+          "end": 8053.10009765625,
+          "ms": 731.5,
+          "observedMs": 740.6000000238419,
+          "driverMs": 782.5228990000005,
+          "stagesMs": {
+            "writeResponse": 56.58059534375025,
+            "refreshResponse": 260.4803493437503,
+            "dialogClosed": 531.3139853437497,
+            "recordsPainted": 715.1334813437497
+          },
+          "uiReadyMs": 731.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 7306.39990234375,
+          "end": 8050.199951171875,
+          "ms": 743.8000000119209,
+          "observedMs": 751.8000000119209,
+          "driverMs": 778.8544679999995,
+          "stagesMs": {
+            "writeResponse": 50.69790765625021,
+            "refreshResponse": 276.78218465625014,
+            "dialogClosed": 429.11626165624966,
+            "recordsPainted": 725.82760565625
+          },
+          "uiReadyMs": 743.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 7324.699951171875,
+          "end": 8054.599853515625,
+          "ms": 729.8999999761581,
+          "observedMs": 735,
+          "driverMs": 779.788896,
+          "stagesMs": {
+            "writeResponse": 113.26233282812518,
+            "refreshResponse": 380.0165498281249,
+            "dialogClosed": 589.0765128281246,
+            "recordsPainted": 715.3412048281252
+          },
+          "uiReadyMs": 729.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 7321.699951171875,
+          "end": 8045.39990234375,
+          "ms": 723.6999999880791,
+          "observedMs": 728,
+          "driverMs": 769.8673680000002,
+          "stagesMs": {
+            "writeResponse": 50.0024938281249,
+            "refreshResponse": 296.1549638281249,
+            "dialogClosed": 531.9711248281246,
+            "recordsPainted": 692.782940828125
+          },
+          "uiReadyMs": 723.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 7307.699951171875,
+          "end": 8060.60009765625,
+          "ms": 752.8999999761581,
+          "observedMs": 760.0999999642372,
+          "driverMs": 787.8736009999993,
+          "stagesMs": {
+            "writeResponse": 99.17173882812494,
+            "refreshResponse": 354.46863082812524,
+            "dialogClosed": 577.1820468281248,
+            "recordsPainted": 737.6575838281251
+          },
+          "uiReadyMs": 752.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 7321.7998046875,
+          "end": 8047,
+          "ms": 725.2000000476837,
+          "observedMs": 729.1000000238419,
+          "driverMs": 770.580935,
+          "stagesMs": {
+            "writeResponse": 56.55273931250031,
+            "refreshResponse": 388.2331083125,
+            "dialogClosed": 591.2269303125004,
+            "recordsPainted": 695.3340123124999
+          },
+          "uiReadyMs": 725.2000000476837,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 7308.300048828125,
+          "end": 8042.60009765625,
+          "ms": 734.3000000119209,
+          "observedMs": 738.4000000357628,
+          "driverMs": 766.4871620000004,
+          "stagesMs": {
+            "writeResponse": 94.94596417187495,
+            "refreshResponse": 357.88700417187465,
+            "dialogClosed": 467.4348571718747,
+            "recordsPainted": 674.637083171875
+          },
+          "uiReadyMs": 734.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 7306.300048828125,
+          "end": 7981.800048828125,
+          "ms": 675.5,
+          "observedMs": 697.3999999761581,
+          "driverMs": 723.6900430000005,
+          "stagesMs": {
+            "writeResponse": 50.23570817187465,
+            "refreshResponse": 300.0416811718751,
+            "dialogClosed": 319.34459217187487,
+            "recordsPainted": 570.4758671718746
+          },
+          "uiReadyMs": 675.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 9699.39990234375,
+          "end": 10465.300048828125,
+          "ms": 765.8999999761581,
+          "observedMs": 770.0999999642372,
+          "driverMs": 801.4036539999997,
+          "stagesMs": {
+            "writeResponse": 109.45010865625045,
+            "refreshResponse": 346.6843146562496,
+            "dialogClosed": 551.1078626562503,
+            "recordsPainted": 740.3917966562494
+          },
+          "uiReadyMs": 765.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 9702.10009765625,
+          "end": 10476.900146484375,
+          "ms": 774.8000000119209,
+          "observedMs": 782.5,
+          "driverMs": 816.2046380000011,
+          "stagesMs": {
+            "writeResponse": 115.07468134375085,
+            "refreshResponse": 381.8008493437501,
+            "dialogClosed": 695.4438773437505,
+            "recordsPainted": 758.7246883437492
+          },
+          "uiReadyMs": 774.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 9699.199951171875,
+          "end": 10466.900146484375,
+          "ms": 767.6999999880791,
+          "observedMs": 771.8999999761581,
+          "driverMs": 802.5964679999997,
+          "stagesMs": {
+            "writeResponse": 108.95255782812455,
+            "refreshResponse": 337.7519088281242,
+            "dialogClosed": 538.8738328281252,
+            "recordsPainted": 743.2070868281244
+          },
+          "uiReadyMs": 767.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 9698.5,
+          "end": 10471.400146484375,
+          "ms": 772.9000000357628,
+          "observedMs": 777,
+          "driverMs": 807.1483660000013,
+          "stagesMs": {
+            "writeResponse": 109.41595000000052,
+            "refreshResponse": 358.8098630000004,
+            "dialogClosed": 564.3411479999995,
+            "recordsPainted": 752.6878199999992
+          },
+          "uiReadyMs": 772.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 9701.099853515625,
+          "end": 10468.599853515625,
+          "ms": 767.5,
+          "observedMs": 775.1000000238419,
+          "driverMs": 807.8198179999999,
+          "stagesMs": {
+            "writeResponse": 109.10920648437423,
+            "refreshResponse": 382.31888548437564,
+            "dialogClosed": 585.7533124843758,
+            "recordsPainted": 744.281986484375
+          },
+          "uiReadyMs": 767.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 9700.89990234375,
+          "end": 10464.39990234375,
+          "ms": 763.5,
+          "observedMs": 771.1000000238419,
+          "driverMs": 803.7170220000007,
+          "stagesMs": {
+            "writeResponse": 114.44152465624938,
+            "refreshResponse": 314.76163665625063,
+            "dialogClosed": 530.1133716562508,
+            "recordsPainted": 736.2077646562502
+          },
+          "uiReadyMs": 763.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 9722.699951171875,
+          "end": 10459.60009765625,
+          "ms": 736.8999999761581,
+          "observedMs": 744.5,
+          "driverMs": 798.5894700000008,
+          "stagesMs": {
+            "writeResponse": 88.18548882812502,
+            "refreshResponse": 342.7325238281246,
+            "dialogClosed": 434.88125482812575,
+            "recordsPainted": 696.5478278281244
+          },
+          "uiReadyMs": 736.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 9718.499755859375,
+          "end": 10454.7998046875,
+          "ms": 736.2999999523163,
+          "observedMs": 744.5999999642372,
+          "driverMs": 794.697712000001,
+          "stagesMs": {
+            "writeResponse": 97.67009414062522,
+            "refreshResponse": 314.1991691406256,
+            "dialogClosed": 514.3859921406256,
+            "recordsPainted": 683.3608531406244
+          },
+          "uiReadyMs": 736.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 9699.099853515625,
+          "end": 10469.7998046875,
+          "ms": 770.6999999880791,
+          "observedMs": 774.8000000119209,
+          "driverMs": 805.170603999999,
+          "stagesMs": {
+            "writeResponse": 108.14150848437566,
+            "refreshResponse": 382.3386604843745,
+            "dialogClosed": 578.7937184843759,
+            "recordsPainted": 749.0524564843745
+          },
+          "uiReadyMs": 770.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 9698.199951171875,
+          "end": 10474.39990234375,
+          "ms": 776.1999999880791,
+          "observedMs": 784.6999999880791,
+          "driverMs": 814.1494480000001,
+          "stagesMs": {
+            "writeResponse": 111.42135782812511,
+            "refreshResponse": 367.882133828125,
+            "dialogClosed": 672.5663198281254,
+            "recordsPainted": 757.9344488281258
+          },
+          "uiReadyMs": 776.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 12009.39990234375,
+          "end": 12767.800048828125,
+          "ms": 758.3999999761581,
+          "observedMs": 763.6999999880791,
+          "driverMs": 806.6325400000005,
+          "stagesMs": {
+            "writeResponse": 85.52468765625053,
+            "refreshResponse": 306.6714736562499,
+            "dialogClosed": 655.3739156562497,
+            "recordsPainted": 758.8888946562492
+          },
+          "uiReadyMs": 758.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 12009.599853515625,
+          "end": 12766.300048828125,
+          "ms": 756.6999999880791,
+          "observedMs": 760.9000000357628,
+          "driverMs": 803.7335669999993,
+          "stagesMs": {
+            "writeResponse": 80.25838948437558,
+            "refreshResponse": 265.56593448437525,
+            "dialogClosed": 633.8939644843758,
+            "recordsPainted": 723.6239134843745
+          },
+          "uiReadyMs": 756.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 11990.5,
+          "end": 12731.800048828125,
+          "ms": 741.2999999523163,
+          "observedMs": 745.1999999880791,
+          "driverMs": 768.9809580000001,
+          "stagesMs": {
+            "writeResponse": 60.501813000000766,
+            "refreshResponse": 304.9815330000001,
+            "dialogClosed": 511.4868170000009,
+            "recordsPainted": 653.4684890000008
+          },
+          "uiReadyMs": 741.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 11991.199951171875,
+          "end": 12713.39990234375,
+          "ms": 722.1999999880791,
+          "observedMs": 726.1999999880791,
+          "driverMs": 750.2874469999988,
+          "stagesMs": {
+            "writeResponse": 61.74941282812506,
+            "refreshResponse": 297.41623682812497,
+            "dialogClosed": 409.4276598281249,
+            "recordsPainted": 634.5236798281258
+          },
+          "uiReadyMs": 722.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 12010.300048828125,
+          "end": 12677.900146484375,
+          "ms": 667.5999999642372,
+          "observedMs": 671.8000000119209,
+          "driverMs": 715.0802309999999,
+          "stagesMs": {
+            "writeResponse": 38.94187317187425,
+            "refreshResponse": 238.51750417187577,
+            "dialogClosed": 333.3839651718754,
+            "recordsPainted": 583.4475551718751
+          },
+          "uiReadyMs": 667.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 12009,
+          "end": 12760.400146484375,
+          "ms": 751.3999999761581,
+          "observedMs": 755.5999999642372,
+          "driverMs": 797.1035649999994,
+          "stagesMs": {
+            "writeResponse": 41.0920729999998,
+            "refreshResponse": 303.72350899999947,
+            "dialogClosed": 413.25836999999956,
+            "recordsPainted": 705.8078110000006
+          },
+          "uiReadyMs": 751.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 12010.199951171875,
+          "end": 12763.5,
+          "ms": 753.3000000119209,
+          "observedMs": 759,
+          "driverMs": 801.4905559999988,
+          "stagesMs": {
+            "writeResponse": 80.61771382812549,
+            "refreshResponse": 285.4317038281242,
+            "dialogClosed": 632.5488898281255,
+            "recordsPainted": 753.7364008281256
+          },
+          "uiReadyMs": 753.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 12008.599853515625,
+          "end": 12793.599853515625,
+          "ms": 785,
+          "observedMs": 1227.3999999761581,
+          "driverMs": 1267.8749189999999,
+          "stagesMs": {
+            "writeResponse": 82.40811248437421,
+            "refreshResponse": 362.99398648437455,
+            "dialogClosed": 1206.0072264843748,
+            "recordsPainted": 1225.553336484376
+          },
+          "uiReadyMs": 785,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 12009.39990234375,
+          "end": 12743.2998046875,
+          "ms": 733.8999999761581,
+          "observedMs": 738.6000000238419,
+          "driverMs": 779.5962440000003,
+          "stagesMs": {
+            "writeResponse": 53.78310765625065,
+            "refreshResponse": 323.3595576562493,
+            "dialogClosed": 528.1054306562492,
+            "recordsPainted": 685.0943716562506
+          },
+          "uiReadyMs": 733.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 12010.5,
+          "end": 12740.300048828125,
+          "ms": 729.8000000119209,
+          "observedMs": 733.8000000119209,
+          "driverMs": 775.9949520000009,
+          "stagesMs": {
+            "writeResponse": 81.11674200000016,
+            "refreshResponse": 355.29082000000017,
+            "dialogClosed": 554.8397609999993,
+            "recordsPainted": 668.8239369999992
+          },
+          "uiReadyMs": 729.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 14758.199951171875,
+          "end": 15459.2998046875,
+          "ms": 701.1000000238419,
+          "observedMs": 705.5,
+          "driverMs": 738.2424179999998,
+          "stagesMs": {
+            "writeResponse": 93.7080218281244,
+            "refreshResponse": 263.03391382812515,
+            "dialogClosed": 421.26335182812545,
+            "recordsPainted": 597.202972828125
+          },
+          "uiReadyMs": 701.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 14766.699951171875,
+          "end": 15536,
+          "ms": 769.3000000119209,
+          "observedMs": 773.6999999880791,
+          "driverMs": 813.7396140000001,
+          "stagesMs": {
+            "writeResponse": 103.68657482812523,
+            "refreshResponse": 345.4011698281247,
+            "dialogClosed": 551.2642838281245,
+            "recordsPainted": 709.6673018281253
+          },
+          "uiReadyMs": 769.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 14785.89990234375,
+          "end": 15556.800048828125,
+          "ms": 770.8999999761581,
+          "observedMs": 774.8000000119209,
+          "driverMs": 834.1864069999992,
+          "stagesMs": {
+            "writeResponse": 118.35475865625085,
+            "refreshResponse": 371.9186726562493,
+            "dialogClosed": 564.6211506562504,
+            "recordsPainted": 725.2292876562497
+          },
+          "uiReadyMs": 770.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 14767.300048828125,
+          "end": 15565,
+          "ms": 797.7000000476837,
+          "observedMs": 806.1000000238419,
+          "driverMs": 846.6595910000015,
+          "stagesMs": {
+            "writeResponse": 123.3341051718744,
+            "refreshResponse": 352.1247351718757,
+            "dialogClosed": 688.5562461718746,
+            "recordsPainted": 765.3979761718747
+          },
+          "uiReadyMs": 797.7000000476837,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 14771.199951171875,
+          "end": 15552.699951171875,
+          "ms": 781.5,
+          "observedMs": 785.8000000119209,
+          "driverMs": 830.4842599999993,
+          "stagesMs": {
+            "writeResponse": 137.0554198281243,
+            "refreshResponse": 352.8889618281246,
+            "dialogClosed": 566.2794638281248,
+            "recordsPainted": 722.8071748281254
+          },
+          "uiReadyMs": 781.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 14758.300048828125,
+          "end": 15527.199951171875,
+          "ms": 768.8999999761581,
+          "observedMs": 776.8999999761581,
+          "driverMs": 808.1394869999986,
+          "stagesMs": {
+            "writeResponse": 112.5253531718754,
+            "refreshResponse": 341.2844611718756,
+            "dialogClosed": 549.665692171875,
+            "recordsPainted": 682.8198421718753
+          },
+          "uiReadyMs": 768.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 14756.39990234375,
+          "end": 15562,
+          "ms": 805.5999999642372,
+          "observedMs": 810.0999999642372,
+          "driverMs": 838.9804009999989,
+          "stagesMs": {
+            "writeResponse": 96.40636965624981,
+            "refreshResponse": 354.4483046562491,
+            "dialogClosed": 669.5055056562505,
+            "recordsPainted": 771.8237826562508
+          },
+          "uiReadyMs": 805.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 14768.2998046875,
+          "end": 15551.499755859375,
+          "ms": 783.2000000476837,
+          "observedMs": 791.6000000238419,
+          "driverMs": 832.2807300000004,
+          "stagesMs": {
+            "writeResponse": 140.11295231250006,
+            "refreshResponse": 317.66371831250035,
+            "dialogClosed": 556.9933253125,
+            "recordsPainted": 722.4932553125
+          },
+          "uiReadyMs": 783.2000000476837,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 14755.7998046875,
+          "end": 15525.699951171875,
+          "ms": 769.9000000357628,
+          "observedMs": 774.4000000357628,
+          "driverMs": 802.2596620000004,
+          "stagesMs": {
+            "writeResponse": 114.4050773125,
+            "refreshResponse": 271.2783463124997,
+            "dialogClosed": 546.1521993125007,
+            "recordsPainted": 682.7054353125004
+          },
+          "uiReadyMs": 769.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 14771,
+          "end": 15509.5,
+          "ms": 738.5,
+          "observedMs": 744.9000000357628,
+          "driverMs": 787.7745070000001,
+          "stagesMs": {
+            "writeResponse": 115.68674400000054,
+            "refreshResponse": 339.2580400000006,
+            "dialogClosed": 539.6199469999992,
+            "recordsPainted": 739.2727500000001
+          },
+          "uiReadyMs": 738.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 17237,
+          "end": 17991.900146484375,
+          "ms": 754.9000000357628,
+          "observedMs": 758.8000000119209,
+          "driverMs": 774.100236000002,
+          "stagesMs": {
+            "writeResponse": 51.47394799999893,
+            "refreshResponse": 276.28319700000065,
+            "dialogClosed": 510.52007199999935,
+            "recordsPainted": 705.9495590000006
+          },
+          "uiReadyMs": 754.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 17255.89990234375,
+          "end": 17960.800048828125,
+          "ms": 704.8999999761581,
+          "observedMs": 708.8999999761581,
+          "driverMs": 742.9777999999969,
+          "stagesMs": {
+            "writeResponse": 69.66394365625092,
+            "refreshResponse": 305.84715365625016,
+            "dialogClosed": 393.97568565624897,
+            "recordsPainted": 620.5693406562496
+          },
+          "uiReadyMs": 704.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 17277.199951171875,
+          "end": 17962.39990234375,
+          "ms": 685.1999999880791,
+          "observedMs": 689.3999999761581,
+          "driverMs": 744.6842319999996,
+          "stagesMs": {
+            "writeResponse": 67.22808882812387,
+            "refreshResponse": 279.3934078281236,
+            "dialogClosed": 472.90776182812624,
+            "recordsPainted": 602.010158828125
+          },
+          "uiReadyMs": 685.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 17237.099853515625,
+          "end": 17985.999755859375,
+          "ms": 748.9000000357628,
+          "observedMs": 754.3000000119209,
+          "driverMs": 769.4415000000008,
+          "stagesMs": {
+            "writeResponse": 51.05858548437391,
+            "refreshResponse": 281.3324324843743,
+            "dialogClosed": 512.5914484843743,
+            "recordsPainted": 690.9082804843747
+          },
+          "uiReadyMs": 748.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 17256.199951171875,
+          "end": 17998.7998046875,
+          "ms": 742.5999999642372,
+          "observedMs": 747,
+          "driverMs": 780.6945720000003,
+          "stagesMs": {
+            "writeResponse": 96.55876182812426,
+            "refreshResponse": 307.36890382812635,
+            "dialogClosed": 569.7483708281252,
+            "recordsPainted": 707.5622498281264
+          },
+          "uiReadyMs": 742.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 17255.999755859375,
+          "end": 17912.2998046875,
+          "ms": 656.2999999523163,
+          "observedMs": 661.2999999523163,
+          "driverMs": 694.8404119999977,
+          "stagesMs": {
+            "writeResponse": 70.09953314062659,
+            "refreshResponse": 288.2895021406257,
+            "dialogClosed": 383.7792201406264,
+            "recordsPainted": 545.1683531406234
+          },
+          "uiReadyMs": 656.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 17256.39990234375,
+          "end": 18000.5,
+          "ms": 744.1000000238419,
+          "observedMs": 751.8999999761581,
+          "driverMs": 785.6893300000011,
+          "stagesMs": {
+            "writeResponse": 71.55309165624931,
+            "refreshResponse": 287.97566465624914,
+            "dialogClosed": 621.1965016562499,
+            "recordsPainted": 710.4381956562502
+          },
+          "uiReadyMs": 744.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 17237.2998046875,
+          "end": 18006.099853515625,
+          "ms": 768.8000000119209,
+          "observedMs": 777,
+          "driverMs": 791.7902899999972,
+          "stagesMs": {
+            "writeResponse": 50.31383131249822,
+            "refreshResponse": 260.4859473124998,
+            "dialogClosed": 589.8076973124989,
+            "recordsPainted": 754.8651823125001
+          },
+          "uiReadyMs": 768.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 17256.900146484375,
+          "end": 18004.400146484375,
+          "ms": 747.5,
+          "observedMs": 752,
+          "driverMs": 785.9065280000032,
+          "stagesMs": {
+            "writeResponse": 73.20151651562628,
+            "refreshResponse": 313.41978951562487,
+            "dialogClosed": 512.327665515626,
+            "recordsPainted": 656.7487765156257
+          },
+          "uiReadyMs": 747.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 17256.300048828125,
+          "end": 17993.800048828125,
+          "ms": 737.5,
+          "observedMs": 746.4000000357628,
+          "driverMs": 779.9588269999986,
+          "stagesMs": {
+            "writeResponse": 72.03095417187433,
+            "refreshResponse": 287.8237741718767,
+            "dialogClosed": 510.68041617187555,
+            "recordsPainted": 689.3147251718765
+          },
+          "uiReadyMs": 737.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 19523.2998046875,
+          "end": 20233.199951171875,
+          "ms": 709.9000000357628,
+          "observedMs": 714.5,
+          "driverMs": 753.5968949999988,
+          "stagesMs": {
+            "writeResponse": 102.73575431249992,
+            "refreshResponse": 375.4145033124987,
+            "dialogClosed": 467.1232703124988,
+            "recordsPainted": 677.2884093124994
+          },
+          "uiReadyMs": 709.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 19530.300048828125,
+          "end": 20228.199951171875,
+          "ms": 697.9000000357628,
+          "observedMs": 698.6000000238419,
+          "driverMs": 744.079136999997,
+          "stagesMs": {
+            "writeResponse": 99.92244017187477,
+            "refreshResponse": 388.6708001718762,
+            "dialogClosed": 400.71200417187356,
+            "recordsPainted": 661.4787571718734
+          },
+          "uiReadyMs": 697.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 19523.699951171875,
+          "end": 20231.499755859375,
+          "ms": 707.8000000119209,
+          "observedMs": 715.2000000476837,
+          "driverMs": 754.0690380000015,
+          "stagesMs": {
+            "writeResponse": 103.98054782812324,
+            "refreshResponse": 309.0379608281255,
+            "dialogClosed": 524.2437338281234,
+            "recordsPainted": 673.9012518281233
+          },
+          "uiReadyMs": 707.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 19524.300048828125,
+          "end": 20290.699951171875,
+          "ms": 766.4000000357628,
+          "observedMs": 770.8000000119209,
+          "driverMs": 809.6275999999998,
+          "stagesMs": {
+            "writeResponse": 136.44101217187563,
+            "refreshResponse": 367.4463151718737,
+            "dialogClosed": 702.9473171718746,
+            "recordsPainted": 757.498774171876
+          },
+          "uiReadyMs": 766.4000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 19523.5,
+          "end": 20280.2998046875,
+          "ms": 756.7999999523163,
+          "observedMs": 760.6999999880791,
+          "driverMs": 798.4069459999992,
+          "stagesMs": {
+            "writeResponse": 88.88423400000102,
+            "refreshResponse": 292.00900900000124,
+            "dialogClosed": 543.2855579999996,
+            "recordsPainted": 726.1111329999985
+          },
+          "uiReadyMs": 756.7999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 19524.199951171875,
+          "end": 20229.900146484375,
+          "ms": 705.6999999880791,
+          "observedMs": 709.6999999880791,
+          "driverMs": 747.9732949999998,
+          "stagesMs": {
+            "writeResponse": 107.5486378281239,
+            "refreshResponse": 364.56148182812467,
+            "dialogClosed": 474.3911938281235,
+            "recordsPainted": 670.7325328281258
+          },
+          "uiReadyMs": 705.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 19523,
+          "end": 20289.300048828125,
+          "ms": 766.2999999523163,
+          "observedMs": 770.5,
+          "driverMs": 807.5443599999999,
+          "stagesMs": {
+            "writeResponse": 146.71721600000092,
+            "refreshResponse": 364.30748200000016,
+            "dialogClosed": 703.4696030000014,
+            "recordsPainted": 753.9724590000005
+          },
+          "uiReadyMs": 766.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 19525.099853515625,
+          "end": 20268.199951171875,
+          "ms": 743.0999999642372,
+          "observedMs": 747.1999999880791,
+          "driverMs": 785.8063780000011,
+          "stagesMs": {
+            "writeResponse": 105.94177748437505,
+            "refreshResponse": 342.3645704843766,
+            "dialogClosed": 564.0338544843762,
+            "recordsPainted": 694.0833214843733
+          },
+          "uiReadyMs": 743.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 19531.999755859375,
+          "end": 20271.699951171875,
+          "ms": 739.6999999880791,
+          "observedMs": 744,
+          "driverMs": 789.4813869999998,
+          "stagesMs": {
+            "writeResponse": 136.8717411406251,
+            "refreshResponse": 356.6068671406247,
+            "dialogClosed": 560.1303561406239,
+            "recordsPainted": 693.3305411406254
+          },
+          "uiReadyMs": 739.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 19525.599853515625,
+          "end": 20269.89990234375,
+          "ms": 744.2999999523163,
+          "observedMs": 748.5999999642372,
+          "driverMs": 786.9881349999996,
+          "stagesMs": {
+            "writeResponse": 128.00066048437657,
+            "refreshResponse": 396.21598148437624,
+            "dialogClosed": 501.87394848437543,
+            "recordsPainted": 696.6340804843749
+          },
+          "uiReadyMs": 744.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 21771.099853515625,
+          "end": 22494.7998046875,
+          "ms": 723.6999999880791,
+          "observedMs": 728,
+          "driverMs": 772.5214769999984,
+          "stagesMs": {
+            "writeResponse": 108.32881848437319,
+            "refreshResponse": 364.85641548437343,
+            "dialogClosed": 456.0963354843734,
+            "recordsPainted": 662.1963934843734
+          },
+          "uiReadyMs": 723.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 21773.10009765625,
+          "end": 22524.699951171875,
+          "ms": 751.6000000238419,
+          "observedMs": 759.3000000119209,
+          "driverMs": 805.1621239999986,
+          "stagesMs": {
+            "writeResponse": 119.81329734374958,
+            "refreshResponse": 350.03072434374917,
+            "dialogClosed": 661.3702733437494,
+            "recordsPainted": 724.8427773437506
+          },
+          "uiReadyMs": 751.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 21771.60009765625,
+          "end": 22502.5,
+          "ms": 730.9000000357628,
+          "observedMs": 735.3000000119209,
+          "driverMs": 779.3950629999999,
+          "stagesMs": {
+            "writeResponse": 106.49559134375158,
+            "refreshResponse": 333.6554113437487,
+            "dialogClosed": 551.5153413437511,
+            "recordsPainted": 684.6815563437485
+          },
+          "uiReadyMs": 730.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 21755.89990234375,
+          "end": 22510.2998046875,
+          "ms": 754.4000000357628,
+          "observedMs": 758.4000000357628,
+          "driverMs": 786.4136179999987,
+          "stagesMs": {
+            "writeResponse": 123.30686765625069,
+            "refreshResponse": 369.5062686562487,
+            "dialogClosed": 581.4843586562492,
+            "recordsPainted": 733.0513926562489
+          },
+          "uiReadyMs": 754.4000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 21756.499755859375,
+          "end": 22491.999755859375,
+          "ms": 735.5,
+          "observedMs": 739.7999999523163,
+          "driverMs": 768.3261620000012,
+          "stagesMs": {
+            "writeResponse": 134.1444981406239,
+            "refreshResponse": 356.96067314062384,
+            "dialogClosed": 449.35494114062385,
+            "recordsPainted": 670.8917361406238
+          },
+          "uiReadyMs": 735.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 21755.300048828125,
+          "end": 22493.5,
+          "ms": 738.1999999880791,
+          "observedMs": 745.8999999761581,
+          "driverMs": 773.6196929999969,
+          "stagesMs": {
+            "writeResponse": 100.40963217187527,
+            "refreshResponse": 377.63291817187564,
+            "dialogClosed": 419.81798117187645,
+            "recordsPainted": 674.7152951718745
+          },
+          "uiReadyMs": 738.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 21755.199951171875,
+          "end": 22496.300048828125,
+          "ms": 741.1000000238419,
+          "observedMs": 745.3000000119209,
+          "driverMs": 772.6207309999991,
+          "stagesMs": {
+            "writeResponse": 95.0176588281247,
+            "refreshResponse": 296.3843668281261,
+            "dialogClosed": 529.7008128281268,
+            "recordsPainted": 680.6656318281239
+          },
+          "uiReadyMs": 741.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 21772.60009765625,
+          "end": 22521.300048828125,
+          "ms": 748.6999999880791,
+          "observedMs": 753.8999999761581,
+          "driverMs": 797.7964580000007,
+          "stagesMs": {
+            "writeResponse": 115.65019134374961,
+            "refreshResponse": 341.43728134375124,
+            "dialogClosed": 683.2191743437506,
+            "recordsPainted": 734.2420323437509
+          },
+          "uiReadyMs": 748.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 21773.199951171875,
+          "end": 22519.699951171875,
+          "ms": 746.5,
+          "observedMs": 755.8999999761581,
+          "driverMs": 799.8448160000007,
+          "stagesMs": {
+            "writeResponse": 117.97900982812644,
+            "refreshResponse": 370.6345928281262,
+            "dialogClosed": 725.1272368281243,
+            "recordsPainted": 747.2710058281264
+          },
+          "uiReadyMs": 746.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 21770.800048828125,
+          "end": 22501.300048828125,
+          "ms": 730.5,
+          "observedMs": 734.8999999761581,
+          "driverMs": 776.6751250000016,
+          "stagesMs": {
+            "writeResponse": 122.30803017187645,
+            "refreshResponse": 334.32002717187424,
+            "dialogClosed": 541.1249141718763,
+            "recordsPainted": 682.2816681718759
+          },
+          "uiReadyMs": 730.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 24131.39990234375,
+          "end": 24892.699951171875,
+          "ms": 761.3000000119209,
+          "observedMs": 765.5,
+          "driverMs": 814.6811630000011,
+          "stagesMs": {
+            "writeResponse": 88.07953565624848,
+            "refreshResponse": 337.5214526562486,
+            "dialogClosed": 533.9280446562516,
+            "recordsPainted": 723.7195146562517
+          },
+          "uiReadyMs": 761.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 24156.099853515625,
+          "end": 24886.599853515625,
+          "ms": 730.5,
+          "observedMs": 735.1999999880791,
+          "driverMs": 808.8081060000004,
+          "stagesMs": {
+            "writeResponse": 73.30764248437481,
+            "refreshResponse": 275.5096844843756,
+            "dialogClosed": 483.83830448437584,
+            "recordsPainted": 678.0055334843746
+          },
+          "uiReadyMs": 730.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 24134.999755859375,
+          "end": 24901.7998046875,
+          "ms": 766.7999999523163,
+          "observedMs": 775.2999999523163,
+          "driverMs": 827.5957669999989,
+          "stagesMs": {
+            "writeResponse": 92.62647114062565,
+            "refreshResponse": 358.07321114062506,
+            "dialogClosed": 662.195664140625,
+            "recordsPainted": 746.5957931406265
+          },
+          "uiReadyMs": 766.7999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 24136.999755859375,
+          "end": 24884.89990234375,
+          "ms": 747.8999999761581,
+          "observedMs": 752.2999999523163,
+          "driverMs": 807.0530319999998,
+          "stagesMs": {
+            "writeResponse": 86.38211414062607,
+            "refreshResponse": 310.7485501406263,
+            "dialogClosed": 515.3805921406238,
+            "recordsPainted": 693.9882271406241
+          },
+          "uiReadyMs": 747.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 24132.099853515625,
+          "end": 24895.699951171875,
+          "ms": 763.6000000238419,
+          "observedMs": 767.9000000357628,
+          "driverMs": 816.6837579999992,
+          "stagesMs": {
+            "writeResponse": 89.18274248437592,
+            "refreshResponse": 330.67135548437363,
+            "dialogClosed": 528.3349244843739,
+            "recordsPainted": 728.8821074843763
+          },
+          "uiReadyMs": 763.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 24132.599853515625,
+          "end": 24894.599853515625,
+          "ms": 762,
+          "observedMs": 769.9000000357628,
+          "driverMs": 818.9604660000005,
+          "stagesMs": {
+            "writeResponse": 88.09361648437334,
+            "refreshResponse": 317.8174754843749,
+            "dialogClosed": 522.5624364843752,
+            "recordsPainted": 724.9918534843746
+          },
+          "uiReadyMs": 762,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 24120.999755859375,
+          "end": 24889.199951171875,
+          "ms": 768.1999999880791,
+          "observedMs": 772.5999999642372,
+          "driverMs": 809.722214999998,
+          "stagesMs": {
+            "writeResponse": 97.55922214062593,
+            "refreshResponse": 365.33168214062607,
+            "dialogClosed": 560.5510441406259,
+            "recordsPainted": 718.786322140626
+          },
+          "uiReadyMs": 768.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 24133.39990234375,
+          "end": 24897.099853515625,
+          "ms": 763.6999999880791,
+          "observedMs": 768,
+          "driverMs": 817.5374450000018,
+          "stagesMs": {
+            "writeResponse": 86.49356265625102,
+            "refreshResponse": 350.41861865625106,
+            "dialogClosed": 548.0848126562487,
+            "recordsPainted": 730.7760756562493
+          },
+          "uiReadyMs": 763.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 24134,
+          "end": 24898.599853515625,
+          "ms": 764.5999999642372,
+          "observedMs": 768.5999999642372,
+          "driverMs": 818.422542999997,
+          "stagesMs": {
+            "writeResponse": 91.01380000000063,
+            "refreshResponse": 339.8137549999992,
+            "dialogClosed": 551.6046810000007,
+            "recordsPainted": 732.5748390000008
+          },
+          "uiReadyMs": 764.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 24148.099853515625,
+          "end": 24887.800048828125,
+          "ms": 739.6999999880791,
+          "observedMs": 744.5,
+          "driverMs": 808.7096999999994,
+          "stagesMs": {
+            "writeResponse": 72.02252248437435,
+            "refreshResponse": 302.18925848437357,
+            "dialogClosed": 502.77341948437606,
+            "recordsPainted": 688.5421634843733
+          },
+          "uiReadyMs": 739.6999999880791,
+          "overlappedHeavy": true
+        }
+      ],
+      "rssBytes": {
+        "initial": 147369984,
+        "peak": 937373696,
+        "final": 911446016
+      }
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "ms": {
+        "n": 100,
+        "p50": 768.9000000357628,
+        "p95": 808.5999999642372,
+        "max": 819.6000000238419
+      },
+      "overlapped": 100,
+      "actions": [
+        {
+          "user": 1,
+          "start": 26138.10009765625,
+          "end": 26935.199951171875,
+          "ms": 797.1000000238419,
+          "observedMs": 804.9000000357628,
+          "driverMs": 852.2383870000012,
+          "stagesMs": {
+            "writeResponse": 118.25723534374993,
+            "refreshResponse": 352.13341334374854,
+            "dialogClosed": 559.7976533437504,
+            "recordsPainted": 771.4579153437517
+          },
+          "uiReadyMs": 797.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 26137.699951171875,
+          "end": 26939.7998046875,
+          "ms": 802.0999999642372,
+          "observedMs": 808,
+          "driverMs": 854.2969069999999,
+          "stagesMs": {
+            "writeResponse": 117.05890882812673,
+            "refreshResponse": 332.43381282812334,
+            "dialogClosed": 674.6635438281264,
+            "recordsPainted": 783.7569678281252
+          },
+          "uiReadyMs": 802.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 26137.89990234375,
+          "end": 26943.39990234375,
+          "ms": 805.5,
+          "observedMs": 824.3999999761581,
+          "driverMs": 870.5936370000018,
+          "stagesMs": {
+            "writeResponse": 118.31505265624946,
+            "refreshResponse": 337.7226056562504,
+            "dialogClosed": 678.6301526562493,
+            "recordsPainted": 786.115343656249
+          },
+          "uiReadyMs": 805.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 26138.39990234375,
+          "end": 26958,
+          "ms": 819.6000000238419,
+          "observedMs": 832.8999999761581,
+          "driverMs": 879.2337210000005,
+          "stagesMs": {
+            "writeResponse": 117.6131996562508,
+            "refreshResponse": 347.78742465624964,
+            "dialogClosed": 557.9429476562509,
+            "recordsPainted": 800.1072036562509
+          },
+          "uiReadyMs": 819.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 26138.099853515625,
+          "end": 26938.2998046875,
+          "ms": 800.1999999880791,
+          "observedMs": 804.8000000119209,
+          "driverMs": 851.0016670000005,
+          "stagesMs": {
+            "writeResponse": 122.05193548437455,
+            "refreshResponse": 318.1976134843753,
+            "dialogClosed": 657.9268764843764,
+            "recordsPainted": 780.0995244843762
+          },
+          "uiReadyMs": 800.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 26139.39990234375,
+          "end": 26933.60009765625,
+          "ms": 794.2000000476837,
+          "observedMs": 798.8000000119209,
+          "driverMs": 845.7206970000007,
+          "stagesMs": {
+            "writeResponse": 117.12152065624832,
+            "refreshResponse": 307.6050536562507,
+            "dialogClosed": 518.9323326562517,
+            "recordsPainted": 766.5310406562494
+          },
+          "uiReadyMs": 794.2000000476837,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 26137.199951171875,
+          "end": 26945.800048828125,
+          "ms": 808.5999999642372,
+          "observedMs": 809.5999999642372,
+          "driverMs": 854.0414180000007,
+          "stagesMs": {
+            "writeResponse": 122.8087568281262,
+            "refreshResponse": 321.5206188281263,
+            "dialogClosed": 558.0514668281248,
+            "recordsPainted": 765.8363068281251
+          },
+          "uiReadyMs": 808.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 26137.199951171875,
+          "end": 26927.199951171875,
+          "ms": 790,
+          "observedMs": 791.6999999880791,
+          "driverMs": 836.3283550000015,
+          "stagesMs": {
+            "writeResponse": 122.66849082812405,
+            "refreshResponse": 350.06342982812566,
+            "dialogClosed": 556.4563868281257,
+            "recordsPainted": 747.8005348281258
+          },
+          "uiReadyMs": 790,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 26138.199951171875,
+          "end": 26936.699951171875,
+          "ms": 798.5,
+          "observedMs": 802.6999999880791,
+          "driverMs": 847.9628440000015,
+          "stagesMs": {
+            "writeResponse": 121.47098982812531,
+            "refreshResponse": 362.8797738281246,
+            "dialogClosed": 565.1032738281247,
+            "recordsPainted": 773.7665548281257
+          },
+          "uiReadyMs": 798.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 26137.89990234375,
+          "end": 26930.300048828125,
+          "ms": 792.3999999761581,
+          "observedMs": 793.8000000119209,
+          "driverMs": 838.0619079999997,
+          "stagesMs": {
+            "writeResponse": 119.6952396562483,
+            "refreshResponse": 325.20410665624877,
+            "dialogClosed": 525.1898436562515,
+            "recordsPainted": 762.2274936562499
+          },
+          "uiReadyMs": 792.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 28156.300048828125,
+          "end": 28941.800048828125,
+          "ms": 785.5,
+          "observedMs": 790,
+          "driverMs": 848.8480859999981,
+          "stagesMs": {
+            "writeResponse": 110.51308217187398,
+            "refreshResponse": 391.0452561718739,
+            "dialogClosed": 588.1588061718758,
+            "recordsPainted": 739.7390251718753
+          },
+          "uiReadyMs": 785.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 28154.800048828125,
+          "end": 28936.800048828125,
+          "ms": 782,
+          "observedMs": 786.2000000476837,
+          "driverMs": 843.3959849999992,
+          "stagesMs": {
+            "writeResponse": 101.4916411718732,
+            "refreshResponse": 402.65831817187427,
+            "dialogClosed": 503.80415017187624,
+            "recordsPainted": 731.7919271718747
+          },
+          "uiReadyMs": 782,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 28138.699951171875,
+          "end": 28939.900146484375,
+          "ms": 801.1999999880791,
+          "observedMs": 809.3999999761581,
+          "driverMs": 850.2102709999999,
+          "stagesMs": {
+            "writeResponse": 128.22288282812588,
+            "refreshResponse": 369.23935282812454,
+            "dialogClosed": 576.8058098281253,
+            "recordsPainted": 754.0326988281267
+          },
+          "uiReadyMs": 801.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 28138.5,
+          "end": 28910.800048828125,
+          "ms": 772.2999999523163,
+          "observedMs": 774.3999999761581,
+          "driverMs": 815.6088720000007,
+          "stagesMs": {
+            "writeResponse": 114.47958600000129,
+            "refreshResponse": 348.1924419999996,
+            "dialogClosed": 457.1022699999994,
+            "recordsPainted": 692.1079460000001
+          },
+          "uiReadyMs": 772.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 28137.89990234375,
+          "end": 28951.2998046875,
+          "ms": 813.3999999761581,
+          "observedMs": 817.5,
+          "driverMs": 857.6764870000006,
+          "stagesMs": {
+            "writeResponse": 113.78351865625154,
+            "refreshResponse": 390.4162696562489,
+            "dialogClosed": 695.7123046562483,
+            "recordsPainted": 784.2512316562497
+          },
+          "uiReadyMs": 813.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 28139.39990234375,
+          "end": 28947.2998046875,
+          "ms": 807.9000000357628,
+          "observedMs": 812.3000000119209,
+          "driverMs": 854.1076140000005,
+          "stagesMs": {
+            "writeResponse": 127.61040965624852,
+            "refreshResponse": 365.5314926562496,
+            "dialogClosed": 685.4969506562484,
+            "recordsPainted": 774.7496846562499
+          },
+          "uiReadyMs": 807.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 28138.39990234375,
+          "end": 28920.800048828125,
+          "ms": 782.4000000357628,
+          "observedMs": 791,
+          "driverMs": 831.4232169999996,
+          "stagesMs": {
+            "writeResponse": 115.49299165625052,
+            "refreshResponse": 330.96142165625133,
+            "dialogClosed": 551.2512236562507,
+            "recordsPainted": 729.962097656251
+          },
+          "uiReadyMs": 782.4000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 28137.89990234375,
+          "end": 28912.5,
+          "ms": 774.6000000238419,
+          "observedMs": 776.1000000238419,
+          "driverMs": 816.0305950000002,
+          "stagesMs": {
+            "writeResponse": 114.86771765624871,
+            "refreshResponse": 341.8816876562487,
+            "dialogClosed": 448.00872565625104,
+            "recordsPainted": 695.8318806562493
+          },
+          "uiReadyMs": 774.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 28139.2998046875,
+          "end": 28938.39990234375,
+          "ms": 799.1000000238419,
+          "observedMs": 803.4000000357628,
+          "driverMs": 844.5058659999995,
+          "stagesMs": {
+            "writeResponse": 126.556607312501,
+            "refreshResponse": 369.4384793124991,
+            "dialogClosed": 576.9278273124983,
+            "recordsPainted": 750.0293263124986
+          },
+          "uiReadyMs": 799.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 28155.5,
+          "end": 28959.300048828125,
+          "ms": 803.7999999523163,
+          "observedMs": 811.1999999880791,
+          "driverMs": 868.4500719999996,
+          "stagesMs": {
+            "writeResponse": 111.57292400000006,
+            "refreshResponse": 379.32003800000166,
+            "dialogClosed": 617.7513790000012,
+            "recordsPainted": 761.8757179999993
+          },
+          "uiReadyMs": 803.7999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 30106.099853515625,
+          "end": 30902.199951171875,
+          "ms": 796.1000000238419,
+          "observedMs": 800.6000000238419,
+          "driverMs": 848.4499319999995,
+          "stagesMs": {
+            "writeResponse": 106.5616014843763,
+            "refreshResponse": 358.7784834843733,
+            "dialogClosed": 657.3851684843758,
+            "recordsPainted": 777.3025324843766
+          },
+          "uiReadyMs": 796.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 30105.599853515625,
+          "end": 30873.099853515625,
+          "ms": 767.5,
+          "observedMs": 775.6000000238419,
+          "driverMs": 822.9906179999998,
+          "stagesMs": {
+            "writeResponse": 102.70270848437576,
+            "refreshResponse": 321.7822864843765,
+            "dialogClosed": 531.2859114843741,
+            "recordsPainted": 689.063303484374
+          },
+          "uiReadyMs": 767.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 30105.39990234375,
+          "end": 30886.89990234375,
+          "ms": 781.5,
+          "observedMs": 786.1999999880791,
+          "driverMs": 833.2553380000027,
+          "stagesMs": {
+            "writeResponse": 106.23822165625097,
+            "refreshResponse": 318.49128965624914,
+            "dialogClosed": 530.8977116562492,
+            "recordsPainted": 752.162089656249
+          },
+          "uiReadyMs": 781.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 30106.099853515625,
+          "end": 30893.699951171875,
+          "ms": 787.6000000238419,
+          "observedMs": 796.8000000119209,
+          "driverMs": 844.2005180000015,
+          "stagesMs": {
+            "writeResponse": 104.23368948437565,
+            "refreshResponse": 382.7510594843734,
+            "dialogClosed": 584.998337484376,
+            "recordsPainted": 763.5054214843767
+          },
+          "uiReadyMs": 787.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 30106.199951171875,
+          "end": 30878.699951171875,
+          "ms": 772.5,
+          "observedMs": 773.5999999642372,
+          "driverMs": 821.2924749999984,
+          "stagesMs": {
+            "writeResponse": 118.75379582812457,
+            "refreshResponse": 374.47652282812487,
+            "dialogClosed": 466.1503598281233,
+            "recordsPainted": 719.3619958281233
+          },
+          "uiReadyMs": 772.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 30105,
+          "end": 30896.5,
+          "ms": 791.5,
+          "observedMs": 795.5,
+          "driverMs": 841.6769760000025,
+          "stagesMs": {
+            "writeResponse": 108.45702700000038,
+            "refreshResponse": 359.3849450000016,
+            "dialogClosed": 662.7583410000007,
+            "recordsPainted": 770.8001130000011
+          },
+          "uiReadyMs": 791.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 30104.999755859375,
+          "end": 30880.89990234375,
+          "ms": 775.8999999761581,
+          "observedMs": 783.6999999880791,
+          "driverMs": 830.3366669999996,
+          "stagesMs": {
+            "writeResponse": 106.8300601406263,
+            "refreshResponse": 338.8405171406266,
+            "dialogClosed": 534.1459161406237,
+            "recordsPainted": 723.6184541406255
+          },
+          "uiReadyMs": 775.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 30106.10009765625,
+          "end": 30890.5,
+          "ms": 784.3999999761581,
+          "observedMs": 792.6999999880791,
+          "driverMs": 839.6770859999997,
+          "stagesMs": {
+            "writeResponse": 104.0135743437495,
+            "refreshResponse": 348.6326793437511,
+            "dialogClosed": 544.6243163437503,
+            "recordsPainted": 757.7872993437486
+          },
+          "uiReadyMs": 784.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 30106.10009765625,
+          "end": 30892.199951171875,
+          "ms": 786.1000000238419,
+          "observedMs": 795.1000000238419,
+          "driverMs": 842.1478869999992,
+          "stagesMs": {
+            "writeResponse": 104.41520034374844,
+            "refreshResponse": 291.70612434374925,
+            "dialogClosed": 536.3068443437514,
+            "recordsPainted": 760.6668643437515
+          },
+          "uiReadyMs": 786.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 30106.10009765625,
+          "end": 30888.60009765625,
+          "ms": 782.5,
+          "observedMs": 790.6999999880791,
+          "driverMs": 837.9427649999998,
+          "stagesMs": {
+            "writeResponse": 103.20243334375118,
+            "refreshResponse": 325.03003134375103,
+            "dialogClosed": 530.8523593437494,
+            "recordsPainted": 754.5563683437504
+          },
+          "uiReadyMs": 782.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 32172,
+          "end": 32913.900146484375,
+          "ms": 741.9000000357628,
+          "observedMs": 750.3000000119209,
+          "driverMs": 798.282089999997,
+          "stagesMs": {
+            "writeResponse": 100.0501179999992,
+            "refreshResponse": 337.6819499999983,
+            "dialogClosed": 531.9277919999986,
+            "recordsPainted": 656.9289449999997
+          },
+          "uiReadyMs": 741.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 32172.7998046875,
+          "end": 32941.699951171875,
+          "ms": 768.9000000357628,
+          "observedMs": 773.3000000119209,
+          "driverMs": 821.7346970000035,
+          "stagesMs": {
+            "writeResponse": 116.74942531250053,
+            "refreshResponse": 359.52721031249894,
+            "dialogClosed": 451.97327331249835,
+            "recordsPainted": 724.2791823125008
+          },
+          "uiReadyMs": 768.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 32153.199951171875,
+          "end": 32823.199951171875,
+          "ms": 670,
+          "observedMs": 675,
+          "driverMs": 703.7145280000004,
+          "stagesMs": {
+            "writeResponse": 57.67859682812559,
+            "refreshResponse": 250.66430882812347,
+            "dialogClosed": 357.5372838281255,
+            "recordsPainted": 560.1537378281246
+          },
+          "uiReadyMs": 670,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 32172.2998046875,
+          "end": 32912.199951171875,
+          "ms": 739.9000000357628,
+          "observedMs": 744.9000000357628,
+          "driverMs": 792.8965689999968,
+          "stagesMs": {
+            "writeResponse": 94.33795931249915,
+            "refreshResponse": 312.06754531250044,
+            "dialogClosed": 517.6123503125018,
+            "recordsPainted": 653.9018263125035
+          },
+          "uiReadyMs": 739.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 32172,
+          "end": 32846.400146484375,
+          "ms": 674.3999999761581,
+          "observedMs": 679.6999999880791,
+          "driverMs": 726.9103179999984,
+          "stagesMs": {
+            "writeResponse": 68.08069899999828,
+            "refreshResponse": 316.55507999999827,
+            "dialogClosed": 413.2184269999998,
+            "recordsPainted": 588.3315299999995
+          },
+          "uiReadyMs": 674.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 32171.89990234375,
+          "end": 32893.699951171875,
+          "ms": 721.8000000119209,
+          "observedMs": 736.3999999761581,
+          "driverMs": 783.2525790000036,
+          "stagesMs": {
+            "writeResponse": 99.25041265624895,
+            "refreshResponse": 333.7247426562499,
+            "dialogClosed": 526.1677306562488,
+            "recordsPainted": 722.5763386562467
+          },
+          "uiReadyMs": 721.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 32171.400146484375,
+          "end": 32864.199951171875,
+          "ms": 692.8000000119209,
+          "observedMs": 697.5,
+          "driverMs": 743.7250810000005,
+          "stagesMs": {
+            "writeResponse": 81.33819551562556,
+            "refreshResponse": 291.91662651562365,
+            "dialogClosed": 402.62447651562616,
+            "recordsPainted": 609.4554135156286
+          },
+          "uiReadyMs": 692.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 32173.599853515625,
+          "end": 32919.5,
+          "ms": 745.8999999761581,
+          "observedMs": 754,
+          "driverMs": 803.050769999998,
+          "stagesMs": {
+            "writeResponse": 108.56175748437454,
+            "refreshResponse": 372.51908748437563,
+            "dialogClosed": 570.6365434843756,
+            "recordsPainted": 674.0064734843763
+          },
+          "uiReadyMs": 745.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 32171.7998046875,
+          "end": 32844.699951171875,
+          "ms": 672.8999999761581,
+          "observedMs": 678.0999999642372,
+          "driverMs": 724.9941279999985,
+          "stagesMs": {
+            "writeResponse": 72.60988131249906,
+            "refreshResponse": 288.27011631249843,
+            "dialogClosed": 387.65519331250107,
+            "recordsPainted": 585.539241312501
+          },
+          "uiReadyMs": 672.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 32172,
+          "end": 32925.2998046875,
+          "ms": 753.3000000119209,
+          "observedMs": 761.6000000238419,
+          "driverMs": 808.6580489999978,
+          "stagesMs": {
+            "writeResponse": 58.13721599999917,
+            "refreshResponse": 287.9465689999997,
+            "dialogClosed": 595.9439960000018,
+            "recordsPainted": 706.6883279999965
+          },
+          "uiReadyMs": 753.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 34139.199951171875,
+          "end": 34941.300048828125,
+          "ms": 802.0999999642372,
+          "observedMs": 806.5999999642372,
+          "driverMs": 860.2747380000001,
+          "stagesMs": {
+            "writeResponse": 113.68945182812604,
+            "refreshResponse": 318.6771318281244,
+            "dialogClosed": 531.0681458281251,
+            "recordsPainted": 762.1495168281253
+          },
+          "uiReadyMs": 802.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 34139.800048828125,
+          "end": 34947.900146484375,
+          "ms": 808.1000000238419,
+          "observedMs": 812.6000000238419,
+          "driverMs": 866.6696999999986,
+          "stagesMs": {
+            "writeResponse": 114.21230717187427,
+            "refreshResponse": 349.9644161718752,
+            "dialogClosed": 560.3285451718766,
+            "recordsPainted": 782.3989111718765
+          },
+          "uiReadyMs": 808.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 34139.300048828125,
+          "end": 34928.400146484375,
+          "ms": 789.1000000238419,
+          "observedMs": 790.1000000238419,
+          "driverMs": 843.5544919999957,
+          "stagesMs": {
+            "writeResponse": 115.72322117187286,
+            "refreshResponse": 314.2210531718738,
+            "dialogClosed": 421.00202217187325,
+            "recordsPainted": 711.2323351718733
+          },
+          "uiReadyMs": 789.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 34139.39990234375,
+          "end": 34948.999755859375,
+          "ms": 809.5999999642372,
+          "observedMs": 813.6999999880791,
+          "driverMs": 866.6148319999993,
+          "stagesMs": {
+            "writeResponse": 115.27739365625166,
+            "refreshResponse": 367.7886466562486,
+            "dialogClosed": 573.3050666562485,
+            "recordsPainted": 786.0662956562519
+          },
+          "uiReadyMs": 809.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 34139.39990234375,
+          "end": 34939.699951171875,
+          "ms": 800.3000000119209,
+          "observedMs": 804.8000000119209,
+          "driverMs": 857.302542999998,
+          "stagesMs": {
+            "writeResponse": 113.9712116562514,
+            "refreshResponse": 300.3904936562467,
+            "dialogClosed": 552.5932956562465,
+            "recordsPainted": 758.9028546562477
+          },
+          "uiReadyMs": 800.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 34138.800048828125,
+          "end": 34946.300048828125,
+          "ms": 807.5,
+          "observedMs": 815.2000000476837,
+          "driverMs": 867.2098790000018,
+          "stagesMs": {
+            "writeResponse": 115.99199017187493,
+            "refreshResponse": 360.0274411718783,
+            "dialogClosed": 562.501278171876,
+            "recordsPainted": 780.8795781718727
+          },
+          "uiReadyMs": 807.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 34139.39990234375,
+          "end": 34943.5,
+          "ms": 804.1000000238419,
+          "observedMs": 813,
+          "driverMs": 865.2063400000043,
+          "stagesMs": {
+            "writeResponse": 112.9562496562503,
+            "refreshResponse": 322.1219636562528,
+            "dialogClosed": 556.2463986562507,
+            "recordsPainted": 765.1606716562528
+          },
+          "uiReadyMs": 804.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 34139.699951171875,
+          "end": 34937.60009765625,
+          "ms": 797.8999999761581,
+          "observedMs": 799.1999999880791,
+          "driverMs": 851.3806839999961,
+          "stagesMs": {
+            "writeResponse": 114.90553182812437,
+            "refreshResponse": 341.2566258281222,
+            "dialogClosed": 559.3133858281217,
+            "recordsPainted": 745.3458908281245
+          },
+          "uiReadyMs": 797.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 34138.800048828125,
+          "end": 34953.699951171875,
+          "ms": 814.9000000357628,
+          "observedMs": 822.5,
+          "driverMs": 873.422636999996,
+          "stagesMs": {
+            "writeResponse": 115.93593817187502,
+            "refreshResponse": 371.3669511718763,
+            "dialogClosed": 680.9497141718748,
+            "recordsPainted": 794.0373351718736
+          },
+          "uiReadyMs": 814.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 34137.89990234375,
+          "end": 34951.999755859375,
+          "ms": 814.1000000238419,
+          "observedMs": 818.5,
+          "driverMs": 868.4015719999952,
+          "stagesMs": {
+            "writeResponse": 115.21066665624676,
+            "refreshResponse": 377.30952365625126,
+            "dialogClosed": 598.3071316562491,
+            "recordsPainted": 791.7826996562508
+          },
+          "uiReadyMs": 814.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 36112.599853515625,
+          "end": 36862.099853515625,
+          "ms": 749.5,
+          "observedMs": 754.1000000238419,
+          "driverMs": 794.740098000002,
+          "stagesMs": {
+            "writeResponse": 109.72823248437635,
+            "refreshResponse": 313.74074548437784,
+            "dialogClosed": 521.148488484374,
+            "recordsPainted": 723.6455104843772
+          },
+          "uiReadyMs": 749.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 36121.599853515625,
+          "end": 36866.89990234375,
+          "ms": 745.2999999523163,
+          "observedMs": 750.1999999880791,
+          "driverMs": 799.5833120000025,
+          "stagesMs": {
+            "writeResponse": 99.3230204843785,
+            "refreshResponse": 352.4657714843779,
+            "dialogClosed": 564.3651364843754,
+            "recordsPainted": 723.5568454843742
+          },
+          "uiReadyMs": 745.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 36121.10009765625,
+          "end": 36857.60009765625,
+          "ms": 736.5,
+          "observedMs": 737.3000000119209,
+          "driverMs": 785.8727819999986,
+          "stagesMs": {
+            "writeResponse": 96.81326734375034,
+            "refreshResponse": 298.4972123437474,
+            "dialogClosed": 512.4083573437529,
+            "recordsPainted": 706.0537273437512
+          },
+          "uiReadyMs": 736.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 36112.5,
+          "end": 36858.900146484375,
+          "ms": 746.3999999761581,
+          "observedMs": 750.8999999761581,
+          "driverMs": 790.6495910000012,
+          "stagesMs": {
+            "writeResponse": 106.81286399999954,
+            "refreshResponse": 325.42626900000323,
+            "dialogClosed": 543.1932979999983,
+            "recordsPainted": 717.3986450000011
+          },
+          "uiReadyMs": 746.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 36121,
+          "end": 36875.800048828125,
+          "ms": 754.8000000119209,
+          "observedMs": 759.4000000357628,
+          "driverMs": 807.5230789999987,
+          "stagesMs": {
+            "writeResponse": 98.08734600000025,
+            "refreshResponse": 335.8183050000007,
+            "dialogClosed": 533.0165639999977,
+            "recordsPainted": 721.261341999998
+          },
+          "uiReadyMs": 754.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 36120.800048828125,
+          "end": 36854.599853515625,
+          "ms": 733.8000000119209,
+          "observedMs": 734.7000000476837,
+          "driverMs": 782.5377640000006,
+          "stagesMs": {
+            "writeResponse": 101.70195217187575,
+            "refreshResponse": 310.39947617187863,
+            "dialogClosed": 409.7824891718774,
+            "recordsPainted": 691.297720171875
+          },
+          "uiReadyMs": 733.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 36112.5,
+          "end": 36863.89990234375,
+          "ms": 751.3999999761581,
+          "observedMs": 760.2999999523163,
+          "driverMs": 799.5307640000028,
+          "stagesMs": {
+            "writeResponse": 109.6828600000008,
+            "refreshResponse": 335.34272500000225,
+            "dialogClosed": 535.6850780000022,
+            "recordsPainted": 726.8131490000014
+          },
+          "uiReadyMs": 751.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 36120.300048828125,
+          "end": 36870,
+          "ms": 749.7000000476837,
+          "observedMs": 754.6000000238419,
+          "driverMs": 801.1507580000034,
+          "stagesMs": {
+            "writeResponse": 100.2724981718784,
+            "refreshResponse": 344.377586171875,
+            "dialogClosed": 650.3154381718778,
+            "recordsPainted": 730.7050971718782
+          },
+          "uiReadyMs": 749.7000000476837,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 36113,
+          "end": 36860.60009765625,
+          "ms": 747.5999999642372,
+          "observedMs": 752.0999999642372,
+          "driverMs": 791.0999890000021,
+          "stagesMs": {
+            "writeResponse": 107.77247999999963,
+            "refreshResponse": 340.3242360000004,
+            "dialogClosed": 541.6393089999983,
+            "recordsPainted": 719.7492950000014
+          },
+          "uiReadyMs": 747.5999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 36122.199951171875,
+          "end": 36868.199951171875,
+          "ms": 746,
+          "observedMs": 750.8999999761581,
+          "driverMs": 798.9380050000036,
+          "stagesMs": {
+            "writeResponse": 99.8093618281273,
+            "refreshResponse": 343.3869748281286,
+            "dialogClosed": 430.62423382812267,
+            "recordsPainted": 660.9005928281258
+          },
+          "uiReadyMs": 746,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 38021,
+          "end": 38787.300048828125,
+          "ms": 766.3000000119209,
+          "observedMs": 770.8000000119209,
+          "driverMs": 821.4178599999941,
+          "stagesMs": {
+            "writeResponse": 116.57027999999991,
+            "refreshResponse": 344.14924600000086,
+            "dialogClosed": 446.4405289999995,
+            "recordsPainted": 746.9759320000012
+          },
+          "uiReadyMs": 766.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 38020.699951171875,
+          "end": 38804.10009765625,
+          "ms": 783.3999999761581,
+          "observedMs": 792.6999999880791,
+          "driverMs": 842.752327000002,
+          "stagesMs": {
+            "writeResponse": 118.28182882812689,
+            "refreshResponse": 360.2687458281216,
+            "dialogClosed": 690.007450828125,
+            "recordsPainted": 762.5985678281286
+          },
+          "uiReadyMs": 783.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 38022,
+          "end": 38801.900146484375,
+          "ms": 779.8999999761581,
+          "observedMs": 806.7999999523163,
+          "driverMs": 858.1370610000013,
+          "stagesMs": {
+            "writeResponse": 113.22846199999913,
+            "refreshResponse": 342.35151400000177,
+            "dialogClosed": 699.5238860000027,
+            "recordsPainted": 756.7000100000005
+          },
+          "uiReadyMs": 779.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 38020.699951171875,
+          "end": 38774.199951171875,
+          "ms": 753.5,
+          "observedMs": 761.5,
+          "driverMs": 811.6870940000008,
+          "stagesMs": {
+            "writeResponse": 117.5751908281236,
+            "refreshResponse": 357.1324128281267,
+            "dialogClosed": 565.236873828122,
+            "recordsPainted": 688.4413008281263
+          },
+          "uiReadyMs": 753.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 38022.39990234375,
+          "end": 38777.199951171875,
+          "ms": 754.7999999523163,
+          "observedMs": 762.6999999880791,
+          "driverMs": 814.1536239999987,
+          "stagesMs": {
+            "writeResponse": 113.19483965625113,
+            "refreshResponse": 330.13498265625094,
+            "dialogClosed": 537.0436216562521,
+            "recordsPainted": 708.4529296562469
+          },
+          "uiReadyMs": 754.7999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 38022.300048828125,
+          "end": 38775.60009765625,
+          "ms": 753.3000000119209,
+          "observedMs": 757.5999999642372,
+          "driverMs": 808.8875349999944,
+          "stagesMs": {
+            "writeResponse": 113.83818517187319,
+            "refreshResponse": 362.0542621718778,
+            "dialogClosed": 563.7356461718737,
+            "recordsPainted": 689.4367971718748
+          },
+          "uiReadyMs": 753.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 38020.60009765625,
+          "end": 38772.400146484375,
+          "ms": 751.8000000119209,
+          "observedMs": 756.1999999880791,
+          "driverMs": 806.0894800000024,
+          "stagesMs": {
+            "writeResponse": 116.71678934375086,
+            "refreshResponse": 324.0124453437529,
+            "dialogClosed": 557.012710343748,
+            "recordsPainted": 685.5402063437505
+          },
+          "uiReadyMs": 751.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 38021.699951171875,
+          "end": 38771,
+          "ms": 749.3000000119209,
+          "observedMs": 753.5,
+          "driverMs": 804.4727510000012,
+          "stagesMs": {
+            "writeResponse": 112.97317882812786,
+            "refreshResponse": 374.55720182812365,
+            "dialogClosed": 483.50546482812206,
+            "recordsPainted": 682.1388098281241
+          },
+          "uiReadyMs": 749.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 38022.900146484375,
+          "end": 38800.300048828125,
+          "ms": 777.3999999761581,
+          "observedMs": 1152.199999988079,
+          "driverMs": 1203.9481769999984,
+          "stagesMs": {
+            "writeResponse": 112.6240475156228,
+            "refreshResponse": 310.22998151562206,
+            "dialogClosed": 1131.625294515623,
+            "recordsPainted": 1143.397840515623
+          },
+          "uiReadyMs": 777.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 38022.39990234375,
+          "end": 38781.89990234375,
+          "ms": 759.5,
+          "observedMs": 764.1999999880791,
+          "driverMs": 815.4630859999961,
+          "stagesMs": {
+            "writeResponse": 113.67008665625326,
+            "refreshResponse": 311.6197396562493,
+            "dialogClosed": 549.5293976562534,
+            "recordsPainted": 727.108485656252
+          },
+          "uiReadyMs": 759.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 40286.89990234375,
+          "end": 40963.39990234375,
+          "ms": 676.5,
+          "observedMs": 677.5,
+          "driverMs": 709.9570010000025,
+          "stagesMs": {
+            "writeResponse": 48.82357265624887,
+            "refreshResponse": 257.4239376562473,
+            "dialogClosed": 362.3138876562516,
+            "recordsPainted": 572.0359896562513
+          },
+          "uiReadyMs": 676.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 40304.199951171875,
+          "end": 41072.5,
+          "ms": 768.3000000119209,
+          "observedMs": 1173.800000011921,
+          "driverMs": 1222.5395219999991,
+          "stagesMs": {
+            "writeResponse": 98.36733682812337,
+            "refreshResponse": 312.3025148281231,
+            "dialogClosed": 1145.6563388281284,
+            "recordsPainted": 1162.0248978281234
+          },
+          "uiReadyMs": 768.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 40286.900146484375,
+          "end": 41024.900146484375,
+          "ms": 738,
+          "observedMs": 746.3999999761581,
+          "driverMs": 777.524427999997,
+          "stagesMs": {
+            "writeResponse": 49.0049085156279,
+            "refreshResponse": 233.87578551562183,
+            "dialogClosed": 444.731546515628,
+            "recordsPainted": 673.3813665156267
+          },
+          "uiReadyMs": 738,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 40304.699951171875,
+          "end": 40971.099853515625,
+          "ms": 666.3999999761581,
+          "observedMs": 671.5,
+          "driverMs": 720.425765,
+          "stagesMs": {
+            "writeResponse": 65.02689982812444,
+            "refreshResponse": 272.96715882812714,
+            "dialogClosed": 399.07543982812786,
+            "recordsPainted": 590.955110828123
+          },
+          "uiReadyMs": 666.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 40306.099853515625,
+          "end": 41005.199951171875,
+          "ms": 699.0999999642372,
+          "observedMs": 704.5,
+          "driverMs": 754.2724909999961,
+          "stagesMs": {
+            "writeResponse": 97.79446448437375,
+            "refreshResponse": 299.3946284843769,
+            "dialogClosed": 406.0691104843718,
+            "recordsPainted": 623.8663484843782
+          },
+          "uiReadyMs": 699.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 40306.10009765625,
+          "end": 41028.5,
+          "ms": 722.3999999761581,
+          "observedMs": 726.5999999642372,
+          "driverMs": 775.8754879999979,
+          "stagesMs": {
+            "writeResponse": 114.99800234375289,
+            "refreshResponse": 353.07595934374694,
+            "dialogClosed": 450.1761993437467,
+            "recordsPainted": 661.743606343749
+          },
+          "uiReadyMs": 722.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 40305.300048828125,
+          "end": 41072.39990234375,
+          "ms": 767.1000000238419,
+          "observedMs": 772.4000000357628,
+          "driverMs": 821.0642040000021,
+          "stagesMs": {
+            "writeResponse": 80.95689217187464,
+            "refreshResponse": 293.81665617187537,
+            "dialogClosed": 622.7036411718727,
+            "recordsPainted": 744.721287171873
+          },
+          "uiReadyMs": 767.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 40306.800048828125,
+          "end": 41073,
+          "ms": 766.1999999880791,
+          "observedMs": 1160.300000011921,
+          "driverMs": 1210.1178450000007,
+          "stagesMs": {
+            "writeResponse": 95.07860217187408,
+            "refreshResponse": 295.00899217187543,
+            "dialogClosed": 1131.1777841718722,
+            "recordsPainted": 1142.9302651718754
+          },
+          "uiReadyMs": 766.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 40304.699951171875,
+          "end": 41060.599853515625,
+          "ms": 755.8999999761581,
+          "observedMs": 764.0999999642372,
+          "driverMs": 811.8850439999951,
+          "stagesMs": {
+            "writeResponse": 67.0145018281255,
+            "refreshResponse": 319.08385482812446,
+            "dialogClosed": 645.908321828123,
+            "recordsPainted": 726.1066398281255
+          },
+          "uiReadyMs": 755.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 40305.099853515625,
+          "end": 41027.199951171875,
+          "ms": 722.0999999642372,
+          "observedMs": 731,
+          "driverMs": 778.7248099999997,
+          "stagesMs": {
+            "writeResponse": 65.91943448437814,
+            "refreshResponse": 304.75267348437774,
+            "dialogClosed": 498.8995974843783,
+            "recordsPainted": 659.8355964843722
+          },
+          "uiReadyMs": 722.0999999642372,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 42638.89990234375,
+          "end": 43395.599853515625,
+          "ms": 756.6999999880791,
+          "observedMs": 761.8000000119209,
+          "driverMs": 809.8723040000041,
+          "stagesMs": {
+            "writeResponse": 115.34601565625053,
+            "refreshResponse": 334.19321165625297,
+            "dialogClosed": 447.9356116562485,
+            "recordsPainted": 716.858098656252
+          },
+          "uiReadyMs": 756.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 42637.39990234375,
+          "end": 43442.699951171875,
+          "ms": 805.2999999523163,
+          "observedMs": 810.8999999761581,
+          "driverMs": 857.087056999997,
+          "stagesMs": {
+            "writeResponse": 115.40950565625099,
+            "refreshResponse": 369.79561865625146,
+            "dialogClosed": 570.7160406562471,
+            "recordsPainted": 738.5233536562519
+          },
+          "uiReadyMs": 805.2999999523163,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 42637.199951171875,
+          "end": 43413.099853515625,
+          "ms": 775.8999999761581,
+          "observedMs": 780.5,
+          "driverMs": 826.1689699999988,
+          "stagesMs": {
+            "writeResponse": 118.04465682812588,
+            "refreshResponse": 368.3487898281237,
+            "dialogClosed": 571.1455108281225,
+            "recordsPainted": 735.8984158281237
+          },
+          "uiReadyMs": 775.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 42637.800048828125,
+          "end": 43421.10009765625,
+          "ms": 783.3000000119209,
+          "observedMs": 792.5,
+          "driverMs": 838.3285009999963,
+          "stagesMs": {
+            "writeResponse": 117.06011817187391,
+            "refreshResponse": 318.5144311718759,
+            "dialogClosed": 559.2761161718736,
+            "recordsPainted": 749.5666441718786
+          },
+          "uiReadyMs": 783.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 42636.099853515625,
+          "end": 43423.599853515625,
+          "ms": 787.5,
+          "observedMs": 792.6999999880791,
+          "driverMs": 836.8220030000011,
+          "stagesMs": {
+            "writeResponse": 117.28522448437434,
+            "refreshResponse": 363.1189694843779,
+            "dialogClosed": 667.7650734843774,
+            "recordsPainted": 756.5298714843739
+          },
+          "uiReadyMs": 787.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 42637.2998046875,
+          "end": 43426.5,
+          "ms": 789.1999999880791,
+          "observedMs": 793.5999999642372,
+          "driverMs": 838.4916479999956,
+          "stagesMs": {
+            "writeResponse": 115.90922931249952,
+            "refreshResponse": 360.39227831250173,
+            "dialogClosed": 664.526076312497,
+            "recordsPainted": 759.6683963125033
+          },
+          "uiReadyMs": 789.1999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 42637.10009765625,
+          "end": 43419.699951171875,
+          "ms": 782.6000000238419,
+          "observedMs": 790.8000000119209,
+          "driverMs": 835.1758469999986,
+          "stagesMs": {
+            "writeResponse": 115.09533434375044,
+            "refreshResponse": 332.5569193437477,
+            "dialogClosed": 541.3897953437481,
+            "recordsPainted": 747.3568043437481
+          },
+          "uiReadyMs": 782.6000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 42638.900146484375,
+          "end": 43390.800048828125,
+          "ms": 751.8999999761581,
+          "observedMs": 753.3999999761581,
+          "driverMs": 799.9110129999972,
+          "stagesMs": {
+            "writeResponse": 115.68457751562528,
+            "refreshResponse": 338.26267351562274,
+            "dialogClosed": 436.7020405156218,
+            "recordsPainted": 698.8453165156243
+          },
+          "uiReadyMs": 751.8999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 42636.800048828125,
+          "end": 43416.599853515625,
+          "ms": 779.8000000119209,
+          "observedMs": 788.7000000476837,
+          "driverMs": 832.6277129999944,
+          "stagesMs": {
+            "writeResponse": 116.80984417187574,
+            "refreshResponse": 344.73368117187783,
+            "dialogClosed": 545.0980671718717,
+            "recordsPainted": 741.7924221718786
+          },
+          "uiReadyMs": 779.8000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 42638.60009765625,
+          "end": 43418,
+          "ms": 779.4000000357628,
+          "observedMs": 787.1000000238419,
+          "driverMs": 832.5235620000021,
+          "stagesMs": {
+            "writeResponse": 116.3912933437532,
+            "refreshResponse": 340.70873434375244,
+            "dialogClosed": 543.4732463437467,
+            "recordsPainted": 742.9182283437476
+          },
+          "uiReadyMs": 779.4000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 1,
+          "start": 44604.89990234375,
+          "end": 45282.599853515625,
+          "ms": 677.6999999880791,
+          "observedMs": 685.7999999523163,
+          "driverMs": 728.7528059999968,
+          "stagesMs": {
+            "writeResponse": 42.04588765624794,
+            "refreshResponse": 228.23121865624853,
+            "dialogClosed": 478.70677065625205,
+            "recordsPainted": 651.4232526562482
+          },
+          "uiReadyMs": 677.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 2,
+          "start": 44606.699951171875,
+          "end": 45289.60009765625,
+          "ms": 682.9000000357628,
+          "observedMs": 687.8000000119209,
+          "driverMs": 731.8444159999999,
+          "stagesMs": {
+            "writeResponse": 82.6425958281252,
+            "refreshResponse": 300.5640348281231,
+            "dialogClosed": 545.1464498281275,
+            "recordsPainted": 665.8692268281229
+          },
+          "uiReadyMs": 682.9000000357628,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 3,
+          "start": 44586.39990234375,
+          "end": 45268.5,
+          "ms": 682.1000000238419,
+          "observedMs": 683.1999999880791,
+          "driverMs": 707.4264509999994,
+          "stagesMs": {
+            "writeResponse": 56.65753665624652,
+            "refreshResponse": 262.53594765625166,
+            "dialogClosed": 364.26399465624854,
+            "recordsPainted": 616.2621426562473
+          },
+          "uiReadyMs": 682.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 4,
+          "start": 44605.39990234375,
+          "end": 45279.89990234375,
+          "ms": 674.5,
+          "observedMs": 675.5,
+          "driverMs": 718.498599999999,
+          "stagesMs": {
+            "writeResponse": 81.21966665625223,
+            "refreshResponse": 298.72527065625036,
+            "dialogClosed": 388.23605365624826,
+            "recordsPainted": 645.303188656253
+          },
+          "uiReadyMs": 674.5,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 5,
+          "start": 44605.89990234375,
+          "end": 45288.300048828125,
+          "ms": 682.3999999761581,
+          "observedMs": 687.6999999880791,
+          "driverMs": 730.9886800000022,
+          "stagesMs": {
+            "writeResponse": 79.70652865625016,
+            "refreshResponse": 298.7487766562481,
+            "dialogClosed": 502.01751265625353,
+            "recordsPainted": 659.8511976562513
+          },
+          "uiReadyMs": 682.3999999761581,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 6,
+          "start": 44587.499755859375,
+          "end": 45281.199951171875,
+          "ms": 693.6999999880791,
+          "observedMs": 701.7999999523163,
+          "driverMs": 726.7396339999977,
+          "stagesMs": {
+            "writeResponse": 69.54037414062623,
+            "refreshResponse": 276.0443301406267,
+            "dialogClosed": 406.71406214062154,
+            "recordsPainted": 665.7559821406248
+          },
+          "uiReadyMs": 693.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 7,
+          "start": 44604.599853515625,
+          "end": 45270.2998046875,
+          "ms": 665.6999999880791,
+          "observedMs": 666.6000000238419,
+          "driverMs": 708.2392880000043,
+          "stagesMs": {
+            "writeResponse": 48.43315048437216,
+            "refreshResponse": 288.7457654843747,
+            "dialogClosed": 384.5795384843732,
+            "recordsPainted": 600.9239464843777
+          },
+          "uiReadyMs": 665.6999999880791,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 8,
+          "start": 44604.2998046875,
+          "end": 45291.39990234375,
+          "ms": 687.1000000238419,
+          "observedMs": 692.4000000357628,
+          "driverMs": 733.5827539999955,
+          "stagesMs": {
+            "writeResponse": 49.30523631250253,
+            "refreshResponse": 277.1112263125033,
+            "dialogClosed": 596.9323703124974,
+            "recordsPainted": 671.6687473124985
+          },
+          "uiReadyMs": 687.1000000238419,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 9,
+          "start": 44605.89990234375,
+          "end": 45284.199951171875,
+          "ms": 678.3000000119209,
+          "observedMs": 688.6999999880791,
+          "driverMs": 731.4505979999958,
+          "stagesMs": {
+            "writeResponse": 85.83436865625117,
+            "refreshResponse": 319.10962865625334,
+            "dialogClosed": 516.7902556562476,
+            "recordsPainted": 653.6055086562483
+          },
+          "uiReadyMs": 678.3000000119209,
+          "overlappedHeavy": true
+        },
+        {
+          "user": 10,
+          "start": 44606.099853515625,
+          "end": 45285.199951171875,
+          "ms": 679.1000000238419,
+          "observedMs": 683.8000000119209,
+          "driverMs": 726.5916880000004,
+          "stagesMs": {
+            "writeResponse": 91.71339148437255,
+            "refreshResponse": 315.53012848437356,
+            "dialogClosed": 514.0909724843732,
+            "recordsPainted": 656.6588584843776
+          },
+          "uiReadyMs": 679.1000000238419,
+          "overlappedHeavy": true
+        }
+      ],
+      "rssBytes": {
+        "initial": 911446016,
+        "peak": 1054887936,
+        "final": 1021349888
+      }
+    }
+  ],
+  "errors": [],
+  "sloViolations": [],
+  "coverageErrors": [],
+  "heavy": [
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 2492.463487,
+      "end": 3146.106564,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 5040.898988,
+      "end": 5741.230719,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 7279.342116,
+      "end": 8002.245611,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 9667.895607,
+      "end": 10224.6819,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 11965.995996,
+      "end": 12592.935983,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 14725.456917,
+      "end": 15301.827115,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 17222.036226,
+      "end": 17991.570452,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 19483.841874,
+      "end": 20066.006179,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 21726.660663,
+      "end": 22268.364146,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "create",
+      "start": 24081.982284,
+      "end": 24625.531983,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 26090.884125,
+      "end": 26634.83593,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 28097.51596,
+      "end": 28695.691281,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 30058.340064,
+      "end": 30630.42907,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 32124.204543,
+      "end": 32784.167217,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 34085.435521,
+      "end": 34682.276002,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 36071.822401,
+      "end": 36632.923792,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 37970.422594,
+      "end": 38530.446843,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 40254.884731,
+      "end": 40904.327021,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 42590.899153,
+      "end": 43151.58703,
+      "bytes": 25166800
+    },
+    {
+      "kind": "zip",
+      "action": "edit",
+      "start": 44562.212119,
+      "end": 45194.275256,
+      "bytes": 25166800
+    }
+  ],
+  "rowsAtStart": 136720,
+  "chromium": "156.0.8078.4"
+}

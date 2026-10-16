@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-10-16T14:50:59.604Z",
+  "label": "d0425de",
+  "checks": [
+    {
+      "path": "/api/projects/:project/ledger?year=2026",
+      "equal": true
+    },
+    {
+      "path": "/api/projects/:project/ledger-total",
+      "equal": true
+    },
+    {
+      "path": "/api/statistics/cross-project?year=2026",
+      "equal": true
+    },
+    {
+      "path": "/api/statistics/custom?projectId=:project",
+      "equal": true,
+      "rows": 13770
+    }
+  ]
+}

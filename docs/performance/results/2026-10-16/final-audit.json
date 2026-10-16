@@ -1,0 +1,323 @@
+{
+  "capturedAt": "2026-10-16T23:47:22.961Z",
+  "label": "f06e96b",
+  "batches": [
+    {
+      "batchId": "01a1451e-1189-7078-9287-86008af4a9e5",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-8eaf-776e-a9f7-fb0fe733d0b4",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-6450-72a8-a2a7-d3158c5dc842",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-6a8a-7207-be93-ea05dadd7f60",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-70bd-71d1-9706-b1ef75d5525c",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-94ed-7064-8803-3536110197cd",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-7754-720e-af1e-932a79a4e2e5",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-7dbf-73cf-b06b-732219194f88",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-889f-76c6-8e51-e5c160642d78",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-9b77-737b-8d7a-7f586a8d0390",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-935c-729a-bee6-c9a4a06fbf39",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1451f-9c20-7620-9808-d3235cc4171f",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-8248-769c-a7d5-2e6a4296ccb8",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-a64c-72ba-b7ce-8832dac0b0fc",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-8863-771c-9e44-05f32a2dc87b",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-b0e7-7602-a250-675805af3cae",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14532-b9b4-7009-88a7-ca6ad5f80463",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14536-895e-7398-bac1-81a4c0bdf9a3",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-8667-7552-890d-24e3400c57a3",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14717-989c-71b9-af10-41a88a44d8f4",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-8e06-7749-afb0-fff03b1e3936",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-949a-71ed-a7c5-1b5478f48d26",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-9b4e-71cd-887a-a5def1ff35ab",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-a1ff-708c-b6b9-1fa0da5f01f6",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-acc0-72ff-ba20-1900459ddf86",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-b6f5-7491-9bb0-5d89211355ec",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14718-bfd7-7517-af97-2a151c2e73d0",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-7fe2-71fa-8d5e-2730b665741a",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-a185-729c-9a5a-c9ffe508fd67",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-734b-76d8-abd7-9be303676d98",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-79f5-77ba-aef3-0afda3c82cf2",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-8606-754b-9b63-586e4aee9bd3",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-aa8f-7394-8fe3-dcc5cb226ce4",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-8cd7-7558-adb5-c8fb96dd3bb4",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a14719-975f-7655-8da3-8aeedd97dbf2",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1471b-71e7-74fa-b31f-1781777f2cf4",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1471c-f053-779c-9df3-a5d2a768facf",
+      "created": 200,
+      "updated": null,
+      "audits": 200,
+      "records": 200,
+      "matched": true
+    },
+    {
+      "batchId": "01a1471c-f133-7681-b6e5-e3efd2255660",
+      "created": 1000,
+      "updated": null,
+      "audits": 1000,
+      "records": 1000,
+      "matched": true
+    },
+    {
+      "batchId": "01a1471c-f390-738b-9e4a-20883d22b270",
+      "created": 2000,
+      "updated": null,
+      "audits": 2000,
+      "records": 2000,
+      "matched": true
+    }
+  ],
+  "totalRecords": 176180,
+  "attachments": {
+    "count": 3,
+    "bytes": 25165824
+  }
+}

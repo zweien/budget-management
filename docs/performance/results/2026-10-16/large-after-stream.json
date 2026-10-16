@@ -1,0 +1,2148 @@
+{
+  "capturedAt": "2026-10-16T06:48:13.063Z",
+  "label": "efadeec-streaming",
+  "users": 10,
+  "environment": "same-host Chromium and production server; desktop 1440x1000, Asia/Shanghai; warm server, independent user sessions",
+  "projects": 10,
+  "originalRowsPerProject": 10000,
+  "phases": [
+    {
+      "phase": "mixed",
+      "groups": [
+        {
+          "name": "navigate-dashboard",
+          "ms": {
+            "n": 20,
+            "p50": 260.6422710000006,
+            "p95": 795.5289069999999,
+            "max": 968.0087189999995
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 260.6422710000006,
+            "p95": 795.5289069999999,
+            "max": 968.0087189999995
+          }
+        },
+        {
+          "name": "navigate-projects",
+          "ms": {
+            "n": 20,
+            "p50": 235.70186799999965,
+            "p95": 392.8899529999999,
+            "max": 755.3507580000005
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 235.70186799999965,
+            "p95": 392.8899529999999,
+            "max": 755.3507580000005
+          }
+        },
+        {
+          "name": "navigate-records",
+          "ms": {
+            "n": 20,
+            "p50": 453.035535,
+            "p95": 818.6474249999992,
+            "max": 1132.6714429999993
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 453.035535,
+            "p95": 818.6474249999992,
+            "max": 1132.6714429999993
+          }
+        },
+        {
+          "name": "navigate-project",
+          "ms": {
+            "n": 20,
+            "p50": 419.2458829999996,
+            "p95": 984.1720329999998,
+            "max": 1152.3125490000002
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 419.2458829999996,
+            "p95": 984.1720329999998,
+            "max": 1152.3125490000002
+          }
+        },
+        {
+          "name": "navigate-ledger",
+          "ms": {
+            "n": 20,
+            "p50": 396.44638100000066,
+            "p95": 935.2811670000001,
+            "max": 966.805813
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 396.44638100000066,
+            "p95": 935.2811670000001,
+            "max": 966.805813
+          }
+        },
+        {
+          "name": "navigate-project-records",
+          "ms": {
+            "n": 20,
+            "p50": 493.1069090000001,
+            "p95": 1034.5742220000002,
+            "max": 1048.3531920000005
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 493.1069090000001,
+            "p95": 1034.5742220000002,
+            "max": 1048.3531920000005
+          }
+        },
+        {
+          "name": "filter",
+          "ms": {
+            "n": 60,
+            "p50": 466.1061529999988,
+            "p95": 501.3214879999996,
+            "max": 549.7842009999986
+          },
+          "duringHeavy": {
+            "n": 60,
+            "p50": 466.1061529999988,
+            "p95": 501.3214879999996,
+            "max": 549.7842009999986
+          }
+        },
+        {
+          "name": "save-confirmation",
+          "ms": {
+            "n": 20,
+            "p50": 619.8054549999997,
+            "p95": 723.7355479999987,
+            "max": 726.5973940000003
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 619.8054549999997,
+            "p95": 723.7355479999987,
+            "max": 726.5973940000003
+          }
+        },
+        {
+          "name": "navigate-statistics",
+          "ms": {
+            "n": 20,
+            "p50": 280.5627860000004,
+            "p95": 449.4038579999997,
+            "max": 589.0280509999975
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 280.5627860000004,
+            "p95": 449.4038579999997,
+            "max": 589.0280509999975
+          }
+        },
+        {
+          "name": "navigate-imports",
+          "ms": {
+            "n": 20,
+            "p50": 319.5388750000002,
+            "p95": 736.4574360000006,
+            "max": 736.8821850000022
+          },
+          "duringHeavy": {
+            "n": 20,
+            "p50": 319.5388750000002,
+            "p95": 736.4574360000006,
+            "max": 736.8821850000022
+          }
+        }
+      ],
+      "actions": [
+        {
+          "name": "navigate-dashboard",
+          "user": 1,
+          "start": 2740.579424,
+          "end": 2993.06513,
+          "ms": 252.48685799999976,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 2,
+          "start": 2856.451214,
+          "end": 3076.586501,
+          "ms": 220.135847,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 3,
+          "start": 2974.533378,
+          "end": 3242.753375,
+          "ms": 268.22050899999977,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 1,
+          "start": 3173.40222,
+          "end": 3328.430817,
+          "ms": 155.02901299999985,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 4,
+          "start": 3093.160821,
+          "end": 3376.133496,
+          "ms": 282.97310700000025,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 5,
+          "start": 3215.693576,
+          "end": 3460.317697,
+          "ms": 244.6243770000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 2,
+          "start": 3326.992663,
+          "end": 3492.735682,
+          "ms": 165.74354700000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 6,
+          "start": 3336.859569,
+          "end": 3593.876201,
+          "ms": 257.0171599999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 7,
+          "start": 3459.568291,
+          "end": 3677.605732,
+          "ms": 218.03796899999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 3,
+          "start": 3562.256212,
+          "end": 3726.308486,
+          "ms": 164.05269000000044,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 4,
+          "start": 3556.235468,
+          "end": 3727.767905,
+          "ms": 171.53277300000036,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 1,
+          "start": 3508.152471,
+          "end": 3862.622948,
+          "ms": 354.47074900000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 8,
+          "start": 3579.178098,
+          "end": 3893.14051,
+          "ms": 313.9626040000003,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 5,
+          "start": 3710.102325,
+          "end": 3959.288956,
+          "ms": 249.18685500000038,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 7,
+          "start": 3857.734311,
+          "end": 4093.435971,
+          "ms": 235.70186799999965,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 9,
+          "start": 3694.719457,
+          "end": 4093.470339,
+          "ms": 398.7510739999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 2,
+          "start": 3742.105337,
+          "end": 4126.05922,
+          "ms": 383.9540589999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 6,
+          "start": 3913.07152,
+          "end": 4159.460178,
+          "ms": 246.38883399999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 10,
+          "start": 3825.251014,
+          "end": 4193.813532,
+          "ms": 368.5627900000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 4,
+          "start": 3907.243031,
+          "end": 4310.268408,
+          "ms": 403.0255530000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 1,
+          "start": 4042.303721,
+          "end": 4343.638646,
+          "ms": 301.3350849999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 8,
+          "start": 4143.225729,
+          "end": 4392.805047,
+          "ms": 249.57952600000044,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 3,
+          "start": 4046.527337,
+          "end": 4442.558789,
+          "ms": 396.031692,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 5,
+          "start": 4209.512495,
+          "end": 4628.14106,
+          "ms": 418.6288370000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 10,
+          "start": 4374.037696,
+          "end": 4642.991755,
+          "ms": 268.9542510000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 2,
+          "start": 4376.209991,
+          "end": 4676.227721,
+          "ms": 300.01790600000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 9,
+          "start": 4414.007124,
+          "end": 4692.741097,
+          "ms": 278.73416499999985,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 7,
+          "start": 4273.69311,
+          "end": 4710.12935,
+          "ms": 436.4364319999995,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 4,
+          "start": 4490.152541,
+          "end": 4826.781408,
+          "ms": 336.62913899999967,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 1,
+          "start": 4523.529307,
+          "end": 4843.119697,
+          "ms": 319.5906620000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 6,
+          "start": 4479.734453,
+          "end": 4959.974747,
+          "ms": 480.24053399999957,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 8,
+          "start": 4642.128382,
+          "end": 5095.163677,
+          "ms": 453.035535,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 3,
+          "start": 4762.595898,
+          "end": 5131.880735,
+          "ms": 369.28512500000033,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 5,
+          "start": 4878.189416,
+          "end": 5226.912269,
+          "ms": 348.7230929999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 7,
+          "start": 4890.156842,
+          "end": 5227.085965,
+          "ms": 336.9292349999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 10,
+          "start": 4822.13637,
+          "end": 5292.881533,
+          "ms": 470.74538699999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 2,
+          "start": 4926.190334,
+          "end": 5325.961004,
+          "ms": 399.7708300000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 4,
+          "start": 5006.183047,
+          "end": 5376.825271,
+          "ms": 370.64246399999956,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 1,
+          "start": 5023.193429,
+          "end": 5509.312308,
+          "ms": 486.11903900000016,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 9,
+          "start": 5012.185056,
+          "end": 5531.850637,
+          "ms": 519.6657729999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 6,
+          "start": 5279.448785,
+          "end": 6167.073322,
+          "ms": 887.6248570000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 5756.861203,
+          "end": 6245.661992,
+          "ms": 488.801109,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 3,
+          "start": 5451.167878,
+          "end": 6309.253617,
+          "ms": 858.0858989999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 8,
+          "start": 5345.240242,
+          "end": 6329.412115,
+          "ms": 984.1720329999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 7,
+          "start": 5407.263761,
+          "end": 6342.544768,
+          "ms": 935.2811670000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 9,
+          "start": 5852.082945,
+          "end": 6442.899435,
+          "ms": 590.8166339999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 5,
+          "start": 5476.109701,
+          "end": 6442.915418,
+          "ms": 966.805813,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 4,
+          "start": 5557.052539,
+          "end": 6539.888626,
+          "ms": 982.8362309999993,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 2,
+          "start": 5575.781394,
+          "end": 6610.355361,
+          "ms": 1034.5742220000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 10,
+          "start": 5473.449152,
+          "end": 6625.761509,
+          "ms": 1152.3125490000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 6,
+          "start": 6487.108383,
+          "end": 6875.882826,
+          "ms": 388.77460299999984,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 6524.205023,
+          "end": 6993.580081,
+          "ms": 469.3752179999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 8,
+          "start": 6580.037494,
+          "end": 7027.24779,
+          "ms": 447.21059999999943,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 7,
+          "start": 6522.105223,
+          "end": 7045.598535,
+          "ms": 523.4934560000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 3,
+          "start": 6629.589126,
+          "end": 7132.880612,
+          "ms": 503.2916460000006,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 9,
+          "start": 6762.761025,
+          "end": 7159.207214,
+          "ms": 396.44638100000066,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 10,
+          "start": 6805.672666,
+          "end": 7242.298955,
+          "ms": 436.62643299999945,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 5,
+          "start": 6692.868528,
+          "end": 7249.546975,
+          "ms": 556.6787029999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 6818.7338,
+          "end": 7292.610472,
+          "ms": 473.8769279999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 6931.430738,
+          "end": 7409.358979,
+          "ms": 477.9284010000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 6,
+          "start": 7195.118931,
+          "end": 7682.266752,
+          "ms": 487.1481569999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 7270.088704,
+          "end": 7743.287876,
+          "ms": 473.19936400000006,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 8,
+          "start": 7277.134228,
+          "end": 7780.521139,
+          "ms": 503.387119,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 7313.099929,
+          "end": 7792.922563,
+          "ms": 479.82290600000033,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 10,
+          "start": 7422.490704,
+          "end": 7907.654726,
+          "ms": 485.16426200000024,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 9,
+          "start": 7479.105733,
+          "end": 7986.521044,
+          "ms": 507.41550299999926,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 7555.64566,
+          "end": 8010.067817,
+          "ms": 454.42255699999987,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 7582.144933,
+          "end": 8042.815322,
+          "ms": 460.6707410000008,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 7583.51304,
+          "end": 8059.320778,
+          "ms": 475.80804200000057,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 7698.174419,
+          "end": 8198.055599,
+          "ms": 499.8813880000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 8070.451582,
+          "end": 8547.077878,
+          "ms": 476.6264719999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 8120.604284,
+          "end": 8590.128863,
+          "ms": 469.5247709999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 8121.699176,
+          "end": 8593.613409,
+          "ms": 471.9143609999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 1,
+          "start": 8118.363749,
+          "end": 8655.097091,
+          "ms": 536.7335820000008,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 8191.733864,
+          "end": 8677.677996,
+          "ms": 485.94437199999993,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 8337.427443,
+          "end": 8759.743245,
+          "ms": 422.3159459999988,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 8307.378263,
+          "end": 8759.96286,
+          "ms": 452.58486900000025,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 8351.669196,
+          "end": 8775.951614,
+          "ms": 424.2826099999984,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 8409.562875,
+          "end": 8844.6773,
+          "ms": 435.11474500000077,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 1,
+          "start": 8655.103843,
+          "end": 8909.096218,
+          "ms": 253.9925349999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 8495.307487,
+          "end": 8942.436569,
+          "ms": 447.12925800000085,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 8824.341747,
+          "end": 9284.377147,
+          "ms": 460.0355920000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 8880.782968,
+          "end": 9311.858337,
+          "ms": 431.07572100000107,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 8875.610236,
+          "end": 9347.823637,
+          "ms": 472.2135930000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 8952.977616,
+          "end": 9383.67681,
+          "ms": 430.69938600000023,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 9037.354409,
+          "end": 9492.844835,
+          "ms": 455.49060199999985,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 1,
+          "start": 9089.424879,
+          "end": 9509.319763,
+          "ms": 419.8951560000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 9051.157875,
+          "end": 9509.885377,
+          "ms": 458.72772599999917,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 9120.397319,
+          "end": 9559.359233,
+          "ms": 438.9621700000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 4,
+          "start": 9127.43958,
+          "end": 9801.627911,
+          "ms": 674.188458999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 2,
+          "start": 9341.315262,
+          "end": 9890.633342,
+          "ms": 549.3183200000003,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 1,
+          "start": 9689.385386,
+          "end": 10041.17735,
+          "ms": 351.79213999999956,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 9650.906495,
+          "end": 10101.254398,
+          "ms": 450.3480150000014,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 9630.633005,
+          "end": 10149.867713,
+          "ms": 519.235012000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 9664.203083,
+          "end": 10164.445689,
+          "ms": 500.2430540000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 4,
+          "start": 9801.634295,
+          "end": 10164.67412,
+          "ms": 363.0404010000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 9875.396825,
+          "end": 10330.95042,
+          "ms": 455.55381900000066,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 2,
+          "start": 9890.640094,
+          "end": 10340.043744,
+          "ms": 449.4038579999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 7,
+          "start": 9725.127775,
+          "end": 10378.39598,
+          "ms": 653.2683809999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 5,
+          "start": 9924.835433,
+          "end": 10544.640632,
+          "ms": 619.8054549999997,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 1,
+          "start": 10291.47262,
+          "end": 10595.460755,
+          "ms": 303.98856700000033,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 3,
+          "start": 9886.038,
+          "end": 10609.77326,
+          "ms": 723.7355479999987,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 4,
+          "start": 10344.83891,
+          "end": 10618.748873,
+          "ms": 273.91017099999954,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 7,
+          "start": 10378.401132,
+          "end": 10732.433121,
+          "ms": 354.0322129999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 2,
+          "start": 10590.096488,
+          "end": 10874.71641,
+          "ms": 284.62009800000124,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 3,
+          "start": 10609.779196,
+          "end": 10976.088097,
+          "ms": 366.30909299999985,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 5,
+          "start": 10544.645592,
+          "end": 10976.161169,
+          "ms": 431.5156729999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 4,
+          "start": 10798.129506,
+          "end": 11058.771521,
+          "ms": 260.6422710000006,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 6,
+          "start": 10582.26471,
+          "end": 11158.013872,
+          "ms": 575.7493540000014,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 1,
+          "start": 10845.157596,
+          "end": 11246.854392,
+          "ms": 401.6969560000016,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 8,
+          "start": 10629.835342,
+          "end": 11279.516458,
+          "ms": 649.6813239999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 7,
+          "start": 10912.128777,
+          "end": 11307.717261,
+          "ms": 395.5887079999993,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 10,
+          "start": 10616.428306,
+          "end": 11343.025476,
+          "ms": 726.5973940000003,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 2,
+          "start": 11124.538098,
+          "end": 11369.026015,
+          "ms": 244.48812499999985,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 9,
+          "start": 10828.6327,
+          "end": 11428.398921,
+          "ms": 599.7663969999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 6,
+          "start": 11158.02048,
+          "end": 11459.67456,
+          "ms": 301.65428800000154,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 8,
+          "start": 11279.52065,
+          "end": 11493.423966,
+          "ms": 213.90350799999942,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 4,
+          "start": 11308.446826,
+          "end": 11509.302992,
+          "ms": 200.8563580000009,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 5,
+          "start": 11226.273944,
+          "end": 11545.812579,
+          "ms": 319.5388750000002,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 10,
+          "start": 11343.031908,
+          "end": 11559.410302,
+          "ms": 216.37856999999894,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 3,
+          "start": 11296.479544,
+          "end": 11609.593532,
+          "ms": 313.11422800000037,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 9,
+          "start": 11428.405305,
+          "end": 11708.967899,
+          "ms": 280.5627860000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 1,
+          "start": 11496.478098,
+          "end": 11725.635611,
+          "ms": 229.15770499999962,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 7,
+          "start": 11487.448197,
+          "end": 11775.621497,
+          "ms": 288.173444,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 2,
+          "start": 11688.113596,
+          "end": 11859.207734,
+          "ms": 171.0943780000016,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 10,
+          "start": 11739.113943,
+          "end": 11992.524898,
+          "ms": 253.4112270000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 5,
+          "start": 11795.135086,
+          "end": 11992.666049,
+          "ms": 197.53120300000046,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 8,
+          "start": 11743.279847,
+          "end": 12063.653983,
+          "ms": 320.37434399999984,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 4,
+          "start": 11759.343144,
+          "end": 12102.968598,
+          "ms": 343.6256940000003,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 6,
+          "start": 11779.317179,
+          "end": 12125.871774,
+          "ms": 346.5548030000009,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 3,
+          "start": 11929.444342,
+          "end": 12143.37713,
+          "ms": 213.9330119999995,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 1,
+          "start": 11975.562964,
+          "end": 12208.85814,
+          "ms": 233.29531999999926,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 7,
+          "start": 12025.342291,
+          "end": 12226.874135,
+          "ms": 201.5322759999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 9,
+          "start": 12028.081064,
+          "end": 12360.871424,
+          "ms": 332.79064800000015,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 10,
+          "start": 12172.173034,
+          "end": 12394.079056,
+          "ms": 221.90645399999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 5,
+          "start": 12312.318972,
+          "end": 12475.967683,
+          "ms": 163.64893500000107,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 2,
+          "start": 12183.623134,
+          "end": 12492.746834,
+          "ms": 309.1239880000012,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 3,
+          "start": 12323.352897,
+          "end": 12527.756299,
+          "ms": 204.4036899999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 8,
+          "start": 12313.77287,
+          "end": 13109.301601,
+          "ms": 795.5289069999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 4,
+          "start": 12352.084722,
+          "end": 13150.156483,
+          "ms": 798.0719210000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 10,
+          "start": 12644.411863,
+          "end": 13399.762365,
+          "ms": 755.3507580000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 6,
+          "start": 12445.300138,
+          "end": 13413.308649,
+          "ms": 968.0087189999995,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 2,
+          "start": 12812.321278,
+          "end": 13426.323159,
+          "ms": 614.0022010000012,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-dashboard",
+          "user": 9,
+          "start": 12680.749995,
+          "end": 13475.660088,
+          "ms": 794.9103009999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 1,
+          "start": 12458.708406,
+          "end": 13507.061326,
+          "ms": 1048.3531920000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 3,
+          "start": 12707.380628,
+          "end": 13526.027701,
+          "ms": 818.6474249999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 5,
+          "start": 12795.848349,
+          "end": 13548.637406,
+          "ms": 752.7893449999992,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 7,
+          "start": 12476.082834,
+          "end": 13608.754101,
+          "ms": 1132.6714429999993,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 4,
+          "start": 13400.173884,
+          "end": 13761.988677,
+          "ms": 361.81496900000093,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 8,
+          "start": 13429.901001,
+          "end": 13762.472387,
+          "ms": 332.571625999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 6,
+          "start": 13593.62512,
+          "end": 13944.641267,
+          "ms": 351.01635499999975,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-projects",
+          "user": 9,
+          "start": 13655.67864,
+          "end": 14048.568449,
+          "ms": 392.8899529999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 3,
+          "start": 13707.119945,
+          "end": 14126.365604,
+          "ms": 419.2458829999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 2,
+          "start": 13746.916815,
+          "end": 14126.513219,
+          "ms": 379.5966279999993,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 10,
+          "start": 13649.40444,
+          "end": 14209.540658,
+          "ms": 560.1364259999991,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 7,
+          "start": 13858.82851,
+          "end": 14292.707809,
+          "ms": 433.8795710000013,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 5,
+          "start": 13873.141543,
+          "end": 14310.152686,
+          "ms": 437.0112870000012,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 13878.520642,
+          "end": 14310.168621,
+          "ms": 431.648059000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 4,
+          "start": 14011.14253,
+          "end": 14504.249279,
+          "ms": 493.1069090000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 8,
+          "start": 14082.613229,
+          "end": 14642.162283,
+          "ms": 559.5492619999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 6,
+          "start": 14124.146317,
+          "end": 14687.431148,
+          "ms": 563.2850549999985,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 3,
+          "start": 14306.41822,
+          "end": 14742.514247,
+          "ms": 436.096187000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-records",
+          "user": 9,
+          "start": 14228.671368,
+          "end": 14826.598738,
+          "ms": 597.9275140000009,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 2,
+          "start": 14446.287055,
+          "end": 14946.306691,
+          "ms": 500.01981199999864,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 10,
+          "start": 14459.833019,
+          "end": 14960.453261,
+          "ms": 500.6205460000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 7,
+          "start": 14542.972938,
+          "end": 14992.530609,
+          "ms": 449.5578949999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 5,
+          "start": 14630.30108,
+          "end": 15078.817027,
+          "ms": 448.5162670000009,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 14600.33806,
+          "end": 15093.588554,
+          "ms": 493.25066999999945,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 6,
+          "start": 14867.891234,
+          "end": 15309.180617,
+          "ms": 441.2895749999989,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 14844.914379,
+          "end": 15309.197737,
+          "ms": 464.2834380000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 8,
+          "start": 14962.118374,
+          "end": 15342.109322,
+          "ms": 379.991172,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project",
+          "user": 9,
+          "start": 15006.478731,
+          "end": 15375.458697,
+          "ms": 368.98033399999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 3,
+          "start": 14922.739054,
+          "end": 15395.588907,
+          "ms": 472.8501890000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 10,
+          "start": 15210.170008,
+          "end": 15576.493425,
+          "ms": 366.323577000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 7,
+          "start": 15242.114492,
+          "end": 15703.457078,
+          "ms": 461.342842,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 1,
+          "start": 15374.074574,
+          "end": 15826.987657,
+          "ms": 452.91333900000063,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 6,
+          "start": 15489.888767,
+          "end": 15845.473234,
+          "ms": 355.58472299999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 15379.180987,
+          "end": 15859.110765,
+          "ms": 479.92992200000117,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 5,
+          "start": 15398.225217,
+          "end": 15884.851882,
+          "ms": 486.62684100000115,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 9,
+          "start": 15555.52285,
+          "end": 15942.82657,
+          "ms": 387.30389600000126,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 15590.865881,
+          "end": 16059.965142,
+          "ms": 469.09948500000064,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-ledger",
+          "user": 8,
+          "start": 15662.967043,
+          "end": 16075.936456,
+          "ms": 412.96963700000015,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 15682.137385,
+          "end": 16183.458665,
+          "ms": 501.3214879999996,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 10,
+          "start": 15826.701786,
+          "end": 16355.4816,
+          "ms": 528.779958000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 6,
+          "start": 16025.141388,
+          "end": 16441.576356,
+          "ms": 416.435128000001,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 16019.809105,
+          "end": 16496.298513,
+          "ms": 476.4896320000007,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 9,
+          "start": 16124.264445,
+          "end": 16569.14612,
+          "ms": 444.881899,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 16171.551111,
+          "end": 16657.355107,
+          "ms": 485.8042999999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 16312.797429,
+          "end": 16778.903406,
+          "ms": 466.1061529999988,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 1,
+          "start": 16237.98647,
+          "end": 16829.476219,
+          "ms": 591.4900210000014,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-project-records",
+          "user": 8,
+          "start": 16395.197431,
+          "end": 16845.787132,
+          "ms": 450.5898610000004,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 4,
+          "start": 16361.448057,
+          "end": 16858.960089,
+          "ms": 497.5122080000019,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 16451.954732,
+          "end": 16925.654968,
+          "ms": 473.7005080000017,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 1,
+          "start": 16829.482667,
+          "end": 17109.220947,
+          "ms": 279.73848799999905,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 16686.122868,
+          "end": 17125.481796,
+          "ms": 439.35910400000284,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 16754.938634,
+          "end": 17193.024768,
+          "ms": 438.08640600000217,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 16775.342972,
+          "end": 17242.633088,
+          "ms": 467.29035600000134,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 16840.412961,
+          "end": 17285.406187,
+          "ms": 444.993434,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 2,
+          "start": 16936.47251,
+          "end": 17393.304859,
+          "ms": 456.83255700000154,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 17055.125236,
+          "end": 17526.378777,
+          "ms": 471.2537330000014,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 1,
+          "start": 17359.931899,
+          "end": 17587.098527,
+          "ms": 227.16683600000033,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 3,
+          "start": 17213.744464,
+          "end": 17668.421845,
+          "ms": 454.677588999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 17294.887446,
+          "end": 17693.458677,
+          "ms": 398.57148700000107,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 4,
+          "start": 17254.601874,
+          "end": 17757.478654,
+          "ms": 502.8769399999983,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 17405.778619,
+          "end": 17821.349239,
+          "ms": 415.57076400000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 7,
+          "start": 17519.554004,
+          "end": 17993.015857,
+          "ms": 473.46210900000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 17472.312858,
+          "end": 17993.633439,
+          "ms": 521.3208049999994,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 17576.197449,
+          "end": 18058.283509,
+          "ms": 482.08620399999927,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 4,
+          "start": 17757.484158,
+          "end": 18103.722662,
+          "ms": 346.23869600000035,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 5,
+          "start": 17804.464617,
+          "end": 18276.564747,
+          "ms": 472.10027400000035,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 17989.0988,
+          "end": 18439.509831,
+          "ms": 450.41119099999923,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 2,
+          "start": 17772.53914,
+          "end": 18473.246357,
+          "ms": 700.7074250000005,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 4,
+          "start": 18354.07808,
+          "end": 18536.434721,
+          "ms": 182.35681699999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 10,
+          "start": 18149.78618,
+          "end": 18594.80088,
+          "ms": 445.01498800000263,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 2,
+          "start": 18473.252709,
+          "end": 18660.096901,
+          "ms": 186.8444159999999,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 3,
+          "start": 18097.541934,
+          "end": 18687.174412,
+          "ms": 589.6326540000009,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 6,
+          "start": 18289.296698,
+          "end": 18740.0272,
+          "ms": 450.730646,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 9,
+          "start": 18347.646057,
+          "end": 18758.055179,
+          "ms": 410.40937799999665,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 3,
+          "start": 18687.18214,
+          "end": 18921.320645,
+          "ms": 234.13863299999866,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 7,
+          "start": 18408.151616,
+          "end": 19080.860366,
+          "ms": 672.7089579999993,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "filter",
+          "user": 8,
+          "start": 18770.12062,
+          "end": 19319.904565,
+          "ms": 549.7842009999986,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 5,
+          "start": 18713.460199,
+          "end": 19357.150069,
+          "ms": 643.6900619999979,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 2,
+          "start": 18980.102547,
+          "end": 19360.856887,
+          "ms": 380.75453200000265,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 3,
+          "start": 19102.089837,
+          "end": 19442.993658,
+          "ms": 340.90407699999923,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 7,
+          "start": 19080.866574,
+          "end": 19508.840973,
+          "ms": 427.97454300000027,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 10,
+          "start": 18983.48631,
+          "end": 19585.436502,
+          "ms": 601.9504000000015,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 6,
+          "start": 19077.456203,
+          "end": 19687.06675,
+          "ms": 609.610722999998,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 5,
+          "start": 19357.156805,
+          "end": 19718.023383,
+          "ms": 360.8668820000021,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 9,
+          "start": 19154.56941,
+          "end": 19795.280429,
+          "ms": 640.7111469999982,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 10,
+          "start": 19585.443014,
+          "end": 19802.320418,
+          "ms": 216.87759599999845,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 7,
+          "start": 19759.080904,
+          "end": 19925.22428,
+          "ms": 166.14363200000298,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 6,
+          "start": 19687.070718,
+          "end": 19958.98967,
+          "ms": 271.9191439999995,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 9,
+          "start": 19795.287165,
+          "end": 19975.385351,
+          "ms": 180.09839399999692,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 5,
+          "start": 20037.650311,
+          "end": 20206.944779,
+          "ms": 169.29462799999965,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "save-confirmation",
+          "user": 8,
+          "start": 19706.103317,
+          "end": 20353.077832,
+          "ms": 646.9747069999976,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 10,
+          "start": 20052.693309,
+          "end": 20692.6347,
+          "ms": 639.9415670000017,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 6,
+          "start": 20138.446899,
+          "end": 20875.32886,
+          "ms": 736.8821850000022,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 9,
+          "start": 20155.668432,
+          "end": 20892.12574,
+          "ms": 736.4574360000006,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-statistics",
+          "user": 8,
+          "start": 20353.083384,
+          "end": 20942.111259,
+          "ms": 589.0280509999975,
+          "overlappedHeavy": true
+        },
+        {
+          "name": "navigate-imports",
+          "user": 8,
+          "start": 21263.080471,
+          "end": 21425.184039,
+          "ms": 162.10377599999993,
+          "overlappedHeavy": true
+        }
+      ],
+      "rssBytes": {
+        "initial": 352346112,
+        "peak": 2502991872,
+        "final": 2126254080,
+        "samples": 200
+      }
+    }
+  ],
+  "heavy": [
+    {
+      "name": "parse-mixed-2000",
+      "start": 510.295596,
+      "end": 810.238683,
+      "ms": 299.94430300000005,
+      "bytes": 50
+    },
+    {
+      "name": "confirm-2000",
+      "start": 2713.668809,
+      "end": 3326.100106,
+      "ms": 612.4356970000003,
+      "bytes": 65,
+      "created": 2000
+    },
+    {
+      "name": "export-50k-class",
+      "start": 3326.176106,
+      "end": 9594.977287,
+      "ms": 6268.801420999999,
+      "bytes": 3654529
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 9594.981639,
+      "end": 10184.358651,
+      "ms": 589.3772360000003,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-50k-class",
+      "start": 10334.310903,
+      "end": 17627.458499,
+      "ms": 7293.148012,
+      "bytes": 3654531
+    },
+    {
+      "name": "zip-24MiB",
+      "start": 17627.467443,
+      "end": 18056.858411,
+      "ms": 429.39117599999736,
+      "bytes": 25166800
+    },
+    {
+      "name": "export-50k-class",
+      "start": 18206.187547,
+      "end": 22646.267884,
+      "ms": 4440.080816999998,
+      "bytes": 3654536
+    }
+  ],
+  "errors": [],
+  "rowsAtStart": 106000,
+  "chromium": "156.0.8078.4"
+}

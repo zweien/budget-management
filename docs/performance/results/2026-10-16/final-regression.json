@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-10-16T23:46:40.079Z",
+  "label": "f06e96b",
+  "cases": [
+    {
+      "name": "background-refresh",
+      "passed": true,
+      "ms": 1006.38095
+    },
+    {
+      "name": "pending-bulk",
+      "passed": true,
+      "ms": 600.3796730000001
+    },
+    {
+      "name": "late-write-page",
+      "passed": true,
+      "ms": 1178.4684790000001,
+      "refreshedPages": ["2"]
+    },
+    {
+      "name": "pagination-filter-export",
+      "passed": true,
+      "ms": 2387.6964259999995,
+      "filteredTotal": 9828,
+      "exportRows": 9828,
+      "listRequestsAfterTyping": 1
+    },
+    {
+      "name": "clear-state-includes-void",
+      "passed": true,
+      "ms": 409.1402829999997,
+      "total": 24098,
+      "voidCount": 270
+    },
+    {
+      "name": "saved-facet",
+      "passed": true,
+      "ms": 1097.6905390000002
+    }
+  ]
+}

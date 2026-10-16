@@ -1,0 +1,187 @@
+{
+  "capturedAt": "2026-10-16T14:57:15.062Z",
+  "label": "7ac7921-same-browser",
+  "node": "v24.16.0",
+  "projects": 10,
+  "rowsPerProject": 10000,
+  "api": [
+    {
+      "name": "ledger",
+      "ms": {
+        "n": 20,
+        "p50": 184.85807599999998,
+        "p95": 210.3225890000001,
+        "max": 223.45167200000014
+      },
+      "bytes": 8645,
+      "sha256": "f12f568dd4fa9569b7f53342469b0f554f7a8cc4518f5b62b8ffb0f6002cfba0"
+    },
+    {
+      "name": "ledger-total",
+      "ms": {
+        "n": 20,
+        "p50": 308.6178839999993,
+        "p95": 330.53986199999963,
+        "max": 330.57407199999943
+      },
+      "bytes": 8753,
+      "sha256": "d6cee0a6c314fd5a2165e1acff9c8dd13548c3db02e65e33f9dd57e75e6b5003"
+    },
+    {
+      "name": "cross-project",
+      "ms": {
+        "n": 20,
+        "p50": 1206.0511790000019,
+        "p95": 1244.5340639999995,
+        "max": 1262.7617050000008
+      },
+      "bytes": 2015,
+      "sha256": "8ff22f186558cb1d9f886c0cff62a4a82856b9d70f964ad3426c6478fa5ba091"
+    },
+    {
+      "name": "attachment-list",
+      "ms": {
+        "n": 20,
+        "p50": 192.80365199999505,
+        "p95": 211.0640940000012,
+        "max": 223.86990800000058
+      },
+      "bytes": 935,
+      "sha256": "dee4bcf76f8c680ba0fcde31172f88643e0a1b1546e982185911f2030266de74"
+    }
+  ],
+  "browser": [
+    {
+      "name": "ledger",
+      "navigation": "fresh-context full navigation; warm server",
+      "ms": {
+        "n": 5,
+        "p50": 339.2675039999958,
+        "p95": 502.04282400000375,
+        "max": 502.04282400000375
+      },
+      "details": [
+        {
+          "domNodes": 845,
+          "tableRows": 22,
+          "longTaskMs": 0,
+          "resourceBytes": 673325,
+          "requests": ["/api/me", "/api/me", "/api/projects/:id/ledger", "/api/projects/:id"]
+        },
+        {
+          "domNodes": 845,
+          "tableRows": 22,
+          "longTaskMs": 0,
+          "resourceBytes": 680626,
+          "requests": ["/api/me", "/api/me", "/api/projects/:id/ledger", "/api/projects/:id"]
+        },
+        {
+          "domNodes": 845,
+          "tableRows": 22,
+          "longTaskMs": 0,
+          "resourceBytes": 684563,
+          "requests": ["/api/me", "/api/me", "/api/projects/:id/ledger", "/api/projects/:id"]
+        },
+        {
+          "domNodes": 845,
+          "tableRows": 22,
+          "longTaskMs": 0,
+          "resourceBytes": 684002,
+          "requests": ["/api/me", "/api/me", "/api/projects/:id/ledger", "/api/projects/:id"]
+        },
+        {
+          "domNodes": 845,
+          "tableRows": 22,
+          "longTaskMs": 0,
+          "resourceBytes": 684568,
+          "requests": ["/api/me", "/api/me", "/api/projects/:id/ledger", "/api/projects/:id"]
+        }
+      ]
+    },
+    {
+      "name": "project-records",
+      "navigation": "fresh-context full navigation; warm server",
+      "ms": {
+        "n": 5,
+        "p50": 12506.822046000001,
+        "p95": 12592.744418000002,
+        "max": 12592.744418000002
+      },
+      "details": [
+        {
+          "domNodes": 658281,
+          "tableRows": 17781,
+          "longTaskMs": 11639,
+          "resourceBytes": 12837722,
+          "requests": [
+            "/api/me",
+            "/api/me",
+            "/api/projects/:id",
+            "/api/projects/:id",
+            "/api/projects/:id/ledger",
+            "/api/projects/:id/records"
+          ]
+        },
+        {
+          "domNodes": 658281,
+          "tableRows": 17781,
+          "longTaskMs": 11384,
+          "resourceBytes": 12837734,
+          "requests": [
+            "/api/me",
+            "/api/me",
+            "/api/projects/:id",
+            "/api/projects/:id",
+            "/api/projects/:id/ledger",
+            "/api/projects/:id/records"
+          ]
+        },
+        {
+          "domNodes": 658281,
+          "tableRows": 17781,
+          "longTaskMs": 11687,
+          "resourceBytes": 12837732,
+          "requests": [
+            "/api/me",
+            "/api/me",
+            "/api/projects/:id",
+            "/api/projects/:id",
+            "/api/projects/:id/ledger",
+            "/api/projects/:id/records"
+          ]
+        },
+        {
+          "domNodes": 658281,
+          "tableRows": 17781,
+          "longTaskMs": 11750,
+          "resourceBytes": 12837735,
+          "requests": [
+            "/api/me",
+            "/api/me",
+            "/api/projects/:id",
+            "/api/projects/:id",
+            "/api/projects/:id/ledger",
+            "/api/projects/:id/records"
+          ]
+        },
+        {
+          "domNodes": 658281,
+          "tableRows": 17781,
+          "longTaskMs": 11522,
+          "resourceBytes": 12837725,
+          "requests": [
+            "/api/me",
+            "/api/me",
+            "/api/projects/:id",
+            "/api/projects/:id",
+            "/api/projects/:id/ledger",
+            "/api/projects/:id/records"
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "rowsAtStart": 136500,
+  "chromium": "156.0.8078.4"
+}

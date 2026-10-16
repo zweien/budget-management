@@ -1,0 +1,34 @@
+{
+  "capturedAt": "2026-10-16T23:47:21.192Z",
+  "label": "f06e96b",
+  "cases": [
+    {
+      "count": 200,
+      "batchId": "01a1471c-f053-779c-9df3-a5d2a768facf",
+      "parseMs": 69.51657899999998,
+      "previewMs": 13.050869999999975,
+      "confirmMs": 72.02896800000002,
+      "created": 200,
+      "matched": true
+    },
+    {
+      "count": 1000,
+      "batchId": "01a1471c-f133-7681-b6e5-e3efd2255660",
+      "parseMs": 167.306128,
+      "previewMs": 28.02005699999995,
+      "confirmMs": 314.8508039999999,
+      "created": 1000,
+      "matched": true
+    },
+    {
+      "count": 2000,
+      "batchId": "01a1471c-f390-738b-9e4a-20883d22b270",
+      "parseMs": 246.6961369999999,
+      "previewMs": 37.41977500000007,
+      "confirmMs": 551.0490539999998,
+      "created": 2000,
+      "matched": true
+    }
+  ],
+  "rowsAtStart": 172980
+}

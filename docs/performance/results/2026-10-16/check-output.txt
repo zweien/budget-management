@@ -1,0 +1,85 @@
+Application f06e96b; checks completed 2026-10-16, production load verified 2026-10-17 Asia/Shanghai.
+
+tests
+ ✓ tests/server/foundation.smoke.test.ts  (2 tests) 65ms
+ ✓ tests/lib/auth/oidc.test.ts  (4 tests) 1ms
+ ✓ tests/lib/auth/session.test.ts  (4 tests) 7ms
+ ✓ tests/lib/table/record-query.test.ts  (2 tests)
+ ✓ tests/lib/budget/rate.test.ts  (4 tests)
+ ✓ tests/server/audit/snapshot.test.ts  (2 tests)
+
+ Test Files  48 passed (48)
+      Tests  407 passed (407)
+   Start at  23:28:46
+   Duration  24.80s (transform 688ms, setup 0ms, collect 2.00s, tests 22.46s, environment 0ms, prepare 28ms)
+
+
+types
+
+> budget-management@0.21.0 check-types
+> tsc --noEmit
+
+
+lint
+  502:17  warning  Compilation Skipped: Use of incompatible library
+
+This API returns functions which cannot be memoized without leading to stale UI. To prevent this, by default React Compiler will skip memoizing this component/hook. However, you may see issues if values from this API are passed to other components/hooks that are memoized.
+
+/home/z/codebase/budget-management/src/app/(dashboard)/projects/page.tsx:502:17
+  500 |
+  501 |   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
+> 502 |   const table = useReactTable({
+      |                 ^^^^^^^^^^^^^ TanStack Table's `useReactTable()` API returns functions that cannot be memoized safely
+  503 |     data: keywordFiltered,
+  504 |     columns,
+  505 |     state: { columnFilters, sorting, columnVisibility },  react-hooks/incompatible-library
+
+/home/z/codebase/budget-management/src/components/records/AttachmentSheet.tsx
+  81:6  warning  React Hook useEffect has a missing dependency: 'record'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/home/z/codebase/budget-management/tests/server/ledger.service.test.ts
+  480:22  warning  'root' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/z/codebase/budget-management/tests/server/settlementImportUnified.service.test.ts
+  9:3  warning  'loadSettlementWorkbookIfMatch' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 4 problems (0 errors, 4 warnings)
+
+
+production build
+├ ƒ /records/import
+├ ƒ /statistics
+└ ƒ /users
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+Delivery lint (all final scripts)
+  502:17  warning  Compilation Skipped: Use of incompatible library
+
+This API returns functions which cannot be memoized without leading to stale UI. To prevent this, by default React Compiler will skip memoizing this component/hook. However, you may see issues if values from this API are passed to other components/hooks that are memoized.
+
+/home/z/codebase/budget-management/src/app/(dashboard)/projects/page.tsx:502:17
+  500 |
+  501 |   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
+> 502 |   const table = useReactTable({
+      |                 ^^^^^^^^^^^^^ TanStack Table's `useReactTable()` API returns functions that cannot be memoized safely
+  503 |     data: keywordFiltered,
+  504 |     columns,
+  505 |     state: { columnFilters, sorting, columnVisibility },  react-hooks/incompatible-library
+
+/home/z/codebase/budget-management/src/components/records/AttachmentSheet.tsx
+  81:6  warning  React Hook useEffect has a missing dependency: 'record'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/home/z/codebase/budget-management/tests/server/ledger.service.test.ts
+  480:22  warning  'root' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/z/codebase/budget-management/tests/server/settlementImportUnified.service.test.ts
+  9:3  warning  'loadSettlementWorkbookIfMatch' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 4 problems (0 errors, 4 warnings)
+
+
+All .mjs scripts parse; document links resolve; JSON copies equal source values; application src/prisma/tests unchanged since f06e96b.

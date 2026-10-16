@@ -1,0 +1,66 @@
+{
+  "capturedAt": "2026-10-16T15:01:04.742Z",
+  "label": "d0425de",
+  "network": {
+    "latency": 80,
+    "downloadThroughput": 625000,
+    "uploadThroughput": 125000
+  },
+  "weakNetwork": [
+    {
+      "name": "project-records",
+      "ms": {
+        "n": 3,
+        "p50": 1575.500482,
+        "p95": 1634.8588929999999,
+        "max": 1634.8588929999999
+      }
+    },
+    {
+      "name": "ledger",
+      "ms": {
+        "n": 3,
+        "p50": 1038.569152,
+        "p95": 1055.4729940000007,
+        "max": 1055.4729940000007
+      }
+    },
+    {
+      "name": "filter",
+      "ms": {
+        "n": 3,
+        "p50": 586.2067939999997,
+        "p95": 635.5848709999991,
+        "max": 635.5848709999991
+      }
+    }
+  ],
+  "preview": {
+    "ms": 365.461362,
+    "domNodes": 2360,
+    "tableRows": 100,
+    "selectionAcrossPages": true
+  },
+  "errors": [],
+  "uploads": [
+    {
+      "bytes": 1048576,
+      "uploadMs": 61.88419199999953,
+      "downloadMs": 17.68971700000111,
+      "bytesEqual": true
+    },
+    {
+      "bytes": 8388608,
+      "uploadMs": 252.81436100000064,
+      "downloadMs": 84.40494500000023,
+      "bytesEqual": true
+    },
+    {
+      "bytes": 52428800,
+      "uploadMs": 1789.305972000002,
+      "downloadMs": 491.2799279999999,
+      "bytesEqual": true
+    }
+  ],
+  "chromium": "156.0.8078.4"
+}
