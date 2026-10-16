@@ -5,6 +5,7 @@ import { ZodError } from 'zod';
 import { env } from '@/lib/env';
 import { HTTPError } from '@/lib/auth/session';
 import { requestMetrics } from '@/server/observability/request-metrics';
+import { beginInteractiveRequest } from '@/server/observability/interactive-requests';
 
 /**
  * HTTP 边缘的深模块:一条接缝服务全部 API 路由。
@@ -164,6 +165,7 @@ export function withRoute<Ctx>(
       const method = req.method;
       // 兼容 NextRequest 与测试直调时的普通 Request(后者无 nextUrl)。
       const path = new URL(req.url).pathname;
+      const finishInteractive = beginInteractiveRequest(path, method);
       let res: Response;
       let failure: Pick<RequestLogInfo, 'error' | 'stack'> = {};
       try {
@@ -172,6 +174,8 @@ export function withRoute<Ctx>(
         const { status, message, stack } = classify(e);
         failure = { error: message, stack };
         res = NextResponse.json({ error: message, requestId }, { status });
+      } finally {
+        finishInteractive();
       }
       const round = (ms: number) => Math.round(ms * 10) / 10;
       const durationMs = round(performance.now() - startedAt);

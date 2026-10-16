@@ -7,6 +7,7 @@ import { uuidv7 } from '@/lib/id';
 import { recordAudit } from '@/server/audit/interceptor';
 import { validateAttachment } from '@/lib/attachments/config';
 import { env } from '@/lib/env';
+import { yieldToInteractiveRequests } from '@/server/observability/interactive-requests';
 
 /**
  * 业务记录报销凭证附件(RecordAttachment)。
@@ -330,7 +331,10 @@ export async function listForExport(
       orderBy: [{ record: { businessDate: 'asc' } }, { createdAt: 'asc' }],
     });
   const rows: Awaited<ReturnType<typeof read>> = [];
-  for (const ids of selection?.chunks ?? [undefined]) rows.push(...(await read(ids)));
+  for (const ids of selection?.chunks ?? [undefined]) {
+    if (selection && selection.totalBytes > 8 * 1024 * 1024) await yieldToInteractiveRequests();
+    rows.push(...(await read(ids)));
+  }
   if (selection && rows.length !== selection.ids.length) {
     throw new HTTPError(409, '打包期间附件或记录已变更，请重试');
   }
