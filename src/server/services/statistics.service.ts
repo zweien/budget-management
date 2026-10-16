@@ -191,10 +191,15 @@ export interface CustomStatisticsResult {
  *   (跨项目场景下取所有匹配项目的 subject_budgets 汇总。)
  * - balance / executionRate 同 ledger 口径。
  */
-export async function customStatistics(
+/** 列表与导出共用授权、筛选和稳定排序；不读取明细或计算汇总。 */
+export async function prepareRecordSelection(
   filters: CustomStatisticsFilters,
   user: Pick<User, 'id' | 'role'>,
-): Promise<CustomStatisticsResult> {
+): Promise<{
+  where: Prisma.BusinessRecordWhereInput;
+  orderBy: Prisma.BusinessRecordOrderByWithRelationInput[];
+  noMatch?: boolean;
+}> {
   // 1) 权限:v0.3.0 起普通用户全局只读,跨项目查询对所有登录用户开放;
   //    指定项目范围的凭证无 projectId 时拒绝(codex P1)。
   //    安全修复(审计 bm1-stat-custom-projectids-scope-bypass):projectId 与多值
@@ -225,19 +230,7 @@ export async function customStatistics(
     });
     subjectLeafIds = matchSubjects(allSubjects, filters.subject).leafIds;
     if (subjectLeafIds.size === 0) {
-      return {
-        summary: {
-          currentBudget: '0.00',
-          paid: '0.00',
-          payable: '0.00',
-          totalOccupied: '0.00',
-          balance: '0.00',
-          executionRate: null,
-        },
-        records: [],
-        total: 0,
-        stats: { totalCount: 0, validCount: 0, amountSum: '0.00' },
-      };
+      return { where: { id: { in: [] } }, orderBy: [{ id: 'desc' }], noMatch: true };
     }
   }
 
@@ -394,13 +387,36 @@ export async function customStatistics(
     orderBy = [{ businessDate: 'desc' }, { createdAt: 'desc' }];
   }
 
+  orderBy.push({ id: 'desc' });
+  return { where, orderBy };
+}
+
+export async function customStatistics(
+  filters: CustomStatisticsFilters,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<CustomStatisticsResult> {
+  const { where, orderBy, noMatch } = await prepareRecordSelection(filters, user);
+  if (noMatch) {
+    return {
+      summary: {
+        currentBudget: '0.00',
+        paid: '0.00',
+        payable: '0.00',
+        totalOccupied: '0.00',
+        balance: '0.00',
+        executionRate: null,
+      },
+      records: [],
+      total: 0,
+      stats: { totalCount: 0, validCount: 0, amountSum: '0.00' },
+    };
+  }
   // 分页(缺省全量,保持既有调用兼容)。
   const paginate: { skip?: number; take?: number } =
     filters.page !== undefined && filters.pageSize !== undefined && filters.pageSize > 0
       ? { skip: (Math.max(1, filters.page) - 1) * filters.pageSize, take: filters.pageSize }
       : {};
 
-  orderBy.push({ id: 'desc' });
   // 预算仍沿用现有项目/单年度口径；多值筛选的预算含义不在性能改造中更改。
   const sbWhere: Prisma.SubjectBudgetWhereInput = filters.projectId
     ? { projectId: filters.projectId }

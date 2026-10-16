@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { BusinessStatus, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
+import { env } from '@/lib/env';
 import { uuidv7 } from '@/lib/id';
 import {
   approveApplication,
@@ -302,6 +303,51 @@ describe('export.service (integration, real PG)', () => {
     expect(listSheet.getCell('A1').value).toContain(project.name);
     expect(listSheet.getCell('E3').numFmt).toBe('#,##0.00');
     expect(listSheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 2 });
+  });
+
+  it('exportStatistics: 跨批次保留筛选全集、排序与时间字段，超限不受列表分页影响', async () => {
+    const { project, leafA } = await seedApprovedProject('BATCH');
+    await prisma.businessRecord.createMany({
+      data: Array.from({ length: 501 }, (_, i) => ({
+        id: uuidv7(),
+        projectId: project.id,
+        subjectId: leafA.id,
+        budgetYear: 2026,
+        amount: String(i + 1),
+        businessDate: new Date('2026-06-20T00:00:00Z'),
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        enteredAt: new Date('2026-10-01T00:00:00Z'),
+        handler: '批量导出',
+        summary: `export-batch-${i}`,
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      })),
+    });
+    const filters = {
+      projectId: project.id,
+      page: 1,
+      pageSize: 1,
+      entryTimeField: 'enteredAt' as const,
+      sort: { field: 'amount' as const, dir: 'desc' as const },
+    };
+    const buffer = await exportStatistics(filters, adminUser(), {
+      layout: 'records',
+      enteredAtOffsetMinutes: -480,
+    });
+    const sheet = await readSheet(buffer);
+    expect(sheet.rowCount).toBe(503);
+    expect(sheet.getCell('E3').value).toBe(501);
+    expect(sheet.getCell('E503').value).toBe(1);
+    expect(sheet.getCell('L3').value).toBe('2026-10-01 08:00');
+    const limit = env.MAX_EXPORT_ROWS;
+    try {
+      env.MAX_EXPORT_ROWS = 500;
+      await expect(
+        exportStatistics(filters, adminUser(), { layout: 'records' }),
+      ).rejects.toMatchObject({ status: 413 });
+    } finally {
+      env.MAX_EXPORT_ROWS = limit;
+    }
   });
 
   it('exportStatistics: 跨项目(无 projectId)普通用户可导出(全局只读)', async () => {

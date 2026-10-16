@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { Writable } from 'node:stream';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
@@ -12,9 +12,9 @@ import { getProjectLedger, type LedgerNode } from '@/server/services/ledger.serv
 import {
   balanceStatistics,
   customStatistics,
+  prepareRecordSelection,
   type BalanceStatisticsFilters,
   type CustomStatisticsFilters,
-  type CustomStatisticsResult,
 } from '@/server/services/statistics.service';
 
 /**
@@ -51,6 +51,91 @@ function rateToPercent(rate: number | null): string {
 /** 用 level 生成树形缩进前缀(level 从 0 起)。 */
 function indent(level: number): string {
   return level > 0 ? `${'  '.repeat(level)}` : '';
+}
+
+// 导出投影不含未使用的业务字段和附件二进制；记录页不需要附件计数。
+const exportRecordSelect = {
+  id: true,
+  budgetYear: true,
+  businessDate: true,
+  completedDate: true,
+  amount: true,
+  status: true,
+  isVoid: true,
+  docNo: true,
+  handler: true,
+  summary: true,
+  remark: true,
+  enteredAt: true,
+  createdAt: true,
+  project: { select: { code: true, name: true } },
+  subject: { select: { code: true, name: true } },
+  createdBy: { select: { name: true } },
+} satisfies Prisma.BusinessRecordSelect;
+type ExportRecord = Omit<
+  Prisma.BusinessRecordGetPayload<{ select: typeof exportRecordSelect }>,
+  'createdBy'
+> & {
+  creatorName: string | null;
+  attachmentCount: number;
+};
+
+async function* readExportRecords(
+  ids: string[],
+  withCounts: boolean,
+): AsyncGenerator<ExportRecord> {
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    const chunk = ids.slice(offset, offset + 500);
+    const [rows, counts] = await Promise.all([
+      prisma.businessRecord.findMany({ where: { id: { in: chunk } }, select: exportRecordSelect }),
+      withCounts
+        ? prisma.recordAttachment.groupBy({
+            by: ['recordId'],
+            where: { recordId: { in: chunk } },
+            _count: { id: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const countById = new Map(counts.map((row) => [row.recordId, row._count.id]));
+    for (const id of chunk) {
+      const row = byId.get(id);
+      if (!row) throw new HTTPError(409, '导出期间记录已删除，请重试');
+      const { createdBy, ...record } = row;
+      yield {
+        ...record,
+        creatorName: createdBy?.name ?? null,
+        attachmentCount: countById.get(id) ?? 0,
+      };
+    }
+  }
+}
+
+/** 释放已提交的Row/Cell，仅在内存保留压缩后的文件，错误时也收尾内存归档。 */
+async function writeStreamingWorkbook(
+  write: (workbook: ExcelJS.stream.xlsx.WorkbookWriter) => Promise<void>,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  const output = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      chunks.push(chunk);
+      done();
+    },
+  });
+  const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+    stream: output,
+    useStyles: true,
+    useSharedStrings: false,
+  });
+  workbook.creator = 'budget-management';
+  try {
+    await write(workbook);
+  } catch (error) {
+    await workbook.commit().catch(() => {});
+    throw error;
+  }
+  await workbook.commit();
+  return Buffer.concat(chunks);
 }
 
 // ---------------- 台账导出 ----------------
@@ -182,27 +267,21 @@ export async function exportStatistics(
   user: ExportUser,
   tz?: { enteredAtOffsetMinutes?: number; layout?: 'records' },
 ): Promise<Buffer> {
-  // 先用单行预检取得筛选全集行数，超限时不搬运全部业务明细。
-  const preview = await customStatistics({ ...filters, page: 1, pageSize: 1 }, user);
-  if (preview.total > env.MAX_EXPORT_ROWS) {
-    throw new HTTPError(
-      413,
-      `导出行数(${preview.total})超过上限 ${env.MAX_EXPORT_ROWS},请增加筛选条件缩小范围`,
-    );
+  const selection = await prepareRecordSelection(filters, user);
+  // 固定本次筛选的成员与顺序，只取 cap+1 个ID；不因后续新增/排序变化发生漏行或重复。
+  const selected = await prisma.businessRecord.findMany({
+    where: selection.where,
+    orderBy: selection.orderBy,
+    select: { id: true },
+    take: env.MAX_EXPORT_ROWS + 1,
+  });
+  if (selected.length > env.MAX_EXPORT_ROWS) {
+    throw new HTTPError(413, `导出行数超过上限 ${env.MAX_EXPORT_ROWS},请增加筛选条件缩小范围`);
   }
-  // 再次读取也有硬上限，避免预检与读取之间的新增将内存物化放大到无界。
-  const result = await customStatistics(
-    { ...filters, page: 1, pageSize: env.MAX_EXPORT_ROWS },
-    user,
+  const records = readExportRecords(
+    selected.map((row) => row.id),
+    tz?.layout !== 'records',
   );
-
-  // 预检后发生并发新增时仍检查总数，不能静默截断筛选全集。
-  if (result.total > env.MAX_EXPORT_ROWS) {
-    throw new HTTPError(
-      413,
-      `导出行数(${result.total})超过上限 ${env.MAX_EXPORT_ROWS},请增加筛选条件缩小范围`,
-    );
-  }
 
   // 2) 元信息:操作人姓名 + 项目编号/名称(筛选描述用,避免打印 UUID)。
   const [operator, project] = await Promise.all([
@@ -219,179 +298,162 @@ export async function exportStatistics(
   ]);
 
   if (tz?.layout === 'records') {
-    return exportRecordList(
-      result.records,
-      project,
-      filters.entryTimeField,
-      tz.enteredAtOffsetMinutes,
-    );
+    return exportRecordList(records, project, filters.entryTimeField, tz.enteredAtOffsetMinutes);
   }
 
   // 3) 构造 workbook。
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'budget-management';
-  workbook.created = new Date();
-  const sheet = workbook.addWorksheet('自定义统计');
+  const result = await customStatistics({ ...filters, page: 1, pageSize: 1 }, user);
+  return writeStreamingWorkbook(async (workbook) => {
+    const sheet = workbook.addWorksheet('自定义统计');
 
-  // 元信息:筛选条件。
-  const filterDesc = describeFilters(filters, project);
-  sheet.getCell('A1').value = `筛选条件:${filterDesc}`;
-  sheet.getCell('A2').value = `导出时间:${formatNow()}`;
-  sheet.getCell('A3').value = `操作人:${operator?.name ?? user.name ?? user.id}`;
+    // 元信息:筛选条件。
+    const filterDesc = describeFilters(filters, project);
+    sheet.getCell('A1').value = `筛选条件:${filterDesc}`;
+    sheet.getCell('A2').value = `导出时间:${formatNow()}`;
+    sheet.getCell('A3').value = `操作人:${operator?.name ?? user.name ?? user.id}`;
 
-  // 汇总区(第 5 行起)。
-  const summaryStart = 5;
-  const summary = result.summary;
-  const summaryRows: [string, string][] = [
-    ['当前预算', summary.currentBudget],
-    ['已支出', summary.paid],
-    ['应付未付', summary.payable],
-    ['总占用', summary.totalOccupied],
-    ['结余', summary.balance],
-    ['执行率', rateToPercent(summary.executionRate)],
-  ];
-  summaryRows.forEach(([k, v], i) => {
-    const row = sheet.getRow(summaryStart + i);
-    row.values = [k, v];
+    // 汇总区(第 5 行起)。
+    const summaryStart = 5;
+    const summary = result.summary;
+    const summaryRows: [string, string][] = [
+      ['当前预算', summary.currentBudget],
+      ['已支出', summary.paid],
+      ['应付未付', summary.payable],
+      ['总占用', summary.totalOccupied],
+      ['结余', summary.balance],
+      ['执行率', rateToPercent(summary.executionRate)],
+    ];
+    summaryRows.forEach(([k, v], i) => {
+      const row = sheet.getRow(summaryStart + i);
+      row.values = [k, v];
+    });
+
+    // 明细表头(空一行后)。
+    const headerRowIdx = summaryStart + summaryRows.length + 1;
+    const headers = [
+      '业务日期',
+      '项目编号',
+      '项目名称',
+      '预算年度',
+      '科目编码',
+      '科目名称',
+      '金额',
+      '经办人',
+      '摘要',
+      '业务状态',
+      '是否作废',
+      '完成日期',
+      '单据编号',
+      '备注',
+      '录入时间',
+      '录入人',
+      '附件数',
+    ];
+    const headerRow = sheet.getRow(headerRowIdx);
+    headerRow.values = headers;
+    headerRow.font = { bold: true };
+    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    headerRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD9E1F2' },
+      };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' },
+      };
+    });
+
+    // 列宽。
+    sheet.getColumn(1).width = 18;
+    for (let c = 2; c <= headers.length; c++) {
+      sheet.getColumn(c).width = 16;
+    }
+
+    headerRow.commit();
+
+    // 明细数据行。
+    let r = headerRowIdx + 1;
+    for await (const rec of records) {
+      const row = sheet.getRow(r);
+      row.values = statisticsRecordRow(rec, tz);
+      row.commit();
+      if (++r % 128 === 0) await yieldToEventLoop();
+    }
   });
-
-  // 明细表头(空一行后)。
-  const headerRowIdx = summaryStart + summaryRows.length + 1;
-  const headers = [
-    '业务日期',
-    '项目编号',
-    '项目名称',
-    '预算年度',
-    '科目编码',
-    '科目名称',
-    '金额',
-    '经办人',
-    '摘要',
-    '业务状态',
-    '是否作废',
-    '完成日期',
-    '单据编号',
-    '备注',
-    '录入时间',
-    '录入人',
-    '附件数',
-  ];
-  const headerRow = sheet.getRow(headerRowIdx);
-  headerRow.values = headers;
-  headerRow.font = { bold: true };
-  headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
-  headerRow.eachCell((cell) => {
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFD9E1F2' },
-    };
-    cell.border = {
-      top: { style: 'thin' },
-      left: { style: 'thin' },
-      bottom: { style: 'thin' },
-      right: { style: 'thin' },
-    };
-  });
-
-  // 明细数据行。
-  let r = headerRowIdx + 1;
-  for (const rec of result.records) {
-    const row = sheet.getRow(r);
-    row.values = statisticsRecordRow(rec, tz);
-    r++;
-  }
-
-  // 列宽。
-  sheet.getColumn(1).width = 18;
-  for (let c = 2; c <= headers.length; c++) {
-    sheet.getColumn(c).width = 16;
-  }
-
-  return toBuffer(await workbook.xlsx.writeBuffer());
 }
 
 /** 记录页的筛选全集；沿用数值金额、中文状态、冻结表头和项目标题。 */
 async function exportRecordList(
-  records: CustomStatisticsResult['records'],
+  records: AsyncIterable<ExportRecord>,
   project: { code: string; name: string } | null,
   entryTimeField: 'enteredAt' | 'createdAt' = 'createdAt',
   offsetMinutes?: number,
 ): Promise<Buffer> {
-  // 逐行提交释放 Cell/Row 对象；只保留压缩后的文件字节，沿用现有 Buffer 返回契约。
-  const chunks: Buffer[] = [];
-  const output = new Writable({
-    write(chunk: Buffer, _encoding, done) {
-      chunks.push(chunk);
-      done();
-    },
-  });
-  const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
-    stream: output,
-    useStyles: true,
-    useSharedStrings: false,
-  });
-  const sheet = workbook.addWorksheet('业务记录', {
-    views: [{ state: 'frozen', ySplit: project ? 2 : 1 }],
-  });
-  const headers = [
-    '项目',
-    '年度',
-    '科目',
-    '申请日期',
-    '完成日期',
-    '金额',
-    '状态',
-    '单据编号',
-    '经办人',
-    '摘要',
-    '备注',
-    '录入人',
-    '录入时间',
-  ];
-  const widths = [24, 8, 22, 12, 12, 14, 10, 20, 10, 32, 28, 10, 17];
-  if (project) {
-    sheet.mergeCells(1, 1, 1, headers.length - 1);
-    sheet.getCell('A1').value = `${project.name} 业务记录(筛选结果)`;
-    sheet.getCell('A1').font = { bold: true, size: 13 };
-  }
-  (project ? widths.slice(1) : widths).forEach((width, i) => {
-    sheet.getColumn(i + 1).width = width;
-  });
-  const header = sheet.addRow(project ? headers.slice(1) : headers);
-  header.font = { bold: true };
-  header.commit();
-  let written = 0;
-  for (const rec of records) {
-    const values = [
-      `${rec.project.code} ${rec.project.name}`,
-      rec.budgetYear,
-      rec.subject.name,
-      toIsoDate(rec.businessDate),
-      rec.completedDate ? toIsoDate(rec.completedDate) : '',
-      fromStored(rec.amount).toNumber(),
-      rec.isVoid ? '已作废' : (STATUS_ENUM_TO_CN[rec.status] ?? rec.status),
-      rec.docNo ?? '',
-      rec.handler,
-      rec.summary,
-      rec.remark ?? '',
-      rec.creatorName ?? '',
-      // 两个记录页原有时间字段不同，保持各页口径。
-      toIsoDateTime(rec[entryTimeField], offsetMinutes).slice(0, 16),
+  return writeStreamingWorkbook(async (workbook) => {
+    const sheet = workbook.addWorksheet('业务记录', {
+      views: [{ state: 'frozen', ySplit: project ? 2 : 1 }],
+    });
+    const headers = [
+      '项目',
+      '年度',
+      '科目',
+      '申请日期',
+      '完成日期',
+      '金额',
+      '状态',
+      '单据编号',
+      '经办人',
+      '摘要',
+      '备注',
+      '录入人',
+      '录入时间',
     ];
-    const row = sheet.addRow(project ? values.slice(1) : values);
-    row.getCell(project ? 5 : 6).numFmt = '#,##0.00';
-    row.commit();
-    // 大导出不能长时间占用处理日常查询与保存的事件循环。
-    if (++written % 128 === 0) await yieldToEventLoop();
-  }
-  await workbook.commit();
-  return Buffer.concat(chunks);
+    const widths = [24, 8, 22, 12, 12, 14, 10, 20, 10, 32, 28, 10, 17];
+    if (project) {
+      sheet.mergeCells(1, 1, 1, headers.length - 1);
+      sheet.getCell('A1').value = `${project.name} 业务记录(筛选结果)`;
+      sheet.getCell('A1').font = { bold: true, size: 13 };
+    }
+    (project ? widths.slice(1) : widths).forEach((width, i) => {
+      sheet.getColumn(i + 1).width = width;
+    });
+    const header = sheet.addRow(project ? headers.slice(1) : headers);
+    header.font = { bold: true };
+    header.commit();
+    let written = 0;
+    for await (const rec of records) {
+      const values = [
+        `${rec.project.code} ${rec.project.name}`,
+        rec.budgetYear,
+        rec.subject.name,
+        toIsoDate(rec.businessDate),
+        rec.completedDate ? toIsoDate(rec.completedDate) : '',
+        fromStored(rec.amount).toNumber(),
+        rec.isVoid ? '已作废' : (STATUS_ENUM_TO_CN[rec.status] ?? rec.status),
+        rec.docNo ?? '',
+        rec.handler,
+        rec.summary,
+        rec.remark ?? '',
+        rec.creatorName ?? '',
+        // 两个记录页原有时间字段不同，保持各页口径。
+        toIsoDateTime(rec[entryTimeField], offsetMinutes).slice(0, 16),
+      ];
+      const row = sheet.addRow(project ? values.slice(1) : values);
+      row.getCell(project ? 5 : 6).numFmt = '#,##0.00';
+      row.commit();
+      // 大导出不能长时间占用处理日常查询与保存的事件循环。
+      if (++written % 128 === 0) await yieldToEventLoop();
+    }
+  });
 }
 
 /** 单条业务记录 → 行数组。金额字符串(2 位小数),业务/完成日期 ISO,录入时间按用户时区。 */
 function statisticsRecordRow(
-  rec: CustomStatisticsResult['records'][number],
+  rec: ExportRecord,
   tz?: { enteredAtOffsetMinutes?: number },
 ): (string | number)[] {
   return [

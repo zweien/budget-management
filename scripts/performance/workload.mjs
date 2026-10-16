@@ -33,6 +33,8 @@ const result = {
   projects: fixture.projects.length,
   originalRowsPerProject: fixture.rowsPerProject,
   phases: [],
+  sloViolations: [],
+  coverageErrors: [],
   heavy: [],
   errors: [],
 };
@@ -301,6 +303,15 @@ try {
         ),
       };
     });
+    const expectedCounts = Object.fromEntries([
+      ...scenarioPaths(fixture.projects[0]).map(([name]) => [`navigate-${name}`, 20]), ['filter', 60], ['save-confirmation', 20],
+    ]);
+    for (const [name, expected] of Object.entries(expectedCounts)) {
+      const group = groups.find((group) => group.name === name);
+      if (!group || group.ms.n !== expected) result.coverageErrors.push({ phase, name, expected, actual: group?.ms.n ?? 0 });
+      const targetMs = name.startsWith('navigate-') ? 2000 : 1000;
+      if (group?.ms.p95 > targetMs) result.sloViolations.push({ phase, name, targetMs, actualMs: group.ms.p95 });
+    }
     result.phases.push({
       phase,
       groups,
@@ -328,4 +339,5 @@ try {
   await browser.close();
   await flush();
 }
-if (result.errors.length) process.exitCode = 1;
+if (result.errors.length || result.coverageErrors.length) process.exitCode = 1;
+else if (result.sloViolations.length) process.exitCode = 2;

@@ -83,6 +83,19 @@ const routes = [
   ['balance', '/api/statistics/balance?year=2026'],
   ['attachment-list', `/api/projects/${project.id}/records/${project.recordId}/attachments`],
 ];
+const browserRoutes = [
+      ['dashboard', '/'],
+      ['projects', '/projects'],
+      ['records', '/records'],
+      ['project', `/projects/${project.id}`],
+      ['ledger', `/projects/${project.id}/ledger`],
+      ['project-records', `/projects/${project.id}/records`],
+      ['statistics', '/statistics'],
+      ['imports', `/projects/${project.id}/imports`],
+    ];
+const available = new Set([...routes, ...browserRoutes].map(([name]) => name));
+for (const name of only) if (!available.has(name)) throw new Error(`未知测量场景: ${name}`);
+if (!routes.some(([name]) => selected(name)) && !(browserSamples > 0 && browserRoutes.some(([name]) => selected(name)))) throw new Error('所选场景没有可执行样本');
 for (const [name, route] of routes.filter(([name]) => selected(name))) {
   await get(route); // 预热另计，正式样本不含模块首次加载。
   const values = [];
@@ -108,16 +121,7 @@ if (browserSamples > 0) {
   });
   result.chromium = browser.version();
   try {
-    for (const [name, path] of [
-      ['dashboard', '/'],
-      ['projects', '/projects'],
-      ['records', '/records'],
-      ['project', `/projects/${project.id}`],
-      ['ledger', `/projects/${project.id}/ledger`],
-      ['project-records', `/projects/${project.id}/records`],
-      ['statistics', '/statistics'],
-      ['imports', `/projects/${project.id}/imports`],
-    ].filter(([name]) => selected(name))) {
+    for (const [name, path] of browserRoutes.filter(([name]) => selected(name))) {
       const values = [];
       const details = [];
       for (let i = 0; i < browserSamples; i++) {
