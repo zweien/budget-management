@@ -398,6 +398,8 @@ function BusinessRecordsPageInner() {
   );
   const queryKey = buildParams(page, pageSize).toString();
   const resultsReady = !loadingRecords && loadedQueryKey === queryKey;
+  // 同一页写后刷新保留已呈现的行，避免卸载/重建全部单元格；换筛选仍等待新结果。
+  const showCurrentResults = resultsReady || (loadingRecords && loadedQueryKey === queryKey);
   const requestSeq = useRef(0);
   /** 只取当前页；合计由服务端按筛选全集计算。 */
   const loadRecords = useCallback(
@@ -854,6 +856,7 @@ function BusinessRecordsPageInner() {
                 const all = ids.length > 0 && sel === ids.length;
                 return (
                   <Checkbox
+                    disabled={!resultsReady}
                     checked={sel > 0 && !all ? 'indeterminate' : all}
                     onCheckedChange={() =>
                       setSelectedIds((prev) => {
@@ -871,7 +874,7 @@ function BusinessRecordsPageInner() {
               cell: ({ row }) => (
                 <Checkbox
                   checked={selectedIds.has(row.original.id)}
-                  disabled={row.original.isVoid}
+                  disabled={!resultsReady || row.original.isVoid}
                   onCheckedChange={() =>
                     setSelectedIds((prev) => {
                       const next = new Set(prev);
@@ -1329,7 +1332,15 @@ function BusinessRecordsPageInner() {
         </Alert>
       ) : null}
       {/* 记录表(Excel 式表头筛选) */}
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
+      <div
+        className="overflow-hidden rounded-lg border border-border bg-card shadow-l2"
+        aria-busy={!resultsReady && !recordsError}
+      >
+        {loadingRecords && showCurrentResults ? (
+          <p role="status" className="px-4 py-2 text-xs text-mute">
+            正在更新记录…
+          </p>
+        ) : null}
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
@@ -1358,7 +1369,7 @@ function BusinessRecordsPageInner() {
                 用普通 tr 渲染在首行(浏览器把 tfoot 固定在底部),列序随可见列动态对齐。
                 门槛 = 筛选模型有行即可(§codex P2):全部为作废时也渲染
                 「总计 0 笔(作废不计)/ 0.00」,恰好在对全部行排除合计的时刻。 */}
-            {resultsReady && filteredRows.length > 0 ? (
+            {showCurrentResults && filteredRows.length > 0 ? (
               <TableRow className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40">
                 {table.getVisibleLeafColumns().map((col, idx) => (
                   <TableCell key={col.id} className="py-1.5">
@@ -1373,7 +1384,7 @@ function BusinessRecordsPageInner() {
                 ))}
               </TableRow>
             ) : null}
-            {!resultsReady && !recordsError ? (
+            {!showCurrentResults && !recordsError ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="">
                   <TableCell colSpan={table.getAllLeafColumns().length}>
@@ -1381,7 +1392,7 @@ function BusinessRecordsPageInner() {
                   </TableCell>
                 </TableRow>
               ))
-            ) : !resultsReady || table.getRowModel().rows.length === 0 ? (
+            ) : !showCurrentResults || table.getRowModel().rows.length === 0 ? (
               <TableRow className="">
                 <TableCell
                   colSpan={table.getAllLeafColumns().length}

@@ -18,6 +18,7 @@ import {
   deleteAttachment,
   listForExport,
   countForExport,
+  selectForExport,
 } from '@/server/services/recordAttachment.service';
 import { MAX_ATTACHMENT_BYTES_DEFAULT } from '@/lib/attachments/config';
 
@@ -335,6 +336,29 @@ describe('recordAttachment.service (integration, real PG)', () => {
     // 与 listForExport 数量一致(同 where 口径)。
     const rows = await listForExport(project.id, { budgetYear: 2026 }, adminUser());
     expect(rows.length).toBe(cYear);
+  });
+
+  it('固定导出成员: 元数据有界，后续新增不混入，删除成员明确409', async () => {
+    const { project, record } = await seedRecord('SELECT');
+    const upload = (name: string) =>
+      createAttachment(
+        record.id,
+        { name, type: 'application/pdf', size: 3, buffer: Buffer.from('PDF') },
+        adminUser(),
+      );
+    const first = await upload('first.pdf');
+    await upload('second.pdf');
+    const sentinel = await selectForExport(project.id, {}, adminUser(), 1);
+    expect(sentinel.count).toBe(2); // 上限+1哨兵，不读后续行或二进制。
+    const selection = await selectForExport(project.id, {}, adminUser(), 500);
+    expect(selection.totalBytes).toBe(6);
+    await upload('late.pdf');
+    const exported = await listForExport(project.id, {}, adminUser(), selection.ids);
+    expect(exported.map((row) => row.attachment.fileName)).toEqual(['first.pdf', 'second.pdf']);
+    await deleteAttachment(first.id, record.id, adminUser());
+    await expect(listForExport(project.id, {}, adminUser(), selection.ids)).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it('countForExport: 非成员(全局只读 USER)走 project:view,同口径可计数', async () => {

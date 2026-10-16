@@ -12,6 +12,7 @@ const project = fixture.projects[0];
 const url = `${base.origin}/projects/${project.id}/records`;
 const only = process.env.PERF_REGRESSION_ONLY;
 const caseNames = [
+  'background-refresh',
   'pending-bulk',
   'late-write-page',
   'pagination-filter-export',
@@ -39,6 +40,48 @@ const run = async (name, test) => {
   console.log(JSON.stringify(result.cases.at(-1)));
 };
 try {
+  await run('background-refresh', async (page) => {
+    await page.evaluate(() => {
+      window.__previousRecordRow = document.querySelector('main tbody tr:nth-child(2)');
+    });
+    let release;
+    const gate = new Promise((done) => {
+      release = done;
+    });
+    let observed;
+    const intercepted = new Promise((done) => {
+      observed = done;
+    });
+    await page.route('**/records/*/status', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{"record":{}}' }),
+    );
+    await page.route('**/api/statistics/custom?**', async (route) => {
+      observed();
+      await gate;
+      await route.continue();
+    });
+    try {
+      await page
+        .locator('main tbody tr')
+        .nth(1)
+        .getByRole('button', { name: '状态', exact: true })
+        .click();
+      await page.getByRole('menuitem').first().click();
+      await intercepted;
+      await delay(100);
+      assert.equal(
+        await page.evaluate(() => window.__previousRecordRow?.isConnected),
+        true,
+        '写后刷新卸载了已有记录行',
+      );
+      assert.equal(await page.locator('main [aria-busy="true"]').count(), 1);
+      assert.ok(await page.getByRole('button', { name: '导出筛选结果', exact: true }).isDisabled());
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+    await recordsReady(page);
+  });
   await run('pending-bulk', async (page) => {
     await page.getByRole('checkbox', { name: '全选可见记录', exact: true }).check();
     assert.equal(await page.getByRole('button', { name: '批量作废', exact: true }).count(), 1);

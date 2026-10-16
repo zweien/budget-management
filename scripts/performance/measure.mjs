@@ -129,7 +129,10 @@ if (browserSamples > 0) {
       const values = [];
       const details = [];
       for (let i = 0; i < browserSamples; i++) {
-        const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+        const context = await browser.newContext({
+          viewport: { width: 1440, height: 1000 },
+          timezoneId: 'Asia/Shanghai',
+        });
         await context.addCookies([
           { name: 'bm_session', value: token, url: base.origin, httpOnly: true, sameSite: 'Lax' },
           { name: 'bm_auth_mode', value: 'sso', url: base.origin, sameSite: 'Lax' },
@@ -186,6 +189,7 @@ if (browserSamples > 0) {
               const main = document.querySelector('main');
               return (
                 main &&
+                !main.querySelector('[aria-busy="true"]') &&
                 main.textContent.trim().length > 0 &&
                 !main.querySelector('[data-slot="skeleton"]') &&
                 !main.textContent.includes('加载中') &&

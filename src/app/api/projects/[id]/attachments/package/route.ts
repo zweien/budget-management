@@ -6,7 +6,7 @@ import { env } from '@/lib/env';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
 import { withExportSlot } from '@/server/exports/concurrency';
-import { countAndBytesForExport, listForExport } from '@/server/services/recordAttachment.service';
+import { selectForExport, listForExport } from '@/server/services/recordAttachment.service';
 import {
   buildFolderPath,
   dedupeName,
@@ -33,10 +33,11 @@ export const GET = withRoute(
     const template = sp.get('template') || DEFAULT_TEMPLATE;
 
     // 堆保护:条数门 + 字节门双闸(安全审计 bm1-att-zip-export-byte-unbounded,同 export 路由)。
-    const { count, totalBytes } = await countAndBytesForExport(
+    const { ids, count, totalBytes } = await selectForExport(
       projectId,
       { budgetYear: year },
       user,
+      PACKAGE_MAX_ATTACHMENTS,
     );
     if (count > PACKAGE_MAX_ATTACHMENTS) {
       return NextResponse.json(
@@ -58,7 +59,7 @@ export const GET = withRoute(
     const large = totalBytes > 8 * 1024 * 1024;
     return withExportSlot(large, async () => {
       const exportUser = large ? await requireUser() : user;
-      const rows = await listForExport(projectId, { budgetYear: year }, exportUser);
+      const rows = await listForExport(projectId, { budgetYear: year }, exportUser, ids);
       if (rows.length === 0) {
         return NextResponse.json({ error: '无附件' }, { status: 404 });
       }

@@ -98,6 +98,7 @@ export async function recordsReady(page) {
       const main = document.querySelector('main');
       return (
         main &&
+        !main.querySelector('[aria-busy="true"]') &&
         !main.querySelector('[data-slot="skeleton"]') &&
         main.querySelectorAll('tbody tr').length > 1
       );

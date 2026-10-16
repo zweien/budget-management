@@ -27,11 +27,15 @@ assert.ok(
 );
 const exportConcurrency = Number(process.env.PERF_EXPORT_CONCURRENCY ?? 1);
 assert.ok(Number.isInteger(exportConcurrency) && exportConcurrency >= 1 && exportConcurrency <= 3);
+const rounds = Number(process.env.PERF_ROUNDS ?? 2);
+assert.ok(Number.isInteger(rounds) && rounds >= 2 && rounds <= 10);
+const expectedSamples = 10 * rounds;
 const result = {
   capturedAt: new Date().toISOString(),
   label: process.env.PERF_LABEL,
   users: 10,
   exportConcurrency,
+  rounds,
   cases: [],
   errors: [],
   sloViolations: [],
@@ -235,7 +239,7 @@ try {
         void sampleMemory();
       }, 100);
       try {
-        for (let round = 0; round < 2; round++) {
+        for (let round = 0; round < rounds; round++) {
           const importTask = ['import', 'parse'].includes(kind)
             ? await staged(kind === 'parse')
             : null;
@@ -296,8 +300,14 @@ try {
       }
       const stats = summarize(actions.map((sample) => sample.ms));
       const overlap = actions.filter((sample) => sample.overlappedHeavy).length;
-      if (stats.n !== 20 || overlap !== (kind === 'idle' ? 0 : 20))
-        result.coverageErrors.push({ kind, action, n: stats.n, overlapped: overlap, expected: 20 });
+      if (stats.n !== expectedSamples || overlap !== (kind === 'idle' ? 0 : expectedSamples))
+        result.coverageErrors.push({
+          kind,
+          action,
+          n: stats.n,
+          overlapped: overlap,
+          expected: expectedSamples,
+        });
       if (stats.p95 > 1000)
         result.sloViolations.push({ kind, action, targetMs: 1000, actualMs: stats.p95 });
       const row = {

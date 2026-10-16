@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/auth/session';
 import { withExportSlot } from '@/server/exports/concurrency';
 import { dedupeName } from '@/lib/attachments/packagePath';
-import { countAndBytesForExport, listForExport } from '@/server/services/recordAttachment.service';
+import { selectForExport, listForExport } from '@/server/services/recordAttachment.service';
 
 import { env } from '@/lib/env';
 
@@ -36,11 +36,12 @@ export const GET = withRoute(
 
     // 堆保护(前置):条数门 + 字节门双闸(安全审计 bm1-att-zip-export-byte-unbounded)。
     // 纯条数门挡不住「500 × 50MB」——zip 生成全量内存物化,峰值约 2× 附件字节总量,
-    // 字节门才是与该威胁对齐的防线。聚合查询不加载 bytea data。
-    const { count, totalBytes } = await countAndBytesForExport(
+    // 字节门才是与该威胁对齐的防线。成员预检不加载 bytea data。
+    const { ids, count, totalBytes } = await selectForExport(
       projectId,
       { budgetYear, subjectId },
       user,
+      EXPORT_MAX_ATTACHMENTS,
     );
     if (count > EXPORT_MAX_ATTACHMENTS) {
       return NextResponse.json(
@@ -59,11 +60,11 @@ export const GET = withRoute(
       );
     }
 
-    // 双门通过,加载安全;载入后复查条数(count 与 load 之间有并发上传窗口)。
+    // 双门通过后仅加载捕获成员，排队期间的新上传不进入本文件。
     const large = totalBytes > 8 * 1024 * 1024;
     return withExportSlot(large, async () => {
       const exportUser = large ? await requireUser() : user;
-      const rows = await listForExport(projectId, { budgetYear, subjectId }, exportUser);
+      const rows = await listForExport(projectId, { budgetYear, subjectId }, exportUser, ids);
       if (rows.length === 0) {
         return NextResponse.json({ error: '所选范围内无附件' }, { status: 404 });
       }

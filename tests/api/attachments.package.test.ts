@@ -13,6 +13,9 @@ import {
   type InitialBudgetPayload,
 } from '@/server/services/initialBudget.service';
 import { GET } from '@/app/api/projects/[id]/attachments/package/route';
+import { GET as exportGet } from '@/app/api/projects/[id]/attachments/export/route';
+import { withExportSlot } from '@/server/exports/concurrency';
+import { env } from '@/lib/env';
 
 // mock 鉴权:requireUser 返回 admin。
 // vi.mock 被提升到 import 之前执行,但工厂返回的 requireUser 仅在测试运行期(beforeAll 之后)
@@ -97,9 +100,24 @@ describe('attachments package route (按科目层级打包)', () => {
   let projectId: string;
   let leafSubjectId: string;
   let recordId: string;
+  let metadataRead: (() => void) | undefined;
 
   beforeAll(async () => {
     await prisma.$connect();
+    prisma.$use(async (params, next) => {
+      const result = await next(params);
+      if (
+        metadataRead &&
+        params.model === 'RecordAttachment' &&
+        (params.action === 'aggregate' ||
+          (params.action === 'findMany' && params.args.select?.sizeBytes))
+      ) {
+        const notify = metadataRead;
+        metadataRead = undefined;
+        notify();
+      }
+      return result;
+    });
     MOCK_ADMIN_ID = uuidv7();
     await prisma.user.create({
       data: { id: MOCK_ADMIN_ID, name: 'admin-pkg', role: UserRole.ADMIN },
@@ -192,5 +210,106 @@ describe('attachments package route (按科目层级打包)', () => {
     const cd = res.headers.get('Content-Disposition') ?? '';
     expect(cd).toContain('filename="attachments.zip"');
     expect(cd).toContain("filename*=UTF-8''");
+  });
+
+  it.each([
+    ['package', 'count', GET],
+    ['package', 'bytes', GET],
+    ['export', 'count', exportGet],
+    ['export', 'bytes', exportGet],
+  ] as const)('%s: %s容量门在二进制打包前拒绝超限', async (path, gate, get) => {
+    const ids = Array.from({ length: gate === 'count' ? 501 : 1 }, () => uuidv7());
+    await prisma.recordAttachment.createMany({
+      data: ids.map((id) => ({
+        id,
+        recordId,
+        fileName: `${id}.pdf`,
+        contentType: 'application/pdf',
+        sizeBytes: gate === 'bytes' ? env.MAX_EXPORT_TOTAL_BYTES + 1 : 1,
+        data: Buffer.from('x'),
+        uploadedById: MOCK_ADMIN_ID,
+      })),
+    });
+    try {
+      const res = await get(
+        new Request(`http://localhost/api/projects/${projectId}/attachments/${path}`) as never,
+        { params: Promise.resolve({ id: projectId }) } as never,
+      );
+      expect(res.status).toBe(413);
+      expect((await res.json()).error).toContain('上限');
+    } finally {
+      await prisma.recordAttachment.deleteMany({ where: { id: { in: ids } } });
+    }
+  });
+
+  it.each([
+    ['package', GET],
+    ['export', exportGet],
+  ] as const)('%s: 排队期间追加超限附件不混入已预检的文件集合', async (path, get) => {
+    const marker = uuidv7();
+    const largeId = uuidv7();
+    const lateIds = Array.from({ length: 501 }, () => uuidv7());
+    await prisma.recordAttachment.create({
+      data: {
+        id: largeId,
+        recordId,
+        fileName: `${marker}.pdf`,
+        contentType: 'application/pdf',
+        sizeBytes: 9 * 1024 * 1024,
+        data: Buffer.alloc(9 * 1024 * 1024),
+        uploadedById: MOCK_ADMIN_ID,
+      },
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredSlot = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = withExportSlot(true, async () => {
+      entered();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await enteredSlot;
+    let selected!: () => void;
+    const selectionRead = new Promise<void>((resolve) => {
+      selected = resolve;
+    });
+    metadataRead = selected;
+    let response: ReturnType<typeof get> | undefined;
+    try {
+      response = get(
+        new Request(`http://localhost/api/projects/${projectId}/attachments/${path}`) as never,
+        { params: Promise.resolve({ id: projectId }) } as never,
+      );
+      await selectionRead;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // 已进入等待队列后追加501个文件，若出队重新查询全范围就会突破原数量门。
+      await prisma.recordAttachment.createMany({
+        data: lateIds.map((id) => ({
+          id,
+          recordId,
+          fileName: `late-${id}.pdf`,
+          contentType: 'application/pdf',
+          sizeBytes: 1,
+          data: Buffer.from('x'),
+          uploadedById: MOCK_ADMIN_ID,
+        })),
+      });
+      release();
+      const res = await response;
+      expect(res.status).toBe(200);
+      const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()));
+      const files = Object.values(zip.files).filter((file) => !file.dir);
+      expect(files).toHaveLength(2);
+      expect(files.some((file) => file.name.includes('late-'))).toBe(false);
+    } finally {
+      metadataRead = undefined;
+      release();
+      await held;
+      await response;
+      await prisma.recordAttachment.deleteMany({ where: { id: { in: [largeId, ...lateIds] } } });
+    }
   });
 });

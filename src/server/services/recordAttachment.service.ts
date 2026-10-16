@@ -231,35 +231,41 @@ export async function countForExport(
 }
 
 /**
- * 计数 + 字节总量:按项目(+可选年度/科目)聚合,不加载 bytea data。
- * 权限:project:view。字节门是真正的 OOM 防线(安全审计 bm1-att-zip-export-byte-unbounded):
- * 附件单文件 50MB × 条数上限 500 = 25GB 仍能通过纯条数门,而 zip 生成是全量内存物化
- * (峰值约 2× 附件字节总量)——没有字节上限,条数上限防不住它自己注释里写的威胁。
+ * 捕获附件成员与字节总量，不加载二进制，最多读取数量上限+1条元数据。
+ * count 超过上限时只作哨兵；通过双门后必须把 ids 传给 listForExport。
+ * 附件上传后不修改内容/大小，固定成员可避免排队期间新增突破容量预检。
  */
-export async function countAndBytesForExport(
+export async function selectForExport(
   projectId: string,
   filters: { budgetYear?: number; subjectId?: string },
   user: Pick<User, 'id' | 'role'>,
-): Promise<{ count: number; totalBytes: number }> {
+  maxAttachments: number,
+): Promise<{ ids: string[]; count: number; totalBytes: number }> {
   await requirePermission(user, 'project:view', projectId);
-  const agg = await prisma.recordAttachment.aggregate({
+  const rows = await prisma.recordAttachment.findMany({
     where: buildExportWhere(projectId, filters),
-    _count: { _all: true },
-    _sum: { sizeBytes: true },
+    select: { id: true, sizeBytes: true },
+    orderBy: [{ record: { businessDate: 'asc' } }, { createdAt: 'asc' }, { id: 'asc' }],
+    take: maxAttachments + 1,
   });
-  return { count: agg._count._all, totalBytes: agg._sum.sizeBytes ?? 0 };
+  return {
+    ids: rows.map((row) => row.id),
+    count: rows.length,
+    totalBytes: rows.reduce((total, row) => total + row.sizeBytes, 0),
+  };
 }
 
 /**
  * 批量导出:按项目(+可选年度/科目)取全部附件 + 关联业务上下文。
  * 权限:project:view。
  * 用于 zip 打包(路由层)。返回每项含 data 二进制。
- * 调用方应先经 countForExport 做硬上限校验,避免本查询 materialize 过多 bytea。
+ * HTTP打包传入通过数量/字节门的固定 attachmentIds，读取时重新校验项目权限。
  */
 export async function listForExport(
   projectId: string,
   filters: { budgetYear?: number; subjectId?: string },
   user: Pick<User, 'id' | 'role'>,
+  attachmentIds?: string[],
 ): Promise<
   Array<{
     record: {
@@ -278,7 +284,10 @@ export async function listForExport(
 > {
   await requirePermission(user, 'project:view', projectId);
   const rows = await prisma.recordAttachment.findMany({
-    where: buildExportWhere(projectId, filters),
+    where: {
+      ...buildExportWhere(projectId, filters),
+      ...(attachmentIds ? { id: { in: attachmentIds } } : {}),
+    },
     include: {
       record: {
         select: {
@@ -296,6 +305,9 @@ export async function listForExport(
     },
     orderBy: [{ record: { businessDate: 'asc' } }, { createdAt: 'asc' }],
   });
+  if (attachmentIds && rows.length !== attachmentIds.length) {
+    throw new HTTPError(409, '打包期间附件或记录已变更，请重试');
+  }
   return rows.map((r) => {
     const { record, data, uploadedBy, ...meta } = r;
     void uploadedBy;
