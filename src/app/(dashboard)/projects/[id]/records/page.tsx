@@ -811,7 +811,11 @@ function BusinessRecordsPageInner() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   {BUSINESS_STATUSES.filter((s) => s !== row.status).map((s) => (
-                    <DropdownMenuItem key={s} onClick={() => void switchStatus(row, s)}>
+                    <DropdownMenuItem
+                      key={s}
+                      disabled={!resultsReady}
+                      onClick={() => void switchStatus(row, s)}
+                    >
                       切换为:{STATUS_LABEL[s]}
                     </DropdownMenuItem>
                   ))}
