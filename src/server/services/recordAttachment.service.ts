@@ -235,12 +235,19 @@ export async function countForExport(
  * count 超过上限时只作哨兵；通过双门后必须把 ids 传给 listForExport。
  * 附件上传后不修改内容/大小，固定成员可避免排队期间新增突破容量预检。
  */
+export interface AttachmentExportSelection {
+  ids: string[];
+  chunks: string[][];
+  count: number;
+  totalBytes: number;
+}
+
 export async function selectForExport(
   projectId: string,
   filters: { budgetYear?: number; subjectId?: string },
   user: Pick<User, 'id' | 'role'>,
   maxAttachments: number,
-): Promise<{ ids: string[]; count: number; totalBytes: number }> {
+): Promise<AttachmentExportSelection> {
   await requirePermission(user, 'project:view', projectId);
   const rows = await prisma.recordAttachment.findMany({
     where: buildExportWhere(projectId, filters),
@@ -248,8 +255,22 @@ export async function selectForExport(
     orderBy: [{ record: { businessDate: 'asc' } }, { createdAt: 'asc' }, { id: 'asc' }],
     take: maxAttachments + 1,
   });
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chunkBytes = 0;
+  for (const row of rows) {
+    if (chunk.length && chunkBytes + row.sizeBytes > 8 * 1024 * 1024) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+    chunk.push(row.id);
+    chunkBytes += row.sizeBytes;
+  }
+  if (chunk.length) chunks.push(chunk);
   return {
     ids: rows.map((row) => row.id),
+    chunks,
     count: rows.length,
     totalBytes: rows.reduce((total, row) => total + row.sizeBytes, 0),
   };
@@ -259,13 +280,15 @@ export async function selectForExport(
  * 批量导出:按项目(+可选年度/科目)取全部附件 + 关联业务上下文。
  * 权限:project:view。
  * 用于 zip 打包(路由层)。返回每项含 data 二进制。
- * HTTP打包传入通过数量/字节门的固定 attachmentIds，读取时重新校验项目权限。
+ * HTTP打包传入通过数量/字节门的固定成员，读取时重新校验项目权限。
+ * 多文件按8MiB分块读取，单个更大文件独立读，减少一次大JSON解码的事件循环停顿。
+ * ZIP仍保留整批二进制；这里限制单次读取，不承诺常量内存。
  */
 export async function listForExport(
   projectId: string,
   filters: { budgetYear?: number; subjectId?: string },
   user: Pick<User, 'id' | 'role'>,
-  attachmentIds?: string[],
+  selection?: AttachmentExportSelection,
 ): Promise<
   Array<{
     record: {
@@ -283,32 +306,43 @@ export async function listForExport(
   }>
 > {
   await requirePermission(user, 'project:view', projectId);
-  const rows = await prisma.recordAttachment.findMany({
-    where: {
-      ...buildExportWhere(projectId, filters),
-      ...(attachmentIds ? { id: { in: attachmentIds } } : {}),
-    },
-    include: {
-      record: {
-        select: {
-          id: true,
-          businessDate: true,
-          summary: true,
-          handler: true,
-          subjectId: true,
-          amount: true,
-          budgetYear: true,
-          status: true,
-        },
+  const read = (ids?: string[]) =>
+    prisma.recordAttachment.findMany({
+      where: {
+        ...buildExportWhere(projectId, filters),
+        ...(ids ? { id: { in: ids } } : {}),
       },
-      uploadedBy: { select: { id: true, name: true } },
-    },
-    orderBy: [{ record: { businessDate: 'asc' } }, { createdAt: 'asc' }],
-  });
-  if (attachmentIds && rows.length !== attachmentIds.length) {
+      include: {
+        record: {
+          select: {
+            id: true,
+            businessDate: true,
+            summary: true,
+            handler: true,
+            subjectId: true,
+            amount: true,
+            budgetYear: true,
+            status: true,
+          },
+        },
+        uploadedBy: { select: { id: true, name: true } },
+      },
+      orderBy: [{ record: { businessDate: 'asc' } }, { createdAt: 'asc' }],
+    });
+  const rows: Awaited<ReturnType<typeof read>> = [];
+  for (const ids of selection?.chunks ?? [undefined]) rows.push(...(await read(ids)));
+  if (selection && rows.length !== selection.ids.length) {
     throw new HTTPError(409, '打包期间附件或记录已变更，请重试');
   }
-  return rows.map((r) => {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const ordered = selection
+    ? selection.ids.map((id) => {
+        const row = byId.get(id);
+        if (!row) throw new HTTPError(409, '打包期间附件或记录已变更，请重试');
+        return row;
+      })
+    : rows;
+  return ordered.map((r) => {
     const { record, data, uploadedBy, ...meta } = r;
     void uploadedBy;
     return {

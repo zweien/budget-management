@@ -13,6 +13,9 @@ import {
   summarize,
   isRecords,
   recordsReady,
+  armRecordWrite,
+  acknowledgeRecordRefresh,
+  recordWriteTiming,
 } from './runtime.mjs';
 
 if (process.env.PERF_ALLOW_WRITES !== '1')
@@ -216,14 +219,17 @@ try {
       const project = fixture.projects[user];
       const measure = async (name, operation) => {
         const start = performance.now();
-        await operation();
+        const timing = await operation();
+        const observedEnd = performance.now();
         assert.equal(errors.length, 0, errors.join('; '));
         actions.push({
           name,
           user: user + 1,
-          start,
-          end: performance.now(),
-          ms: performance.now() - start,
+          start: timing?.start ?? start,
+          end: timing?.end ?? observedEnd,
+          ms: timing?.ms ?? observedEnd - start,
+          driverMs: observedEnd - start,
+          ...(timing ? { observedMs: timing.observedMs } : {}),
         });
       };
       try {
@@ -255,6 +261,7 @@ try {
             await page.getByRole('button', { name: '修改', exact: true }).first().click();
             const summary = `性能合成业务 保存-${runId}-${phase}-${user}-${round}`;
             await page.getByRole('dialog').getByLabel('摘要', { exact: true }).fill(summary);
+            await armRecordWrite(page, summary);
             await measure('save-confirmation', async () => {
               const updated = page.waitForResponse(isRecords);
               const saved = page.waitForResponse(
@@ -267,10 +274,11 @@ try {
                 .getByRole('button', { name: '保存', exact: true })
                 .click();
               assert.equal((await saved).status(), 200);
-              await updated;
+              await acknowledgeRecordRefresh(page, await updated);
               await page.getByRole('dialog').waitFor({ state: 'hidden' });
               await recordsReady(page);
               await page.getByText(summary, { exact: true }).first().waitFor();
+              return recordWriteTiming(page);
             });
           }
         }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { randomBytes, createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import {
   localRuntime,
@@ -22,6 +23,7 @@ const result = {
   weakNetwork: [],
   preview: null,
   errors: [],
+  uploads: [],
 };
 const browser = await chromium.launch(browserOptions());
 result.chromium = browser.version();
@@ -110,6 +112,35 @@ try {
     result.preview.selectionAcrossPages = true;
   } finally {
     await context.close();
+  }
+  if (process.env.PERF_UPLOADS === '1') {
+    assert.equal(process.env.PERF_ALLOW_WRITES, '1', '上传探索需要显式允许写合成库');
+    const project = fixture.projects[0];
+    const path = `/api/projects/${project.id}/records/${project.recordId}/attachments`;
+    for (const mib of [1, 8, 50]) {
+      const bytes = randomBytes(mib * 1024 * 1024);
+      const form = new FormData();
+      form.set(
+        'file',
+        new File([bytes], `performance-upload-${mib}.pdf`, { type: 'application/pdf' }),
+      );
+      const uploaded = await api(path, { method: 'POST', body: form });
+      const id = uploaded.json.id;
+      assert.equal(typeof id, 'string');
+      try {
+        const downloaded = await api(`${path}/${id}`);
+        const hash = (buffer) => createHash('sha256').update(buffer).digest('hex');
+        assert.equal(hash(downloaded.buffer), hash(bytes));
+        result.uploads.push({
+          bytes: bytes.length,
+          uploadMs: uploaded.ms,
+          downloadMs: downloaded.ms,
+          bytesEqual: true,
+        });
+      } finally {
+        await api(`${path}/${id}`, { method: 'DELETE' });
+      }
+    }
   }
 } catch (error) {
   result.errors.push(error.message);

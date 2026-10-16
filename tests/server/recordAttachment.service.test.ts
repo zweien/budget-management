@@ -74,11 +74,25 @@ describe('recordAttachment.service (integration, real PG)', () => {
   const createdUserIds: string[] = [];
   let adminId: string;
   let outsiderId: string;
+  let exportReadSizes: number[] | undefined;
   const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
   const outsiderUser = () => ({ id: outsiderId, role: UserRole.USER });
 
   beforeAll(async () => {
     await prisma.$connect();
+    prisma.$use(async (params, next) => {
+      const result = await next(params);
+      if (
+        exportReadSizes &&
+        params.model === 'RecordAttachment' &&
+        params.action === 'findMany' &&
+        params.args.include?.record
+      )
+        exportReadSizes.push(
+          result.reduce((total: number, row: { data: Buffer }) => total + row.data.length, 0),
+        );
+      return result;
+    });
     adminId = uuidv7();
     outsiderId = uuidv7();
     await prisma.user.createMany({
@@ -338,6 +352,28 @@ describe('recordAttachment.service (integration, real PG)', () => {
     expect(rows.length).toBe(cYear);
   });
 
+  it('打包二进制读取让出普通请求: 多附件每次读取最多8MiB（单个大文件除外）', async () => {
+    const { project, record } = await seedRecord('CHUNKS');
+    const buffer = samplePdf(5 * 1024 * 1024);
+    for (let i = 0; i < 3; i++)
+      await createAttachment(
+        record.id,
+        { name: `chunk-${i}.pdf`, type: 'application/pdf', size: buffer.length, buffer },
+        adminUser(),
+      );
+    const selection = await selectForExport(project.id, {}, adminUser(), 500);
+    exportReadSizes = [];
+    try {
+      const rows = await listForExport(project.id, {}, adminUser(), selection);
+      expect(rows).toHaveLength(3);
+      expect(rows.every((row) => row.data.equals(buffer))).toBe(true);
+      expect(exportReadSizes.length).toBeGreaterThan(1);
+      expect(Math.max(...exportReadSizes)).toBeLessThanOrEqual(8 * 1024 * 1024);
+    } finally {
+      exportReadSizes = undefined;
+    }
+  });
+
   it('固定导出成员: 元数据有界，后续新增不混入，删除成员明确409', async () => {
     const { project, record } = await seedRecord('SELECT');
     const upload = (name: string) =>
@@ -353,10 +389,10 @@ describe('recordAttachment.service (integration, real PG)', () => {
     const selection = await selectForExport(project.id, {}, adminUser(), 500);
     expect(selection.totalBytes).toBe(6);
     await upload('late.pdf');
-    const exported = await listForExport(project.id, {}, adminUser(), selection.ids);
+    const exported = await listForExport(project.id, {}, adminUser(), selection);
     expect(exported.map((row) => row.attachment.fileName)).toEqual(['first.pdf', 'second.pdf']);
     await deleteAttachment(first.id, record.id, adminUser());
-    await expect(listForExport(project.id, {}, adminUser(), selection.ids)).rejects.toMatchObject({
+    await expect(listForExport(project.id, {}, adminUser(), selection)).rejects.toMatchObject({
       status: 409,
     });
   });

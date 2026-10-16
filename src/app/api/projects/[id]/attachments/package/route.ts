@@ -33,12 +33,13 @@ export const GET = withRoute(
     const template = sp.get('template') || DEFAULT_TEMPLATE;
 
     // 堆保护:条数门 + 字节门双闸(安全审计 bm1-att-zip-export-byte-unbounded,同 export 路由)。
-    const { ids, count, totalBytes } = await selectForExport(
+    const selection = await selectForExport(
       projectId,
       { budgetYear: year },
       user,
       PACKAGE_MAX_ATTACHMENTS,
     );
+    const { count, totalBytes } = selection;
     if (count > PACKAGE_MAX_ATTACHMENTS) {
       return NextResponse.json(
         { error: `打包附件过多(上限 ${PACKAGE_MAX_ATTACHMENTS} 个),请按年度缩小范围` },
@@ -59,7 +60,7 @@ export const GET = withRoute(
     const large = totalBytes > 8 * 1024 * 1024;
     return withExportSlot(large, async () => {
       const exportUser = large ? await requireUser() : user;
-      const rows = await listForExport(projectId, { budgetYear: year }, exportUser, ids);
+      const rows = await listForExport(projectId, { budgetYear: year }, exportUser, selection);
       if (rows.length === 0) {
         return NextResponse.json({ error: '无附件' }, { status: 404 });
       }

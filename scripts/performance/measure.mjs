@@ -69,6 +69,9 @@ const preflight = JSON.parse((await get('/api/projects')).body);
 if (preflight.length !== fixture.projects.length || !preflight.some((p) => p.id === project.id)) {
   throw new Error('应用数据与专用性能夹具不一致，拒绝测量');
 }
+result.rowsAtStart = JSON.parse(
+  (await get('/api/statistics/custom?includeVoid=1&page=1&pageSize=1')).body,
+).total;
 
 const routes = [
   ['projects', '/api/projects'],

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import { SignJWT } from 'jose';
+import assert from 'node:assert/strict';
 
 export const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 export const paint = (page) =>
@@ -107,4 +108,75 @@ export async function recordsReady(page) {
     { timeout: 15_000 },
   );
   await paint(page);
+}
+
+/** 保存计时在浏览器内结束，排除驱动轮询延迟；必须先确认本次刷新响应。 */
+export async function armRecordWrite(page, summary = null) {
+  await page.evaluate((summary) => {
+    window.__interactionStart = null;
+    window.__interactionReady = null;
+    window.__interactionRefreshComplete = false;
+    window.__expectedRecordTotal = null;
+    const begin = (event) => {
+      if (event.target.closest('button')?.textContent.trim() !== '保存') return;
+      document.removeEventListener('click', begin, true);
+      window.__interactionStart = performance.now();
+      const ready = () => {
+        const main = document.querySelector('main');
+        return (
+          window.__interactionRefreshComplete &&
+          main &&
+          main.textContent.includes(`共 ${window.__expectedRecordTotal} 条`) &&
+          !document.querySelector('[data-slot="dialog-content"]') &&
+          !main.querySelector('[aria-busy="true"], [data-slot="skeleton"]') &&
+          main.querySelectorAll('tbody tr').length > 1 &&
+          (summary === null || main.textContent.includes(summary))
+        );
+      };
+      const observe = () => {
+        if (ready())
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              if (ready()) window.__interactionReady = performance.now();
+              else observe();
+            }),
+          );
+        else requestAnimationFrame(observe);
+      };
+      requestAnimationFrame(observe);
+    };
+    document.addEventListener('click', begin, true);
+  }, summary);
+}
+
+export async function acknowledgeRecordRefresh(page, response) {
+  assert.ok(response.ok());
+  const data = await response.json();
+  assert.ok(Array.isArray(data.records) && data.records.length > 1);
+  assert.equal(typeof data.total, 'number');
+  await page.evaluate((total) => {
+    window.__expectedRecordTotal = total;
+    window.__interactionRefreshComplete = true;
+  }, data.total);
+}
+
+export async function recordWriteTiming(page) {
+  await page.waitForFunction(() => window.__interactionReady !== null, undefined, {
+    timeout: 15_000,
+  });
+  const timing = await page.evaluate(() => ({
+    start: window.__interactionStart,
+    end: window.__interactionReady,
+    observed: performance.now(),
+    origin: performance.timeOrigin,
+  }));
+  assert.ok(
+    typeof timing.start === 'number' && typeof timing.end === 'number' && timing.end > timing.start,
+  );
+  return {
+    start: timing.origin + timing.start - performance.timeOrigin,
+    end: timing.origin + timing.end - performance.timeOrigin,
+    ms: timing.end - timing.start,
+    observedMs: timing.observed - timing.start,
+  };
 }

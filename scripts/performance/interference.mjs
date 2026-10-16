@@ -13,6 +13,8 @@ import {
   paint,
   delay,
   summarize,
+  armRecordWrite,
+  acknowledgeRecordRefresh,
 } from './runtime.mjs';
 
 if (process.env.PERF_ALLOW_WRITES !== '1') throw new Error('需要 PERF_ALLOW_WRITES=1，仅写合成库');
@@ -30,12 +32,21 @@ assert.ok(Number.isInteger(exportConcurrency) && exportConcurrency >= 1 && expor
 const rounds = Number(process.env.PERF_ROUNDS ?? 2);
 assert.ok(Number.isInteger(rounds) && rounds >= 2 && rounds <= 10);
 const expectedSamples = 10 * rounds;
+const actionsToRun = (process.env.PERF_ACTIONS ?? 'switch,filter,create,edit').split(',');
+assert.ok(
+  actionsToRun.length &&
+    new Set(actionsToRun).size === actionsToRun.length &&
+    actionsToRun.every((action) => ['switch', 'filter', 'create', 'edit'].includes(action)),
+);
+const pageSize = process.env.PERF_PAGE_SIZE ? Number(process.env.PERF_PAGE_SIZE) : null;
+assert.ok(pageSize === null || [50, 100, 200].includes(pageSize));
 const result = {
   capturedAt: new Date().toISOString(),
   label: process.env.PERF_LABEL,
   users: 10,
   exportConcurrency,
   rounds,
+  pageSize,
   cases: [],
   errors: [],
   sloViolations: [],
@@ -126,6 +137,15 @@ const prepare = async (session, action, round) => {
   const { page, project, user } = session;
   await page.goto(`${base.origin}/projects/${project.id}/records`);
   await recordsReady(page);
+  if (pageSize && Number(await page.getByLabel('每页条数').inputValue()) !== pageSize) {
+    const resized = page.waitForResponse(
+      (res) =>
+        isRecords(res) && new URL(res.url()).searchParams.get('pageSize') === String(pageSize),
+    );
+    await page.getByLabel('每页条数').selectOption(String(pageSize));
+    await resized;
+    await recordsReady(page);
+  }
   const summary = `性能合成业务 干扰-${runId}-${action}-${user}-${round}`;
   if (action === 'filter')
     await page.getByRole('button', { name: '筛选摘要', exact: true }).click();
@@ -149,29 +169,32 @@ const prepare = async (session, action, round) => {
       .click({ trial: true });
   if (action === 'switch')
     await page.getByRole('link', { name: '执行台账', exact: true }).click({ trial: true });
-  await page.evaluate((action) => {
-    window.__interactionStart = null;
-    document.addEventListener(
-      action === 'filter' ? 'input' : 'click',
-      (event) => {
-        const element = event.target;
-        const matches =
-          action === 'filter'
-            ? element instanceof HTMLInputElement && element.placeholder === '包含…'
-            : action === 'switch'
-              ? element.closest('a')?.getAttribute('href')?.endsWith('/ledger')
-              : element.closest('button')?.textContent.trim() === '保存';
-        if (matches) window.__interactionStart = performance.now();
-      },
-      { capture: true },
-    );
-  }, action);
+  if (action === 'create' || action === 'edit')
+    await armRecordWrite(page, action === 'edit' ? summary : null);
+  else
+    await page.evaluate((action) => {
+      window.__interactionStart = null;
+      window.__interactionReady = null;
+      document.addEventListener(
+        action === 'filter' ? 'input' : 'click',
+        (event) => {
+          const element = event.target;
+          const matches =
+            action === 'filter'
+              ? element instanceof HTMLInputElement && element.placeholder === '包含…'
+              : element.closest('a')?.getAttribute('href')?.endsWith('/ledger');
+          if (matches) window.__interactionStart = performance.now();
+        },
+        { capture: true },
+      );
+    }, action);
   assert.equal(session.errors.length, 0, session.errors.join('; '));
   return summary;
 };
 const operate = async (session, action, summary) => {
   const { page } = session;
   const start = performance.now();
+  const stages = {};
   if (action === 'switch') {
     await page.getByRole('link', { name: '执行台账', exact: true }).click();
     await page.waitForURL(/\/ledger$/);
@@ -198,31 +221,53 @@ const operate = async (session, action, summary) => {
     const refreshed = page.waitForResponse(isRecords);
     await page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }).click();
     const response = await saved;
+    stages.writeResponse = performance.now();
     assert.ok(response.ok());
     assert.equal((await response.json()).record.summary, summary);
-    await refreshed;
+    await acknowledgeRecordRefresh(page, await refreshed);
+    stages.refreshResponse = performance.now();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    stages.dialogClosed = performance.now();
     await recordsReady(page);
+    stages.recordsPainted = performance.now();
     if (action === 'edit') await page.getByText(summary, { exact: true }).first().waitFor();
   }
   assert.equal(session.errors.length, 0, session.errors.join('; '));
+  if (action === 'create' || action === 'edit')
+    await page.waitForFunction(() => window.__interactionReady !== null, undefined, {
+      timeout: 15_000,
+    });
   const timing = await page.evaluate(() => ({
     start: window.__interactionStart,
     end: performance.now(),
     origin: performance.timeOrigin,
+    ready: window.__interactionReady,
   }));
   assert.equal(typeof timing.start, 'number', '没有实际输入事件的证据');
+  const write = action === 'create' || action === 'edit';
+  if (write)
+    assert.ok(
+      typeof timing.ready === 'number' && timing.ready > timing.start,
+      '没有本次刷新成功及界面绘制完成的证据',
+    );
+  const completed = write ? timing.ready : timing.end;
+  const actualStart = timing.origin + timing.start - performance.timeOrigin;
   return {
     user: session.user + 1,
-    start: timing.origin + timing.start - performance.timeOrigin,
-    end: timing.origin + timing.end - performance.timeOrigin,
-    ms: timing.end - timing.start,
+    start: actualStart,
+    end: timing.origin + completed - performance.timeOrigin,
+    ms: completed - timing.start,
+    observedMs: timing.end - timing.start,
     driverMs: performance.now() - start,
+    stagesMs: Object.fromEntries(
+      Object.entries(stages).map(([name, end]) => [name, end - actualStart]),
+    ),
+    uiReadyMs: typeof timing.ready === 'number' ? timing.ready - timing.start : null,
   };
 };
 try {
   for (const kind of kinds)
-    for (const action of ['switch', 'filter', 'create', 'edit']) {
+    for (const action of actionsToRun) {
       const actions = [];
       const memory = [];
       let timer;
@@ -329,8 +374,11 @@ try {
 } finally {
   await browser.close();
 }
-if (result.cases.length !== kinds.length * 4)
-  result.coverageErrors.push({ expectedCases: kinds.length * 4, actual: result.cases.length });
+if (result.cases.length !== kinds.length * actionsToRun.length)
+  result.coverageErrors.push({
+    expectedCases: kinds.length * actionsToRun.length,
+    actual: result.cases.length,
+  });
 await flush();
 if (result.errors.length || result.coverageErrors.length) process.exitCode = 1;
 else if (result.sloViolations.length) process.exitCode = 2;

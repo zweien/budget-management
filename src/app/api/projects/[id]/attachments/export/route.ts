@@ -37,12 +37,13 @@ export const GET = withRoute(
     // 堆保护(前置):条数门 + 字节门双闸(安全审计 bm1-att-zip-export-byte-unbounded)。
     // 纯条数门挡不住「500 × 50MB」——zip 生成全量内存物化,峰值约 2× 附件字节总量,
     // 字节门才是与该威胁对齐的防线。成员预检不加载 bytea data。
-    const { ids, count, totalBytes } = await selectForExport(
+    const selection = await selectForExport(
       projectId,
       { budgetYear, subjectId },
       user,
       EXPORT_MAX_ATTACHMENTS,
     );
+    const { count, totalBytes } = selection;
     if (count > EXPORT_MAX_ATTACHMENTS) {
       return NextResponse.json(
         { error: `导出附件过多(上限 ${EXPORT_MAX_ATTACHMENTS} 个),请缩小筛选范围` },
@@ -64,7 +65,7 @@ export const GET = withRoute(
     const large = totalBytes > 8 * 1024 * 1024;
     return withExportSlot(large, async () => {
       const exportUser = large ? await requireUser() : user;
-      const rows = await listForExport(projectId, { budgetYear, subjectId }, exportUser, ids);
+      const rows = await listForExport(projectId, { budgetYear, subjectId }, exportUser, selection);
       if (rows.length === 0) {
         return NextResponse.json({ error: '所选范围内无附件' }, { status: 404 });
       }
