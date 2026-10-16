@@ -7,8 +7,12 @@ import {
   yieldToInteractiveRequests,
 } from '@/server/observability/interactive-requests';
 
-beforeAll(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] }));
-afterAll(() => vi.useRealTimers());
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 describe('日常请求优先', () => {
   it('日常请求完成并经过安静窗口后，大文件才继续读取；重复释放不减多次', async () => {
