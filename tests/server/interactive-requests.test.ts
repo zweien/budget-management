@@ -40,12 +40,27 @@ describe('日常请求优先', () => {
     }
   });
 
-  it('重任务不等待自身，短安静窗口后继续', async () => {
-    const finish = beginInteractiveRequest('/api/projects/p/attachments/export', 'GET');
+  it.each([
+    ['/api/projects/p/attachments/export', 'GET'],
+    ['/api/projects/p/attachments/package', 'GET'],
+    ['/api/statistics/export', 'POST'],
+    ['/api/projects/p/imports', 'POST'],
+    ['/api/projects/p/imports/b/confirm', 'POST'],
+    ['/api/imports/settlement', 'POST'],
+  ])('重任务 %s 不等待自身，短安静窗口后继续', async (path, method) => {
+    const finish = beginInteractiveRequest(path, method);
     const waiting = yieldToInteractiveRequests();
-    await vi.advanceTimersByTimeAsync(40);
-    await waiting;
-    finish();
+    let resumed = false;
+    void waiting.then(() => {
+      resumed = true;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(40);
+      expect(resumed).toBe(true);
+      await waiting;
+    } finally {
+      finish();
+    }
   });
 
   it('持续交互最多让行1秒，防止打包长期饿死', async () => {

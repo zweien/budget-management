@@ -10,7 +10,8 @@ export function beginInteractiveRequest(path: string, method: string): () => voi
   const heavy =
     path === '/api/statistics/export' ||
     /\/attachments\/(export|package)$/.test(path) ||
-    (method === 'POST' && /\/imports(?:\/[^/]+\/confirm)?$/.test(path));
+    (method === 'POST' &&
+      (path === '/api/imports/settlement' || /\/imports(?:\/[^/]+\/confirm)?$/.test(path)));
   if (heavy) return () => {};
   activity.active++;
   let finished = false;
