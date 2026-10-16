@@ -84,6 +84,13 @@ export function parseRecordFilters(sp: URLSearchParams): CustomStatisticsFilters
   if (docNo) filters.docNo = docNo;
 
   const enteredAtFrom = sp.get('enteredAtFrom');
+  const entryTimeField = sp.get('entryTimeField');
+  if (entryTimeField !== null) {
+    if (entryTimeField !== 'enteredAt' && entryTimeField !== 'createdAt') {
+      throw new HTTPError(400, '录入时间字段无效');
+    }
+    filters.entryTimeField = entryTimeField;
+  }
   if (enteredAtFrom) filters.enteredAtFrom = enteredAtFrom;
   const enteredAtTo = sp.get('enteredAtTo');
   if (enteredAtTo) filters.enteredAtTo = enteredAtTo;

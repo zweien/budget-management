@@ -29,6 +29,7 @@ import {
 import { apiFetch, downloadFile } from '@/lib/api/client';
 import { exportAttachmentsZip, uploadAttachment } from '@/lib/api/attachments';
 import { buildRecordQuery } from '@/lib/table/record-query';
+import { useLatestCallback } from '@/lib/hooks/use-latest-callback';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
@@ -248,6 +249,8 @@ function BusinessRecordsPageInner() {
   const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
   // 业务记录列表。
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
+  const [loadedQueryKey, setLoadedQueryKey] = useState('');
+  const [recordsError, setRecordsError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
   const [total, setTotal] = useState(0);
@@ -393,53 +396,68 @@ function BusinessRecordsPageInner() {
       }),
     [columnFilters, sorting, projectId],
   );
+  const queryKey = buildParams(page, pageSize).toString();
+  const resultsReady = !loadingRecords && loadedQueryKey === queryKey;
   const requestSeq = useRef(0);
   /** 只取当前页；合计由服务端按筛选全集计算。 */
-  const reloadRecords = useCallback(
+  const loadRecords = useCallback(
     async (signal?: AbortSignal) => {
       const seq = ++requestSeq.current;
       setLoadingRecords(true);
+      setRecordsError(null);
       try {
         const data = await apiFetch<{
           records: BusinessRecordRow[];
           total: number;
           stats: { totalCount: number; validCount: number; amountSum: string };
-        }>(`/api/statistics/custom?${buildParams(page, pageSize)}`, { signal });
+        }>(`/api/statistics/custom?${queryKey}`, { signal });
         if (seq !== requestSeq.current || signal?.aborted) return;
         setRecords(data.records);
+        setLoadedQueryKey(queryKey);
         setTotal(data.total);
         setStats(data.stats);
         const lastPage = Math.max(1, Math.ceil(data.total / pageSize));
         if (page > lastPage) setPage(lastPage);
       } catch (e) {
-        if (!signal?.aborted && seq === requestSeq.current && e instanceof Error)
+        if (!signal?.aborted && seq === requestSeq.current && e instanceof Error) {
+          setRecordsError(e.message);
           toast.error(e.message);
+        }
       } finally {
         if (!signal?.aborted && seq === requestSeq.current) setLoadingRecords(false);
       }
     },
-    [buildParams, page, pageSize],
+    [queryKey, page, pageSize],
   );
   useEffect(() => {
     const controller = new AbortController();
-    void reloadRecords(controller.signal);
+    void loadRecords(controller.signal);
     return () => controller.abort();
-  }, [reloadRecords]);
+  }, [loadRecords]);
+  const loadFacets = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const data = await apiFetch<{
+          years: number[];
+          creatorNames: string[];
+          handlerNames: string[];
+        }>(`/api/statistics/custom-facets?projectIds=${encodeURIComponent(projectId)}`, { signal });
+        if (!signal?.aborted) setFacets(data);
+      } catch (error) {
+        if (!signal?.aborted && error instanceof Error) toast.error(error.message);
+      }
+    },
+    [projectId],
+  );
   useEffect(() => {
-    let cancelled = false;
-    apiFetch<{ years: number[]; creatorNames: string[]; handlerNames: string[] }>(
-      `/api/statistics/custom-facets?projectIds=${encodeURIComponent(projectId)}`,
-    )
-      .then((data) => {
-        if (!cancelled) setFacets(data);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled && error instanceof Error) toast.error(error.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
+    const controller = new AbortController();
+    void loadFacets(controller.signal);
+    return () => controller.abort();
+  }, [loadFacets]);
+  // 写入期间可能已经翻页或更改筛选，完成后使用最新闭包，并更新新增值的候选。
+  const reloadRecords = useLatestCallback(async () => {
+    await Promise.all([loadRecords(), loadFacets()]);
+  });
 
   /** 打开"新增"Dialog。 */
   const openCreate = () => {
@@ -827,7 +845,7 @@ function BusinessRecordsPageInner() {
               header: ({ table: tbl }) => {
                 const ids = tbl
                   .getFilteredRowModel()
-                  .rows.filter((r) => !r.original.isVoid)
+                  .rows.filter((r) => resultsReady && !r.original.isVoid)
                   .map((r) => r.original.id);
                 const sel = ids.filter((id) => selectedIds.has(id)).length;
                 const all = ids.length > 0 && sel === ids.length;
@@ -1098,6 +1116,7 @@ function BusinessRecordsPageInner() {
     ],
     [
       renderRowActions,
+      resultsReady,
       subjectLabels,
       subjectOptions,
       subjectMap,
@@ -1127,7 +1146,7 @@ function BusinessRecordsPageInner() {
   // 批量作废目标 = 当前筛选可见且勾选的未作废行(所见即所废,避免误伤被筛选隐藏的行)。
   const visibleVoidableIds = table
     .getRowModel()
-    .rows.filter((r) => !r.original.isVoid)
+    .rows.filter((r) => resultsReady && !r.original.isVoid)
     .map((r) => r.original.id);
   const selectedVisibleCount = visibleVoidableIds.filter((id) => selectedIds.has(id)).length;
 
@@ -1188,7 +1207,7 @@ function BusinessRecordsPageInner() {
             variant="outline"
             size="sm"
             onClick={() => void handleExportXlsx()}
-            disabled={exportingXlsx || filteredRows.length === 0}
+            disabled={exportingXlsx || !resultsReady || filteredRows.length === 0}
           >
             <Download />
             {exportingXlsx ? '导出中…' : '导出筛选结果'}
@@ -1296,6 +1315,16 @@ function BusinessRecordsPageInner() {
         </div>
       ) : null}
 
+      {recordsError ? (
+        <Alert variant="error">
+          <AlertDescription className="flex items-center justify-between gap-2">
+            {recordsError}
+            <Button variant="outline" size="sm" onClick={() => void reloadRecords()}>
+              重试
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {/* 记录表(Excel 式表头筛选) */}
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
         <Table>
@@ -1326,7 +1355,7 @@ function BusinessRecordsPageInner() {
                 用普通 tr 渲染在首行(浏览器把 tfoot 固定在底部),列序随可见列动态对齐。
                 门槛 = 筛选模型有行即可(§codex P2):全部为作废时也渲染
                 「总计 0 笔(作废不计)/ 0.00」,恰好在对全部行排除合计的时刻。 */}
-            {!loadingRecords && filteredRows.length > 0 ? (
+            {resultsReady && filteredRows.length > 0 ? (
               <TableRow className="border-b border-border bg-muted/40 font-medium hover:bg-muted/40">
                 {table.getVisibleLeafColumns().map((col, idx) => (
                   <TableCell key={col.id} className="py-1.5">
@@ -1341,7 +1370,7 @@ function BusinessRecordsPageInner() {
                 ))}
               </TableRow>
             ) : null}
-            {loadingRecords ? (
+            {!resultsReady && !recordsError ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="">
                   <TableCell colSpan={table.getAllLeafColumns().length}>
@@ -1349,13 +1378,13 @@ function BusinessRecordsPageInner() {
                   </TableCell>
                 </TableRow>
               ))
-            ) : table.getRowModel().rows.length === 0 ? (
+            ) : !resultsReady || table.getRowModel().rows.length === 0 ? (
               <TableRow className="">
                 <TableCell
                   colSpan={table.getAllLeafColumns().length}
                   className="h-32 text-center text-muted-foreground"
                 >
-                  暂无业务记录
+                  {recordsError ? '加载失败，请重试' : '暂无业务记录'}
                 </TableCell>
               </TableRow>
             ) : (
@@ -1375,7 +1404,7 @@ function BusinessRecordsPageInner() {
           page={page}
           pageSize={pageSize}
           total={total}
-          loading={loadingRecords}
+          loading={!resultsReady}
           onPageChange={setPage}
           onPageSizeChange={(size) => {
             setPageSize(size);

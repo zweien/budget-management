@@ -65,7 +65,12 @@ export function buildRecordQuery(
       if (range.to) params.set(`${id}To`, boundary(new Date(range.to), true));
     }
   }
-  if (options.projectId) params.set('projectId', options.projectId);
+  if (options.projectId) {
+    params.set('projectId', options.projectId);
+    params.set('entryTimeField', 'enteredAt');
+    // 项目页清除/全选状态筛选时原本包含作废，显式状态集合则保持其选择。
+    if (!params.has('statuses')) params.set('includeVoid', '1');
+  }
   let allowed = projectIds;
   if (options.writableProjectIds && !projectIds.includes(VALUES_FILTER_NONE)) {
     allowed = projectIds.length

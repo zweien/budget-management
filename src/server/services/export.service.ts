@@ -217,7 +217,12 @@ export async function exportStatistics(
   ]);
 
   if (tz?.layout === 'records') {
-    return exportRecordList(result.records, project, tz.enteredAtOffsetMinutes);
+    return exportRecordList(
+      result.records,
+      project,
+      filters.entryTimeField,
+      tz.enteredAtOffsetMinutes,
+    );
   }
 
   // 3) 构造 workbook。
@@ -308,6 +313,7 @@ export async function exportStatistics(
 async function exportRecordList(
   records: CustomStatisticsResult['records'],
   project: { code: string; name: string } | null,
+  entryTimeField: 'enteredAt' | 'createdAt' = 'createdAt',
   offsetMinutes?: number,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
@@ -354,7 +360,7 @@ async function exportRecordList(
       rec.remark ?? '',
       rec.creatorName ?? '',
       // 两个记录页原有时间字段不同，保持各页口径。
-      toIsoDateTime(project ? rec.enteredAt : rec.createdAt, offsetMinutes).slice(0, 16),
+      toIsoDateTime(rec[entryTimeField], offsetMinutes).slice(0, 16),
     ];
     const row = sheet.addRow(project ? values.slice(1) : values);
     row.getCell(project ? 5 : 6).numFmt = '#,##0.00';

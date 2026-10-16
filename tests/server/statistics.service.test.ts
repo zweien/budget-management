@@ -829,8 +829,8 @@ describe('statistics.service (integration, real PG)', () => {
         } as never,
         adminUser(),
       );
-    await mk({});
-    await mk({
+    const r1 = await mk({});
+    const r2 = await mk({
       subjectId: leafB.id,
       amount: '200.00',
       businessDate: '2026-05-02',
@@ -949,6 +949,27 @@ describe('statistics.service (integration, real PG)', () => {
       adminUser(),
     );
     expect(noSubject.total).toBe(0);
+
+    // 项目页显示 enteredAt，不能用同时存在的 createdAt 替代其筛选/排序。
+    await prisma.businessRecord.update({
+      where: { id: r1.record.id },
+      data: { enteredAt: new Date('2020-01-01T00:00:00Z') },
+    });
+    await prisma.businessRecord.update({
+      where: { id: r2.record.id },
+      data: { enteredAt: new Date('2030-01-01T00:00:00Z') },
+    });
+    const byActualEntry = await customStatistics(
+      {
+        projectId: project.id,
+        entryTimeField: 'enteredAt',
+        enteredAtFrom: '2029-01-01T00:00:00Z',
+        enteredAtTo: '2031-01-01T00:00:00Z',
+        sort: { field: 'enteredAt', dir: 'asc' },
+      },
+      adminUser(),
+    );
+    expect(byActualEntry.records.map((r) => r.id)).toEqual([r2.record.id]);
   });
 
   it('customStatistics: 无完成日期 / 金额区间筛选', async () => {

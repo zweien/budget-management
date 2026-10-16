@@ -22,6 +22,7 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tan
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
 import { buildRecordQuery } from '@/lib/table/record-query';
+import { useLatestCallback } from '@/lib/hooks/use-latest-callback';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
@@ -347,7 +348,7 @@ function UnifiedRecordsPageInner() {
   // 请求序号:仅最新请求可落结果(与统计页同款守卫,防翻页/筛选连点时慢旧响应覆盖新结果)。
   const reqSeqRef = useRef(0);
   /** 列表重拉:服务端筛选/排序/分页,一次一页。 */
-  const reloadRecords = useCallback(
+  const loadRecords = useCallback(
     async (signal?: AbortSignal) => {
       const seq = ++reqSeqRef.current;
       if (scope === 'writable' && writableIds.size === 0) {
@@ -381,33 +382,37 @@ function UnifiedRecordsPageInner() {
   useEffect(() => {
     // 数据拉取是 effect 的合法用途;setState 均在 Promise 回调中(异步)。
     const controller = new AbortController();
-    void reloadRecords(controller.signal);
+    void loadRecords(controller.signal);
     return () => controller.abort();
-  }, [reloadRecords]);
+  }, [loadRecords]);
 
-  // 值列候选:项目集合或权限范围变化时拉一次(跨项目接口,全局只读)。
-  useEffect(() => {
-    if (projects === null || (scope === 'writable' && writableIds.size === 0)) return;
-    let cancelled = false;
-    const qs = new URLSearchParams();
-    const ids = scope === 'writable' ? Array.from(writableIds) : Array.from(projectName.keys());
-    for (const id of ids) qs.append('projectIds', id);
-    apiFetch<{
-      years: number[];
-      handlerNames: string[];
-      creatorNames: string[];
-      subjectNames: string[];
-    }>(`/api/statistics/custom-facets?${qs.toString()}`)
-      .then((f) => {
-        if (!cancelled) setFacets(f);
-      })
-      .catch(() => {
+  // 值列候选按范围加载；写入成功后也更新新年度、经办人与录入人。
+  const loadFacets = useCallback(
+    async (signal?: AbortSignal) => {
+      if (projects === null || (scope === 'writable' && writableIds.size === 0)) return;
+      const qs = new URLSearchParams();
+      const ids = scope === 'writable' ? Array.from(writableIds) : Array.from(projectName.keys());
+      for (const id of ids) qs.append('projectIds', id);
+      try {
+        const f = await apiFetch<NonNullable<typeof facets>>(
+          `/api/statistics/custom-facets?${qs}`,
+          { signal },
+        );
+        if (!signal?.aborted) setFacets(f);
+      } catch {
         /* 候选拉取失败不阻断列表 */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectName, projects, scope, writableIds]);
+      }
+    },
+    [projectName, projects, scope, writableIds],
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadFacets(controller.signal);
+    return () => controller.abort();
+  }, [loadFacets]);
+  const reloadRecords = useLatestCallback(async () => {
+    await Promise.all([loadRecords(), loadFacets()]);
+  });
 
   /** 可作废项目集(record:void 需 OWNER/ADMIN → canEdit;录入人员 HANDLER 不可批量作废,codex P1)。 */
   const voidableIds = useMemo(

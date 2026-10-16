@@ -74,9 +74,11 @@ export interface CustomStatisticsFilters {
   docNo?: string;
   /** 仅看无完成日期。 */
   completedDateEmpty?: boolean;
-  /** 录入时间范围起(yyyy-mm-dd,含;createdAt 按日过滤)。 */
+  /** 页面展示的录入时间字段；缺省保留全局页的 createdAt 口径。 */
+  entryTimeField?: 'enteredAt' | 'createdAt';
+  /** 录入时间范围起(ISO 瞬间，含)。 */
   enteredAtFrom?: string;
-  /** 录入时间范围止(yyyy-mm-dd,含当日)。 */
+  /** 录入时间范围止(ISO 瞬间，独占)。 */
   enteredAtTo?: string;
   /** 完成日期范围起(ISO yyyy-mm-dd,含)。 */
   completedDateFrom?: string;
@@ -320,21 +322,22 @@ export async function customStatistics(
   }
   if (filters.enteredAtFrom || filters.enteredAtTo) {
     // 前端传本地时刻的 ISO 瞬间(起=当日 0 点,止=次日 0 点独占,时区感知,codex P2)。
-    where.createdAt = {};
+    const entryRange: Prisma.DateTimeFilter = {};
     if (filters.enteredAtFrom) {
       const from = new Date(filters.enteredAtFrom);
       if (Number.isNaN(from.getTime())) {
         throw new HTTPError(400, '录入时间范围起无效');
       }
-      where.createdAt.gte = from;
+      entryRange.gte = from;
     }
     if (filters.enteredAtTo) {
       const to = new Date(filters.enteredAtTo);
       if (Number.isNaN(to.getTime())) {
         throw new HTTPError(400, '录入时间范围止无效');
       }
-      where.createdAt.lt = to;
+      entryRange.lt = to;
     }
+    where[filters.entryTimeField ?? 'createdAt'] = entryRange;
   }
   if (filters.completedDateEmpty) {
     where.completedDate = {
@@ -375,7 +378,7 @@ export async function customStatistics(
         : sort.field === 'creatorName'
           ? { createdBy: { name: sort.dir } }
           : sort.field === 'enteredAt'
-            ? { createdAt: sort.dir }
+            ? { [filters.entryTimeField ?? 'createdAt']: sort.dir }
             : { [sort.field]: sort.dir };
     orderBy = [
       ...(['remark', 'docNo', 'completedDate'].includes(sort.field)
