@@ -299,6 +299,9 @@ describe('export.service (integration, real PG)', () => {
     expect(listSheet.getRow(2).values).toContain('年度');
     expect(listSheet.getRow(2).values).toContain('单据编号');
     expect(listSheet.getRow(3).values).toContain(200);
+    expect(listSheet.getCell('A1').value).toContain(project.name);
+    expect(listSheet.getCell('E3').numFmt).toBe('#,##0.00');
+    expect(listSheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 2 });
   });
 
   it('exportStatistics: 跨项目(无 projectId)普通用户可导出(全局只读)', async () => {

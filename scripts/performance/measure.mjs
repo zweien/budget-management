@@ -17,6 +17,8 @@ const fixture = JSON.parse(
 const samples = Number(process.env.PERF_SAMPLES ?? 20);
 const browserSamples = Number(process.env.PERF_BROWSER_SAMPLES ?? 5);
 const output = resolve(process.env.PERF_OUTPUT ?? '.scratch/performance/baseline.json');
+const only = new Set((process.env.PERF_ONLY ?? '').split(',').filter(Boolean));
+const selected = (name) => only.size === 0 || only.has(name);
 if (
   !Number.isInteger(samples) ||
   samples < 1 ||
@@ -81,7 +83,7 @@ const routes = [
   ['balance', '/api/statistics/balance?year=2026'],
   ['attachment-list', `/api/projects/${project.id}/records/${project.recordId}/attachments`],
 ];
-for (const [name, route] of routes) {
+for (const [name, route] of routes.filter(([name]) => selected(name))) {
   await get(route); // 预热另计，正式样本不含模块首次加载。
   const values = [];
   let response;
@@ -115,7 +117,7 @@ if (browserSamples > 0) {
       ['project-records', `/projects/${project.id}/records`],
       ['statistics', '/statistics'],
       ['imports', `/projects/${project.id}/imports`],
-    ]) {
+    ].filter(([name]) => selected(name))) {
       const values = [];
       const details = [];
       for (let i = 0; i < browserSamples; i++) {
@@ -131,6 +133,22 @@ if (browserSamples > 0) {
           }).observe({ type: 'longtask', buffered: true });
         });
         const page = await context.newPage();
+        if (process.env.PERF_FAULT_PATH) {
+          await page.route(`**${process.env.PERF_FAULT_PATH}*`, (route) =>
+            route.fulfill({
+              status: 503,
+              contentType: 'application/json',
+              body: '{"error":"performance fault injection"}',
+            }),
+          );
+        }
+        const markFailure = () => {
+          void page
+            .evaluate(() => {
+              window.__budgetPerfFailed = true;
+            })
+            .catch(() => {});
+        };
         const requests = [];
         const sampleErrors = [];
         page.on('request', (req) => {
@@ -138,13 +156,17 @@ if (browserSamples > 0) {
           if (url.pathname.startsWith('/api/'))
             requests.push(url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, ':id'));
         });
-        page.on('pageerror', (error) => sampleErrors.push(error.message));
+        page.on('pageerror', (error) => {
+          sampleErrors.push(error.message);
+          markFailure();
+        });
         page.on('response', (response) => {
           const url = new URL(response.url());
           if (url.pathname.startsWith('/api/') && response.status() >= 400) {
             sampleErrors.push(
               `${url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, ':id')} HTTP ${response.status()}`,
             );
+            markFailure();
           }
         });
         const start = performance.now();
@@ -152,6 +174,7 @@ if (browserSamples > 0) {
           await page.goto(new URL(path, base).href, { waitUntil: 'domcontentloaded' });
           await page.waitForFunction(
             ({ minimumRows }) => {
+              if (window.__budgetPerfFailed) return true;
               const main = document.querySelector('main');
               return (
                 main &&

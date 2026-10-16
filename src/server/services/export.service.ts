@@ -1,4 +1,6 @@
 import ExcelJS from 'exceljs';
+import { Writable } from 'node:stream';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
@@ -316,8 +318,22 @@ async function exportRecordList(
   entryTimeField: 'enteredAt' | 'createdAt' = 'createdAt',
   offsetMinutes?: number,
 ): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('业务记录');
+  // 逐行提交释放 Cell/Row 对象；只保留压缩后的文件字节，沿用现有 Buffer 返回契约。
+  const chunks: Buffer[] = [];
+  const output = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      chunks.push(chunk);
+      done();
+    },
+  });
+  const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+    stream: output,
+    useStyles: true,
+    useSharedStrings: false,
+  });
+  const sheet = workbook.addWorksheet('业务记录', {
+    views: [{ state: 'frozen', ySplit: project ? 2 : 1 }],
+  });
   const headers = [
     '项目',
     '年度',
@@ -344,7 +360,8 @@ async function exportRecordList(
   });
   const header = sheet.addRow(project ? headers.slice(1) : headers);
   header.font = { bold: true };
-  sheet.views = [{ state: 'frozen', ySplit: header.number }];
+  header.commit();
+  let written = 0;
   for (const rec of records) {
     const values = [
       `${rec.project.code} ${rec.project.name}`,
@@ -364,8 +381,12 @@ async function exportRecordList(
     ];
     const row = sheet.addRow(project ? values.slice(1) : values);
     row.getCell(project ? 5 : 6).numFmt = '#,##0.00';
+    row.commit();
+    // 大导出不能长时间占用处理日常查询与保存的事件循环。
+    if (++written % 128 === 0) await yieldToEventLoop();
   }
-  return toBuffer(await workbook.xlsx.writeBuffer());
+  await workbook.commit();
+  return Buffer.concat(chunks);
 }
 
 /** 单条业务记录 → 行数组。金额字符串(2 位小数),业务/完成日期 ISO,录入时间按用户时区。 */
