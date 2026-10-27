@@ -61,3 +61,7 @@ Thumbs.db
 # mimosa 安全扫描产物
 .mimosa/
 check-*.debug.mjs
+
+# Python 字节码(budget.py 助手本地调试产物)
+__pycache__/
+*.pyc

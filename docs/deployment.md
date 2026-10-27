@@ -130,7 +130,34 @@ SSO 首次登录走 **JIT 自动建档**（默认 `USER`，全局只读）。第
 
 **不要执行 `npm run db:seed`**——那是写入 mock 用户的开发数据，SSO 生产环境用不上。
 
-## 6. 升级
+## 6. 用户主机接入（Coding Agent，Windows 适用）
+
+内网用户在自己电脑上经 coding agent（ZCode / Codex 等）操作系统的最简形态——**无需 curl / jq / node_modules / 互联网**，只需 Python ≥ 3.8（标准库即可；离线环境用官方安装包离线分发 Python）：
+
+1. **签发凭证**：用户登录系统，在「API 凭证」页自助签发**个人凭证**（读写档、按需项目范围、可选有效期），明文仅创建时可见。
+2. **拷贝 2 个文件**：把仓库 `skills/budget-ops/` 下的 `SKILL.md` 与 `budget.py` 复制到用户主机的 `~/.agents/skills/budget-ops/`（Windows 为 `%USERPROFILE%\.agents\skills\budget-ops\`）。
+3. **初始化配置**（交互输入 Base URL 与 API Key，自动探测连通性并校验凭证，写 `~/.budget-agent.json`）：
+
+   ```bash
+   python budget.py setup
+   ```
+
+4. **自检**：
+
+   ```bash
+   python budget.py doctor
+   ```
+
+之后 agent 会话按 SKILL.md 用 `python budget.py api/upload …` 操作系统。要点：
+
+- 认证走 Bearer API Key，**不经过 Authentik**——用户主机只需内网可达预算系统，无需访问 SSO。
+- 配置解析顺序：`BUDGET_BASE_URL` / `BUDGET_TOKEN` 环境变量 > `~/.budget-agent.json`（`BUDGET_CONFIG` 可指定路径）。
+- 内网自签 https 时给助手加 `--insecure`（或 `BUDGET_INSECURE=1`）。
+- **安全**：凭证等同本人身份，疑似泄露立即在「API 凭证」页撤销；便携主机不要放无人值守全范围服务账号 key。
+- **无人值守场景**（定时收件箱导入等）：凭证由管理员在有仓库代码的机器上 `npm run make-agent` 签发（离线准备同第 5 节），跑在常开机器上，而非便携客户端。
+- **MCP 接入为可选项**：离线客户端默认不用（官方 `npx tsx` 启动方式需联网）；确需时自行预打包单文件 bundle。
+
+## 7. 升级
 
 ```bash
 # 构建机
@@ -143,7 +170,7 @@ docker load … && docker compose -f … up -d   # 换镜像 tag 后重建容器
 
 入口脚本对新镜像自动执行 `migrate deploy`，无手动迁移步骤；`AUTH_SECRET` 沿用原值。
 
-## 7. 验证清单
+## 8. 验证清单
 
 - 浏览器打开 `APP_BASE_URL` → 跳转 Authentik 登录 → 回跳后右上角显示你的姓名（JIT 建档成功）。
 - `make-admin` 后重新登录，侧边栏出现管理功能。

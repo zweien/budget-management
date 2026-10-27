@@ -1,26 +1,32 @@
 ---
 name: budget-ops
-description: 通过 API 操作科研项目预算管理系统(查询/统计、初始预算编制、预算调整、结算单导入、业务记录维护、到账登记)。内置三档确认策略与无人值守收件箱流程;任意 coding agent 会话可用,不依赖 MCP。
+description: 通过 API 操作科研项目预算管理系统(查询/统计、初始预算编制、预算调整、结算单导入、业务记录维护、到账登记)。内置三档确认策略与无人值守收件箱流程;任意 coding agent 会话可用,不依赖 MCP;仅需 Python 标准库,无 curl/jq 也可用(Windows 适用)。
 ---
 
 # 预算系统操作(budget-ops)
 
-通过 HTTP API 以**服务账号**身份操作科研项目预算管理系统。若当前会话已接入 `budget_*` MCP 工具,优先用工具;否则按本文用 `curl`。
+通过 HTTP API 以**机器凭证**身份(服务账号,或本人签发的个人凭证)操作科研项目预算管理系统。若当前会话已接入 `budget_*` MCP 工具,优先用工具;否则统一用随本 skill 附带的 **`budget.py` 助手**——单文件、仅 Python 3 标准库,Windows / Linux / macOS 通用,无需 curl/jq/任何第三方包。
 
 ## 1. 配置
 
-凭据在 `~/.budget-agent.json`(chmod 600),由管理员运行 `npm run make-agent` 生成:
+凭据在 `~/.budget-agent.json`(Windows 为 `%USERPROFILE%\.budget-agent.json`,建议权限 600),内容 `{ "baseUrl", "token" }`。来源两种:管理员 `npm run make-agent` 生成(服务账号);或用户在「API 凭证」页自助签发**个人凭证**后手工填入。环境变量 `BUDGET_BASE_URL` / `BUDGET_TOKEN` 优先于配置文件,`BUDGET_CONFIG` 可指定配置文件路径。
 
-```json
-{ "baseUrl": "http://localhost:3000", "token": "bma_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }
-```
-
-环境变量 `BUDGET_BASE_URL` / `BUDGET_TOKEN` 可覆盖。所有请求带 `Authorization: Bearer <token>`:
+首次配置与自检(token 交互输入,不留 shell 历史):
 
 ```bash
-BASE=$(jq -r .baseUrl ~/.budget-agent.json); TOK=$(jq -r .token ~/.budget-agent.json)
-curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
+python budget.py setup     # 输入 Base URL 与 API Key → 写配置 → 自动探测连通性 + 校验凭证
+python budget.py doctor    # 事后自检:/api/health + 凭证有效性
 ```
+
+之后所有请求经助手发出(操作目录里的路径直接复用,`/api` 前缀由助手补齐):
+
+```bash
+python budget.py api GET "/projects?includeArchived=1"
+python budget.py api POST /projects/$PID/records '{"budgetYear":2026,…}'
+python budget.py upload ~/budget-inbox/A-001/结算单.xlsx /projects/$PID/imports
+```
+
+> Windows 注意:命令用 `python`(或 `py`);路径正反斜杠均可。仅内网自签 https 时加 `--insecure`(或 env `BUDGET_INSECURE=1`)。
 
 - **401**:凭证无效/已撤销/已过期 → 停止并上报,请用户在「API 凭证」页重发(服务账号场景 `npm run make-agent` 重发)。
 - **403 且消息含「无人值守凭证禁止」**:命中硬排除(见下),**不得**尝试绕过,原样上报。
@@ -59,7 +65,7 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 | 审计日志           | `GET /audit-logs?projectId=&action=&dateFrom=&dateTo=&limit=`(无人值守被拒尝试 action=`unattended.denied`)                                                                   |
 | 编制单回读         | `GET /projects/$PID/initial-budget` — 初始预算编制单全量(状态/科目树/年度/明细/总预算);**404 = 有权限且该项目尚未编制**,可作「完整档 + OWNER」权限的只读探测                 |
 | 调整单列表         | `GET /projects/$PID/adjustments` — 全部调整单(状态/kind/明细/锁),响应 `{adjustments:[…]}`;`GET …/adjustments/:adjId` 取单张,响应 `{adjustment:{…}}`                          |
-| 上传解析(不改台账) | `POST -F file=@文件.xlsx /projects/$PID/imports` → `{batchId}`,格式自动识别(结算单 v1 填制日期版 / v2 申请日期版 / 标准模板)                                                 |
+| 上传解析(不改台账) | `upload <文件.xlsx> /projects/$PID/imports`(multipart 字段 `file`)→ `{batchId}`,格式自动识别(结算单 v1 填制日期版 / v2 申请日期版 / 标准模板)                                |
 | 补全更新预览       | 结算单再次导入命中同单据编号且金额一致、带来新信息(补完成日期/状态推进到已支出)→ 行标「补全更新」,确认后**更新**既有记录(非新增);金额不一致或无新信息 = 硬重复,禁止          |
 | 暂存行修改         | `PATCH /projects/$PID/imports/:batchId`,body `{"updates":[{"rowId","subjectId"?,"budgetYear"?,"forcedImport"?}]}`                                                            |
 
@@ -123,8 +129,8 @@ curl -sS -H "Authorization: Bearer $TOK" "$BASE/api/projects"
 
 定时任务提示词通常是「扫描收件箱并处理」。流程:
 
-1. 扫描 `~/budget-inbox/<项目编号>/*.xlsx`;目录名即项目编号,用项目列表把编号换成 `$PID`。**上传工具只接受收件箱目录内的文件**(服务端与 MCP 侧双重强制;其他路径的文件先移入收件箱再处理)。
-2. 逐文件:上传解析 → `budget_get_import_preview` 查看行/错误/重复。
+1. 扫描 `~/budget-inbox/<项目编号>/*.xlsx`;目录名即项目编号,用项目列表把编号换成 `$PID`。**无人值守纪律:上传文件一律先放入收件箱目录**(MCP 上传工具强制校验该目录;`budget.py` 不重复校验,遵守同一纪律——其他路径的文件先移入收件箱再处理)。
+2. 逐文件:`upload` 上传解析 → `api GET /projects/$PID/imports/<batchId>` 查看行/错误/重复。
 3. **科目自动指派**:先查科目映射记忆(整表一次 + 未命中摘要按词补查);命中 → 直接指派;未命中 → 对着科目树语义判断(拿不准就留空);仍不确定的行留空并计入待指派清单。
 4. `PATCH` 暂存全部可确定的行。**确认导入仅当任务指令明确授权时执行**;否则批次留在暂存,汇报里列出待确认批次与待指派行。
 5. 成功 → 文件移入 `~/budget-inbox/<项目编号>/_done/`;上传或解析失败 → 移入 `_failed/`,旁边写 `<同名>.txt` 说明原因。
