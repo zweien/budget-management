@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-28
+
+### 新增
+
+- budget-ops skill 随附 `budget.py` 助手：单文件、纯 Python 标准库的 API 客户端（setup / doctor / api / upload 四子命令），交互签收 token、自动探测连通性与凭证校验后才落配置——面向无 curl / jq / node_modules 的内网 Windows 客户端
+- 部署指南 [docs/deployment.md](./docs/deployment.md)：内网 + Authentik SSO 全流程（Provider 配置、镜像构建与离线导入、环境变量强校验说明、首个管理员引导、升级流程），含「用户主机接入」一节（拷 2 个文件 + `python budget.py setup` 即完成 agent 接入）
+
+### 变更
+
+- SKILL.md 改写：`budget.py` 为主调用路径，去除 jq / curl 依赖；身份口径放宽为机器凭证（服务账号或个人凭证）；收件箱纪律注明 MCP 工具与 HTTP 通道的强制差异
+
 ## [0.21.1] - 2026-10-18
 
 ### 变更
