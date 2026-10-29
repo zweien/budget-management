@@ -154,6 +154,8 @@ interface BusinessRecordRow {
   remark: string | null;
   /** 录入人姓名(服务端随记录带出;0.14 筛选扩展)。 */
   creatorName: string | null;
+  /** 附件数(附件列特殊显示:有附件高亮 + 计数)。 */
+  attachmentCount: number;
   isVoid: boolean;
   voidReason: string | null;
   voidedBy: string | null;
@@ -1113,11 +1115,14 @@ function BusinessRecordsPageInner() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-mute"
+            className={`h-7 gap-1 px-2 ${row.original.attachmentCount > 0 ? 'text-link' : 'text-mute'}`}
             onClick={() => setAttachmentTarget(row.original)}
-            aria-label="查看报销凭证"
+            aria-label={`查看报销凭证:${row.original.summary}`}
           >
             <Paperclip className="size-4" />
+            {row.original.attachmentCount > 0 ? (
+              <span className="tabular-nums">{row.original.attachmentCount}</span>
+            ) : null}
           </Button>
         ),
         enableSorting: false,

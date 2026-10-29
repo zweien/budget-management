@@ -53,8 +53,12 @@ export interface UpdateRecordInput {
   remark?: string | null;
 }
 
-/** 业务记录行 + 录入人姓名(listRecords 返回,0.14 筛选扩展)。 */
-export type BusinessRecordWithName = BusinessRecord & { creatorName: string | null };
+/** 业务记录行 + 录入人姓名 + 附件数(listRecords 返回,0.14 筛选扩展)。 */
+export type BusinessRecordWithName = BusinessRecord & {
+  creatorName: string | null;
+  /** 附件数(台账附件列特殊显示:有附件时高亮 + 计数)。 */
+  attachmentCount: number;
+};
 
 /** §8 list 组合筛选参数。 */
 export interface ListRecordsFilters {
@@ -457,11 +461,19 @@ export async function listRecords(
   const rows = await prisma.businessRecord.findMany({
     where,
     orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }],
-    include: { createdBy: { select: { name: true } } },
+    include: {
+      createdBy: { select: { name: true } },
+      _count: { select: { attachments: true } },
+    },
     ...paging,
   });
   // creatorName(0.14 筛选扩展):录入人展示/筛选直接用名字,前端不必再查用户表。
-  return rows.map(({ createdBy, ...r }) => ({ ...r, creatorName: createdBy?.name ?? null }));
+  // attachmentCount:附件列"有附件"特殊显示(与统计/全局记录页同口径)。
+  return rows.map(({ createdBy, _count, ...r }) => ({
+    ...r,
+    creatorName: createdBy?.name ?? null,
+    attachmentCount: _count.attachments,
+  }));
 }
 
 /**

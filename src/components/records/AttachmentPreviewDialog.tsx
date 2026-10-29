@@ -110,7 +110,8 @@ export function AttachmentPreviewDialog({
 
   return (
     <Dialog open={!!attachment} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[80vh] w-full max-w-4xl flex-col sm:max-w-4xl">
+      {/* 近全屏:图片/PDF 预览以看清楚为先;上限 1440px 防超宽屏拉伸留白过大。 */}
+      <DialogContent className="flex h-[92vh] max-w-[min(96vw,1440px)] flex-col sm:max-w-[min(96vw,1440px)]">
         <DialogHeader>
           <DialogTitle className="truncate">预览:{attachment?.fileName ?? ''}</DialogTitle>
         </DialogHeader>

@@ -689,7 +689,7 @@ function UnifiedRecordsPageInner() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-mute"
+            className={`h-7 gap-1 px-2 ${row.original.attachmentCount > 0 ? 'text-link' : 'text-mute'}`}
             onClick={() =>
               setAttachmentTarget({
                 id: row.original.id,

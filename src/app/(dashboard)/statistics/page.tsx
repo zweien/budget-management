@@ -675,7 +675,7 @@ function CustomStatisticsTab() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 gap-1 px-2 text-mute"
+                        className={`h-7 gap-1 px-2 ${r.attachmentCount > 0 ? 'text-link' : 'text-mute'}`}
                         onClick={() =>
                           setAttachmentTarget({
                             id: r.id,
