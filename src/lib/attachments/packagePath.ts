@@ -1,7 +1,7 @@
 /**
  * 按预算科目层级打包附件 — 路径与文件名构建(纯函数,无 IO/无 DB)。
  *
- * 文件夹路径:walk 附件所属叶科目的 parentId 到根,每段 `${code}_${name}`。
+ * 文件夹路径:walk 附件所属叶科目的 parentId 到根,每段取科目名称。
  * 文件名:占位符模板渲染({date}/{amount}/.../{original})。
  * 全部经过 OS 安全消毒(防 zip-slip 与 Windows 非法字符)。
  */
@@ -53,7 +53,8 @@ export function sanitizeSegment(s: string): string {
 }
 
 /**
- * 构建根→叶的文件夹路径,每段 `${code}_${name}` 消毒后用 `/` 连接。
+ * 构建根→叶的文件夹路径,每段取科目名称消毒后用 `/` 连接
+ * (目录给人看,不带编码;名称消毒后为空时兜底用编码,再过滤防空段)。
  * subjectId 不在 map → 空串(调用方应保证存在,此处防御)。
  */
 export function buildFolderPath(subjectId: string, subjectById: Map<string, SubjectNode>): string {
@@ -64,7 +65,10 @@ export function buildFolderPath(subjectId: string, subjectById: Map<string, Subj
     chain.unshift(cur);
     cur = cur.parentId ? subjectById.get(cur.parentId) : undefined;
   }
-  return chain.map((s) => sanitizeSegment(`${s.code}_${s.name}`)).join('/');
+  return chain
+    .map((s) => sanitizeSegment(s.name) || s.code)
+    .filter(Boolean)
+    .join('/');
 }
 
 /** 占位符 → 取值函数。 */

@@ -20,8 +20,8 @@ const DEFAULT_TEMPLATE = '{date}_{amount}_{summary}_{original}';
 
 /**
  * GET /api/projects/:id/attachments/package?year=&template= — 按预算科目层级打包全部附件。
- * 文件夹:根→叶 walk parentId,每段 `${code}_${name}`。
- * 文件名:占位符模板(默认 {date}_{amount}_{summary}_{original})。
+ * 文件夹:根→叶 walk parentId,每段取科目名称(不带编码)。
+ * 文件名:占位符模板(默认 {date}_{amount}_{summary}_{original},始终补齐原扩展名)。
  * 无附件 → 404;附件数 > 500 → 413(防 OOM)。权限:project:view。
  */
 export const GET = withRoute(

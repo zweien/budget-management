@@ -54,18 +54,25 @@ describe('sanitizeSegment', () => {
 });
 
 describe('buildFolderPath', () => {
-  it('从叶到根 walk parentId,每段 code_name', () => {
-    expect(buildFolderPath('leaf', subjectById)).toBe('ZJF_直接费/SBF_设备费/SBGZF_设备购置费');
+  it('从叶到根 walk parentId,每段只取科目名称(不带编码)', () => {
+    expect(buildFolderPath('leaf', subjectById)).toBe('直接费/设备费/设备购置费');
   });
   it('根节点(无 parentId)只返回自身段', () => {
-    expect(buildFolderPath('root', subjectById)).toBe('ZJF_直接费');
+    expect(buildFolderPath('root', subjectById)).toBe('直接费');
   });
   it('科目名含非法字符时消毒', () => {
     const subs: SubjectNode[] = [
       { id: 'r', code: 'X', name: 'a/b', parentId: null, level: 1, isLeaf: false },
       { id: 'l', code: 'Y', name: '叶', parentId: 'r', level: 2, isLeaf: true },
     ];
-    expect(buildFolderPath('l', new Map(subs.map((s) => [s.id, s])))).toBe('X_a_b/Y_叶');
+    expect(buildFolderPath('l', new Map(subs.map((s) => [s.id, s])))).toBe('a_b/叶');
+  });
+  it('科目名消毒后为空 → 兜底用编码,不产生空段', () => {
+    const subs: SubjectNode[] = [
+      { id: 'r', code: 'X', name: ' . . ', parentId: null, level: 1, isLeaf: false },
+      { id: 'l', code: 'Y', name: '叶', parentId: 'r', level: 2, isLeaf: true },
+    ];
+    expect(buildFolderPath('l', new Map(subs.map((s) => [s.id, s])))).toBe('X/叶');
   });
   it('subjectId 不在 map 中 → 空字符串(防御)', () => {
     expect(buildFolderPath('unknown', subjectById)).toBe('');

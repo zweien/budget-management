@@ -177,8 +177,8 @@ describe('attachments package route (按科目层级打包)', () => {
     const buf = Buffer.from(await res.arrayBuffer());
     const zip = await JSZip.loadAsync(buf);
     const names = Object.keys(zip.files);
-    // 路径: ROOT_根科目/LEAF_叶科目/2026-08-05_1200.00_差旅费_发票.pdf
-    expect(names).toContain('ROOT_根科目/LEAF_叶科目/2026-08-05_1200.00_差旅费_发票.pdf');
+    // 路径: 根科目/叶科目/2026-08-05_1200.00_差旅费_发票.pdf(目录只取科目名,不带编码)
+    expect(names).toContain('根科目/叶科目/2026-08-05_1200.00_差旅费_发票.pdf');
   });
 
   it('自定义模板渲染各占位符', async () => {
