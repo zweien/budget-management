@@ -394,7 +394,18 @@ function parseDateInput(s: string): Date | undefined {
   const d = Number(parts[2]);
   if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d)) return undefined;
   const date = new Date(y, mo - 1, d);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  // 原生 date input 分段键入时可能产出 "0005-02-05" 这类年份段未输满的值;
+  // JS 会把 0~99 的年份映射为 1900+年(new Date(5,…) → 1905),须回验分量拒绝,
+  // 否则筛选区间静默跳到一个多世纪前。
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== y ||
+    date.getMonth() !== mo - 1 ||
+    date.getDate() !== d
+  ) {
+    return undefined;
+  }
+  return date;
 }
 
 function DateRangeFilter<TData>({
@@ -463,11 +474,9 @@ function DateRangeFilter<TData>({
               value={value?.from ? toDateInput(new Date(value.from)) : ''}
               onChange={(e) => {
                 const from = parseDateInput(e.target.value);
-                if (from) {
-                  apply({ from, to: value?.to ? new Date(value.to) : from });
-                } else {
-                  apply(undefined);
-                }
+                // 中间态(空串/年份段未输满)不提交也不清空:键入途中把已设区间
+                // 整个抹掉,另一个输入框会跟着被清空。清空走「全部」预设。
+                if (from) apply({ from, to: value?.to ? new Date(value.to) : from });
               }}
               aria-label="起始日期"
               className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -478,11 +487,7 @@ function DateRangeFilter<TData>({
               value={value?.to ? toDateInput(new Date(value.to)) : ''}
               onChange={(e) => {
                 const to = parseDateInput(e.target.value);
-                if (to) {
-                  apply({ from: value?.from ? new Date(value.from) : to, to });
-                } else {
-                  apply(undefined);
-                }
+                if (to) apply({ from: value?.from ? new Date(value.from) : to, to });
               }}
               aria-label="结束日期"
               className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

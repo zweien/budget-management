@@ -42,6 +42,9 @@ function parseRangeTokens(text: string): DateRange | undefined {
  * 触发器是可键入的 Input:手输两个日期(任意分隔,如 `2026-01-01 ~ 2026-12-31`),
  * 提取到合法日期即提交;中间态/非法文本留在草稿里不打扰,失焦回显最后有效值。
  * 保留日历点选与一键清空。显示值为 `draft ?? 受控值格式化` 派生。
+ *
+ * 点击输入区只负责「打开」(同 date-picker):聚焦即开弹层,编辑中重复点击
+ * (移动光标/选中部分文本)不关闭;Radix 触发器默认点击 toggle,须抑制。
  */
 export function DateRangePicker({
   value,
@@ -55,11 +58,12 @@ export function DateRangePicker({
       ? `${format(value.from, 'yyyy-MM-dd')} — ${format(value.to, 'yyyy-MM-dd')}`
       : format(value.from, 'yyyy-MM-dd')
     : '';
+  const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<string | null>(null);
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild onClick={(e) => e.preventDefault()}>
         <div className={cn('relative w-full', className)}>
           <CalendarDays className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-mute" />
           <Input
@@ -67,6 +71,7 @@ export function DateRangePicker({
             value={draft ?? display}
             placeholder={placeholder}
             className={cn('h-9 pr-8 pl-8 tabular-nums', !value?.from && 'text-mute')}
+            onFocus={() => setOpen(true)}
             onChange={(e) => {
               const text = e.target.value;
               setDraft(text);

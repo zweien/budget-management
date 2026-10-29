@@ -34,6 +34,10 @@ function parseDate(text: string): Date | undefined {
  * 触发器是可键入的 Input:手输 yyyy-MM-dd(也认 / 或 . 分隔),解析合法即提交;
  * 中间态/非法文本只留在草稿里不打扰,失焦回显最后有效值(外部受控值)。
  * 显示值为 `draft ?? 受控值格式化` 派生:未编辑时外部变化即时反映。
+ *
+ * 点击输入区只负责「打开」:聚焦即开弹层,编辑中重复点击(移动光标/选中
+ * 部分文本)不关闭。Radix 触发器默认点击 toggle,须以 preventDefault 抑制,
+ * 否则键入途中再点一下输入框会把弹层点关。
  */
 export function DatePicker({
   value,
@@ -47,7 +51,7 @@ export function DatePicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+      <PopoverTrigger asChild onClick={(e) => e.preventDefault()}>
         <div className={cn('relative w-full', className)}>
           <CalendarDays className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-mute" />
           <Input
@@ -55,6 +59,7 @@ export function DatePicker({
             value={draft ?? (value ? format(value, 'yyyy-MM-dd') : '')}
             placeholder={placeholder}
             className={cn('h-9 pl-8 tabular-nums', !value && 'text-mute')}
+            onFocus={() => setOpen(true)}
             onChange={(e) => {
               const text = e.target.value;
               setDraft(text);
