@@ -368,6 +368,30 @@ function useDatePresets(): DatePreset[] {
   }, []);
 }
 
+/** 日期筛选左栏快捷按钮(全部/预设/年份共用):active 态 accent 高亮。 */
+function PresetButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
+        active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 /** 两个日期区间是否代表同一天区间(from/to 兼容 Date 与 URL 还原出的字符串)。 */
 function sameRange(a?: DateRangeFilterValue, b?: DateRange): boolean {
   const fa = a?.from ? new Date(a.from).getTime() : 0;
@@ -418,6 +442,11 @@ function DateRangeFilter<TData>({
   const value = column.getFilterValue() as DateRangeFilterValue | undefined;
   const isEmptyOnly = value?.empty === true;
   const presets = useDatePresets();
+  /** 年份快捷:今年起往前 6 年(业务/完成日期按整年筛查高频)。 */
+  const years = React.useMemo(() => {
+    const y = new Date().getFullYear();
+    return Array.from({ length: 6 }, (_, i) => y - i);
+  }, []);
 
   const apply = (r: DateRange | undefined) => {
     column.setFilterValue(r?.from || r?.to ? r : undefined);
@@ -436,33 +465,29 @@ function DateRangeFilter<TData>({
         </label>
       ) : null}
       <div className={cn('flex gap-2', isEmptyOnly && 'pointer-events-none opacity-40')}>
-        {/* 快捷预设 */}
+        {/* 快捷预设 + 年份快捷 */}
         <div className="flex w-32 shrink-0 flex-col gap-0.5 border-r border-border pr-2">
-          <button
-            type="button"
-            onClick={() => apply(undefined)}
-            className={cn(
-              'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
-              !value ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
-            )}
-          >
+          <PresetButton active={!value} onClick={() => apply(undefined)}>
             全部
-          </button>
-          {presets.map((p) => {
-            const r = p.get();
-            const active = sameRange(value, r);
+          </PresetButton>
+          {presets.map((p) => (
+            <PresetButton
+              key={p.label}
+              active={sameRange(value, p.get())}
+              onClick={() => apply(p.get())}
+            >
+              {p.label}
+            </PresetButton>
+          ))}
+          {/* 年份快捷:整年区间(1/1 ~ 12/31),与预设同高亮互斥 */}
+          <div className="my-1 border-t border-border" />
+          {years.map((y) => {
+            const anchor = new Date(y, 0, 1);
+            const r: DateRange = { from: startOfYear(anchor), to: endOfYear(anchor) };
             return (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => apply(r)}
-                className={cn(
-                  'rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent',
-                  active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
-                )}
-              >
-                {p.label}
-              </button>
+              <PresetButton key={y} active={sameRange(value, r)} onClick={() => apply(r)}>
+                {y} 年
+              </PresetButton>
             );
           })}
         </div>
