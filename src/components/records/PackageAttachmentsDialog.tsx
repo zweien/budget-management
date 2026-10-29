@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { packageAttachmentsBySubject } from '@/lib/api/attachments';
+import { ensureExtension } from '@/lib/attachments/packagePath';
 
 const DEFAULT_TEMPLATE = '{date}_{amount}_{summary}_{original}';
 const ALL_YEAR = '__ALL__';
@@ -66,9 +67,11 @@ export function PackageAttachmentsDialog({
   const [busy, setBusy] = useState(false);
 
   const previewName = useMemo(() => {
-    return template.trim().replace(/\{(\w+)\}/g, (full, key: string) => {
+    const rendered = template.trim().replace(/\{(\w+)\}/g, (full, key: string) => {
       return PREVIEW_CTX[key] ?? full;
     });
+    // 与服务端 renderFilename 同规则:模板未含 {original} 时也补原文件扩展名。
+    return ensureExtension(rendered, PREVIEW_CTX.original);
   }, [template]);
 
   const handlePackage = async () => {

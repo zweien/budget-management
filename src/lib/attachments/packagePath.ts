@@ -81,21 +81,38 @@ const TOKENS: Record<string, (ctx: TokenContext) => string> = {
 
 /**
  * 渲染文件名:把 {token} 替换为对应值,未知占位符原样保留。
- * 渲染后整体消毒;空模板 → 用 original 兜底;超长(>200)截断保留扩展名。
+ * 渲染后整体消毒并补齐原文件扩展名(模板不含 {original} 或不在末尾时,
+ * zip 内条目将没有后缀,Windows 无法识别类型);超长(>200)截断保留扩展名。
  */
 export function renderFilename(template: string, ctx: TokenContext): string {
   const tpl = template.trim() || '{original}';
-  let out = tpl.replace(/\{(\w+)\}/g, (full, key: string) => {
+  const rendered = tpl.replace(/\{(\w+)\}/g, (full, key: string) => {
     const fn = TOKENS[key];
     return fn ? fn(ctx) : full;
   });
-  out = sanitizeSegment(out);
-  if (out.length > MAX_NAME) {
-    const dot = out.lastIndexOf('.');
-    const ext = dot > 0 && out.length - dot <= 10 ? out.slice(dot) : '';
-    out = out.slice(0, MAX_NAME - ext.length) + ext;
+  // 消毒后为空(模板值全空/全非法字符)→ 回退原文件名。
+  let name = ensureExtension(
+    sanitizeSegment(rendered) || sanitizeSegment(ctx.original),
+    ctx.original,
+  );
+  if (name.length > MAX_NAME) {
+    const dot = name.lastIndexOf('.');
+    const ext = dot > 0 && name.length - dot <= 10 ? name.slice(dot) : '';
+    name = name.slice(0, MAX_NAME - ext.length) + ext;
   }
-  return out;
+  return name;
+}
+
+/** 文件名扩展名(含点,小写;无扩展名为空串)。 */
+export function extOfName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot).toLowerCase() : '';
+}
+
+/** 保证 name 以 original 的扩展名结尾:已一致不动,缺失/不在末尾则补上。 */
+export function ensureExtension(name: string, original: string): string {
+  const ext = extOfName(sanitizeSegment(original));
+  return ext && !name.toLowerCase().endsWith(ext) ? name + ext : name;
 }
 
 /**

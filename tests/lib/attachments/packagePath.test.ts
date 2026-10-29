@@ -81,10 +81,32 @@ describe('renderFilename', () => {
   it('未知占位符原样保留(字面量)', () => {
     expect(renderFilename('{date}_报销_{original}', ctx)).toBe('2026-08-05_报销_发票.pdf');
   });
-  it('所有占位符:handler/subject/status/year', () => {
+  it('所有占位符:handler/subject/status/year;无 {original} 时补原扩展名', () => {
     expect(renderFilename('{handler}_{subject}_{status}_{year}', ctx)).toBe(
-      '张三_设备购置费_PAID_2026',
+      '张三_设备购置费_PAID_2026.pdf',
     );
+  });
+  it('{original} 不在末尾时补扩展名到结尾', () => {
+    expect(renderFilename('{original}_{date}', ctx)).toBe('发票.pdf_2026-08-05.pdf');
+  });
+  it('已以原扩展名结尾时不重复追加(大小写不敏感)', () => {
+    expect(renderFilename('{date}_{amount}_{summary}_{original}', ctx)).toBe(
+      '2026-08-05_1200.00_差旅费_发票.pdf',
+    );
+    const upper: TokenContext = { ...ctx, original: '发票.PDF' };
+    expect(renderFilename('{summary}_{original}', upper)).toBe('差旅费_发票.PDF');
+  });
+  it('结尾是其他扩展名时仍补原扩展名(内容类型以原文件为准)', () => {
+    const c: TokenContext = { ...ctx, summary: '扫描件.jpg' };
+    expect(renderFilename('{summary}', c)).toBe('扫描件.jpg.pdf');
+  });
+  it('原文件无扩展名时不凭空追加', () => {
+    const c: TokenContext = { ...ctx, original: 'README' };
+    expect(renderFilename('{summary}_{handler}', c)).toBe('差旅费_张三');
+  });
+  it('渲染结果为空(占位值全空)→ 回退原文件名', () => {
+    const c: TokenContext = { ...ctx, summary: '' };
+    expect(renderFilename('{summary}', c)).toBe('发票.pdf');
   });
   it('渲染后消毒非法字符', () => {
     const c: TokenContext = { ...ctx, summary: 'a/b' };
