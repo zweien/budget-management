@@ -767,6 +767,21 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(all[0].summary).toBe('A1');
     // creatorName(0.14 筛选扩展):录入人姓名随记录带出。
     expect(all[0].creatorName).toBe('admin-t6');
+    // attachmentCount(附件列计数显示):无附件为 0;插入附件后为实际条数。
+    expect(all[0].attachmentCount).toBe(0);
+    await prisma.recordAttachment.create({
+      data: {
+        id: uuidv7(),
+        recordId: all[0].id,
+        fileName: '发票.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 10,
+        data: Buffer.from('x'),
+        uploadedById: all[0].createdById,
+      },
+    });
+    const withAtt = await listRecords(project.id, {}, adminUser());
+    expect(withAtt[0].attachmentCount).toBe(1);
 
     // includeVoid → 2 条。
     const withVoid = await listRecords(project.id, { includeVoid: true }, adminUser());
