@@ -37,6 +37,11 @@ interface AttachmentSheetProps {
   canWrite: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * 附件数变化(上传成功/删除成功)后回调父页,同步台账行的 attachmentCount
+   * (否则高亮/计数要等手动刷新才更新;codex review)。
+   */
+  onChanged?: (recordId: string, count: number) => void;
 }
 
 interface PendingItem {
@@ -53,6 +58,7 @@ export function AttachmentSheet({
   canWrite,
   open,
   onOpenChange,
+  onChanged,
 }: AttachmentSheetProps) {
   const [items, setItems] = useState<AttachmentMeta[]>([]);
   const [loading, setLoading] = useState(false);
@@ -94,11 +100,15 @@ export function AttachmentSheet({
       ...prev,
       ...arr.map<PendingItem>((f) => ({ file: f, status: 'uploading' })),
     ]);
+    // 本地计数器:循环内 items 闭包不更新,累计后经 onChanged 通知父页。
+    let count = items.length;
     for (const file of arr) {
       try {
         const meta = await uploadAttachment(projectId, record.id, file);
         setItems((prev) => [...prev, meta]);
         setPending((prev) => prev.map((p) => (p.file === file ? { ...p, status: 'done' } : p)));
+        count += 1;
+        onChanged?.(record.id, count);
       } catch (e) {
         setPending((prev) =>
           prev.map((p) =>
@@ -120,6 +130,7 @@ export function AttachmentSheet({
       await deleteAttachment(projectId, record.id, att.id);
       setItems((prev) => prev.filter((x) => x.id !== att.id));
       toast.success('已删除附件');
+      onChanged?.(record.id, items.length - 1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '删除失败');
     }

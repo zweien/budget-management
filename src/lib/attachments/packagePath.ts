@@ -54,8 +54,10 @@ export function sanitizeSegment(s: string): string {
 
 /**
  * 构建根→叶的文件夹路径,每段取科目名称消毒后用 `/` 连接
- * (目录给人看,不带编码;名称消毒后为空时兜底用编码,再过滤防空段)。
- * subjectId 不在 map → 空串(调用方应保证存在,此处防御)。
+ * (目录给人看,不带编码)。subjectId 不在 map → 空串(防御)。
+ * 注意:名称与编码都必须过 sanitizeSegment——编码兜底不过消毒会引入
+ * `../` 之类目录段,对不严格的解压器构成 zip-slip(codex review major)。
+ * 兄弟同名消歧请用 buildFolderPaths(打包路由用它,单链版保留供测试)。
  */
 export function buildFolderPath(subjectId: string, subjectById: Map<string, SubjectNode>): string {
   const chain: SubjectNode[] = [];
@@ -66,9 +68,50 @@ export function buildFolderPath(subjectId: string, subjectById: Map<string, Subj
     cur = cur.parentId ? subjectById.get(cur.parentId) : undefined;
   }
   return chain
-    .map((s) => sanitizeSegment(s.name) || s.code)
+    .map((s) => sanitizeSegment(s.name) || sanitizeSegment(s.code) || s.id)
     .filter(Boolean)
     .join('/');
+}
+
+/**
+ * 全树批量构建 subjectId → 文件夹路径(打包路由入口)。
+ * 在 buildFolderPath 基础上做兄弟同名消歧:同一父节点下消毒后同名的
+ * 科目(名称不保证唯一,如「试验/测试」与「试验:测试」),后出现者追加
+ * `_${编码}`,避免两个科目的附件被合并进同一目录、科目归属丢失。
+ * subjects 顺序即消歧顺序,调用方应传 sortOrder/code 排序后的全量。
+ */
+export function buildFolderPaths(subjects: SubjectNode[]): Map<string, string> {
+  const byId = new Map(subjects.map((s) => [s.id, s]));
+  // 父节点(含根 null)→ 子科目分组,保持传入顺序。
+  const childrenOf = new Map<string | null, SubjectNode[]>();
+  for (const s of subjects) {
+    const list = childrenOf.get(s.parentId ?? null) ?? [];
+    list.push(s);
+    childrenOf.set(s.parentId ?? null, list);
+  }
+  // 段名消歧:同级消毒后同名 → 后者 `${name}_${code}`。
+  const segById = new Map<string, string>();
+  for (const kids of childrenOf.values()) {
+    const seen = new Map<string, number>();
+    for (const k of kids) {
+      const base = sanitizeSegment(k.name) || sanitizeSegment(k.code) || k.id;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      segById.set(k.id, n > 1 ? `${base}_${sanitizeSegment(k.code) || k.id}` : base);
+    }
+  }
+  const paths = new Map<string, string>();
+  for (const s of subjects) {
+    const chain: string[] = [];
+    let cur: SubjectNode | undefined = s;
+    while (cur) {
+      const seg = segById.get(cur.id);
+      if (seg) chain.unshift(seg);
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    paths.set(s.id, chain.join('/'));
+  }
+  return paths;
 }
 
 /** 占位符 → 取值函数。 */

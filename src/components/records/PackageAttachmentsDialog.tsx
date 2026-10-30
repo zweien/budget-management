@@ -68,7 +68,9 @@ export function PackageAttachmentsDialog({
   const [busy, setBusy] = useState(false);
 
   const previewName = useMemo(() => {
-    const rendered = template.trim().replace(/\{(\w+)\}/g, (full, key: string) => {
+    // 与服务端同规则:空模板回落默认模板(路由对空 template 用 DEFAULT_TEMPLATE)。
+    const tpl = template.trim() || DEFAULT_TEMPLATE;
+    const rendered = tpl.replace(/\{(\w+)\}/g, (full, key: string) => {
       return PREVIEW_CTX[key] ?? full;
     });
     // 与服务端 renderFilename 同规则:模板未含 {original} 时也补原文件扩展名。
@@ -161,7 +163,7 @@ export function PackageAttachmentsDialog({
                 ))}
               </ul>
               <p className="mt-1.5 text-mute">
-                规则:未知占位符原样保留;模板为空用原文件名;文件名始终以原文件扩展名结尾;非法字符替换为下划线;同目录同名自动追加
+                规则:未知占位符原样保留;模板为空用默认模板;文件名始终以原文件扩展名结尾;非法字符替换为下划线;同目录同名自动追加
                 (1)(2)。
               </p>
             </details>

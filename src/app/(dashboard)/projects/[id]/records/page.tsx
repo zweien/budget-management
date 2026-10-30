@@ -1886,6 +1886,11 @@ function BusinessRecordsPageInner() {
         canWrite={!!project?.canWriteRecords}
         open={!!attachmentTarget}
         onOpenChange={(o) => !o && setAttachmentTarget(null)}
+        onChanged={(recordId, count) =>
+          setRecords((prev) =>
+            prev.map((r) => (r.id === recordId ? { ...r, attachmentCount: count } : r)),
+          )
+        }
       />
 
       {/* 按科目层级打包附件 Dialog(Task 5 集成) */}

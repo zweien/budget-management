@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   sanitizeSegment,
   buildFolderPath,
+  buildFolderPaths,
   renderFilename,
   dedupeName,
   type SubjectNode,
@@ -74,8 +75,52 @@ describe('buildFolderPath', () => {
     ];
     expect(buildFolderPath('l', new Map(subs.map((s) => [s.id, s])))).toBe('X/叶');
   });
+  it('编码兜底同样过消毒:危险编码不产生 ../ 目录穿越(zip-slip)', () => {
+    const subs: SubjectNode[] = [
+      { id: 'r', code: '../evil', name: '...', parentId: null, level: 1, isLeaf: false },
+      { id: 'l', code: 'Y', name: '叶', parentId: 'r', level: 2, isLeaf: true },
+    ];
+    const path = buildFolderPath('l', new Map(subs.map((s) => [s.id, s])));
+    expect(path).not.toMatch(/(^|\/)\.\.?(\/|$)/);
+    expect(path).toBe('_evil/叶'); // '../evil' 消毒:非法字符替换 + 去首部点 → '_evil'
+  });
   it('subjectId 不在 map 中 → 空字符串(防御)', () => {
     expect(buildFolderPath('unknown', subjectById)).toBe('');
+  });
+});
+
+describe('buildFolderPaths(全树批量 + 兄弟同名消歧)', () => {
+  it('常规树与单链版结果一致', () => {
+    const paths = buildFolderPaths(subjects);
+    expect(paths.get('leaf')).toBe('直接费/设备费/设备购置费');
+    expect(paths.get('root')).toBe('直接费');
+  });
+  it('兄弟同名消歧:同级消毒后同名,后者追加 _编码', () => {
+    // 「试验/测试」与「试验:测试」消毒后同为「试验_测试」→ 后者消歧。
+    const subs: SubjectNode[] = [
+      { id: 'a', code: 'A1', name: '试验/测试', parentId: null, level: 1, isLeaf: true },
+      { id: 'b', code: 'B2', name: '试验:测试', parentId: null, level: 1, isLeaf: true },
+    ];
+    const paths = buildFolderPaths(subs);
+    expect(paths.get('a')).toBe('试验_测试');
+    expect(paths.get('b')).toBe('试验_测试_B2'); // 同名 + 编码消歧,不合并目录
+  });
+  it('不同名兄弟不受消歧影响', () => {
+    const subs: SubjectNode[] = [
+      { id: 'a', code: 'A1', name: '设备费', parentId: null, level: 1, isLeaf: true },
+      { id: 'b', code: 'B2', name: '材料费', parentId: null, level: 1, isLeaf: true },
+    ];
+    const paths = buildFolderPaths(subs);
+    expect(paths.get('a')).toBe('设备费');
+    expect(paths.get('b')).toBe('材料费');
+  });
+  it('消歧后目录名含危险编码也已消毒', () => {
+    const subs: SubjectNode[] = [
+      { id: 'a', code: 'A1', name: 'x', parentId: null, level: 1, isLeaf: true },
+      { id: 'b', code: '../E', name: 'x', parentId: null, level: 1, isLeaf: true },
+    ];
+    const path = buildFolderPaths(subs).get('b') ?? '';
+    expect(path).not.toMatch(/(^|\/)\.\.?(\/|$)/);
   });
 });
 

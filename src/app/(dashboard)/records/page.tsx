@@ -1635,6 +1635,11 @@ function UnifiedRecordsPageInner() {
         }
         open={!!attachmentTarget}
         onOpenChange={(o) => !o && setAttachmentTarget(null)}
+        onChanged={(recordId, count) =>
+          setRecords((prev) =>
+            prev.map((r) => (r.id === recordId ? { ...r, attachmentCount: count } : r)),
+          )
+        }
       />
     </div>
   );

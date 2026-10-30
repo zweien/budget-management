@@ -8,10 +8,9 @@ import { requireUser } from '@/lib/auth/session';
 import { withExportSlot } from '@/server/exports/concurrency';
 import { selectForExport, listForExport } from '@/server/services/recordAttachment.service';
 import {
-  buildFolderPath,
+  buildFolderPaths,
   dedupeName,
   renderFilename,
-  type SubjectNode,
   type TokenContext,
 } from '@/lib/attachments/packagePath';
 
@@ -65,13 +64,14 @@ export const GET = withRoute(
         return NextResponse.json({ error: '无附件' }, { status: 404 });
       }
 
-      // 加载项目科目全树(年度无关),建 id→node map 供路径构建。
+      // 加载项目科目全树(年度无关);批量预构建 subjectId→文件夹路径
+      // (含兄弟同名消歧,subjects 须按 sortOrder/code 排序传入)。
       const subjects = await prisma.budgetSubject.findMany({
         where: { projectId },
         orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
         select: { id: true, code: true, name: true, parentId: true, level: true, isLeaf: true },
       });
-      const subjectById = new Map<string, SubjectNode>(subjects.map((s) => [s.id, s]));
+      const folderBySubject = buildFolderPaths(subjects);
 
       const [project, leafNameById] = await Promise.all([
         prisma.project.findUnique({ where: { id: projectId }, select: { name: true } }),
@@ -85,7 +85,7 @@ export const GET = withRoute(
       const usedByFolder = new Map<string, Map<string, number>>();
 
       for (const r of rows) {
-        const folder = buildFolderPath(r.record.subjectId, subjectById);
+        const folder = folderBySubject.get(r.record.subjectId) ?? '';
         const ctx: TokenContext = {
           date: r.record.businessDate.toISOString().slice(0, 10),
           amount: r.record.amount.toFixed(2),
