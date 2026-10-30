@@ -782,6 +782,22 @@ describe('businessRecord.service (integration, real PG)', () => {
     });
     const withAtt = await listRecords(project.id, {}, adminUser());
     expect(withAtt[0].attachmentCount).toBe(1);
+    // 多附件与计数隔离:同记录第二条 → 2;作废记录 B1 无附件 → 0。
+    await prisma.recordAttachment.create({
+      data: {
+        id: uuidv7(),
+        recordId: all[0].id,
+        fileName: '明细.xlsx',
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        sizeBytes: 20,
+        data: Buffer.from('y'),
+        uploadedById: all[0].createdById,
+      },
+    });
+    const withTwo = await listRecords(project.id, {}, adminUser());
+    expect(withTwo[0].attachmentCount).toBe(2);
+    const voidedList = await listRecords(project.id, { includeVoid: true }, adminUser());
+    expect(voidedList.find((r) => r.summary === 'B1')?.attachmentCount).toBe(0);
 
     // includeVoid → 2 条。
     const withVoid = await listRecords(project.id, { includeVoid: true }, adminUser());
