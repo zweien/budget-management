@@ -83,6 +83,8 @@ export function HeaderFilter<TData>({
   sortable,
 }: HeaderFilterProps<TData>) {
   const active = isFilterActive(type, column.getFilterValue());
+  // 受控开合:values 筛选「确定/清除筛选」提交后关闭弹层(其余类型点外即关)。
+  const [open, setOpen] = React.useState(false);
   const sorted = sortable ? column.getIsSorted() : false;
   const titleEl = sortable ? (
     <button
@@ -109,7 +111,7 @@ export function HeaderFilter<TData>({
   return (
     <span className="inline-flex items-center gap-1">
       {titleEl}
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
@@ -131,7 +133,12 @@ export function HeaderFilter<TData>({
           )}
         >
           {type === 'values' ? (
-            <ValuesFilter column={column} valueLabels={valueLabels} options={options} />
+            <ValuesFilter
+              column={column}
+              valueLabels={valueLabels}
+              options={options}
+              onClose={() => setOpen(false)}
+            />
           ) : null}
           {type === 'text' ? <TextFilter column={column} placeholder={placeholder} /> : null}
           {type === 'range' ? <RangeFilter column={column} /> : null}
@@ -145,15 +152,20 @@ export function HeaderFilter<TData>({
 }
 
 /** 值清单勾选(faceted unique values;undefined=不过滤=全部勾选)。
- *  选项值保持原生类型(年度为 number),与 filterFn 的 includes 比较一致。 */
+ *  选项值保持原生类型(年度为 number),与 filterFn 的 includes 比较一致。
+ *  勾选只改本地草稿,「确定」统一提交——每勾一项就刷新一次会把服务端分页
+ *  的列表打成一串请求(Excel 也是批量勾选后确认的交互)。 */
 function ValuesFilter<TData>({
   column,
   valueLabels,
   options,
+  onClose,
 }: {
   column: Column<TData, unknown>;
   valueLabels?: Record<string, string>;
   options?: unknown[];
+  /** 「确定/清除筛选」提交后关闭弹层。 */
+  onClose: () => void;
 }) {
   const faceted = column.getFacetedUniqueValues();
   // 候选清单:优先用外部传入的稳定 options;否则取 faceted unique values
@@ -167,8 +179,9 @@ function ValuesFilter<TData>({
     [faceted, options],
   );
   const selected = column.getFilterValue() as unknown[] | undefined;
-  // undefined 视为全选(不过滤)。
-  const selectedSet = React.useMemo(() => new Set(selected ?? allValues), [selected, allValues]);
+  // 本地草稿:弹层挂载时以当前筛选初始化(undefined = 全选);勾选/全选/
+  // 取消全选只动草稿,「确定」才写回列筛选。弹层关闭即卸载,下次打开重置。
+  const [draft, setDraft] = React.useState<Set<unknown>>(() => new Set(selected ?? allValues));
   const [search, setSearch] = React.useState('');
 
   const labelOf = (v: unknown) => valueLabels?.[String(v)] ?? String(v);
@@ -191,10 +204,12 @@ function ValuesFilter<TData>({
   };
 
   const toggle = (v: unknown, checked: boolean) => {
-    const next = new Set(selectedSet);
-    if (checked) next.add(v);
-    else next.delete(v);
-    apply(next);
+    setDraft((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(v);
+      else next.delete(v);
+      return next;
+    });
   };
 
   return (
@@ -214,10 +229,7 @@ function ValuesFilter<TData>({
               key={String(v)}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-sm hover:bg-accent"
             >
-              <Checkbox
-                checked={selectedSet.has(v)}
-                onCheckedChange={(c) => toggle(v, c === true)}
-              />
+              <Checkbox checked={draft.has(v)} onCheckedChange={(c) => toggle(v, c === true)} />
               <span className="flex-1 truncate">{labelOf(v)}</span>
               <span className="caption-mono text-mute">{faceted.get(v) ?? ''}</span>
             </label>
@@ -225,30 +237,48 @@ function ValuesFilter<TData>({
         )}
       </div>
       <div className="flex justify-between border-t border-border pt-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-1.5 text-xs"
-          onClick={() => apply(new Set(allValues))}
-        >
-          全选
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-1.5 text-xs"
-          onClick={() => apply(new Set())}
-        >
-          取消全选
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-1.5 text-xs"
-          onClick={() => column.setFilterValue(undefined)}
-        >
-          清除筛选
-        </Button>
+        <div className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-xs"
+            onClick={() => setDraft(new Set(allValues))}
+          >
+            全选
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-xs"
+            onClick={() => setDraft(new Set())}
+          >
+            取消全选
+          </Button>
+        </div>
+        <div className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-xs"
+            onClick={() => {
+              column.setFilterValue(undefined);
+              setDraft(new Set(allValues));
+              onClose();
+            }}
+          >
+            清除筛选
+          </Button>
+          <Button
+            size="sm"
+            className="h-6 px-3 text-xs"
+            onClick={() => {
+              apply(draft);
+              onClose();
+            }}
+          >
+            确定
+          </Button>
+        </div>
       </div>
     </div>
   );
