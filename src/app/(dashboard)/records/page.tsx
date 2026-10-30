@@ -287,7 +287,9 @@ function UnifiedRecordsPageInner() {
       subjectId: '',
       amount: '',
       businessDate: undefined, // 申请日期默认留空,需要时再填;提交留空由服务端默认当天
-
+      // docNo 录入表单不采集(编辑弹窗才有该字段),但 schema 为必填 string:
+      // 缺省时 undefined 过不了校验,且字段未挂载错误无处显示,提交被静默拦截。
+      docNo: '',
       status: 'PLACEHOLDER',
       handler: '',
       summary: '',
