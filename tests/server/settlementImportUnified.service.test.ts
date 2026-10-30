@@ -68,6 +68,7 @@ async function buildV1Xlsx(): Promise<Buffer> {
 
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
+  await prisma.initialBudgetApplication.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.businessRecordHistory
     .deleteMany({ where: { businessRecord: { projectId } } })
     .catch(() => {});
@@ -104,6 +105,17 @@ describe('settlementImport unified entry (integration, real PG)', () => {
     );
     projectAId = project.id;
     createdProjectIds.push(project.id);
+    await prisma.initialBudgetApplication
+      .create({
+        data: {
+          id: uuidv7(),
+          projectId: project.id,
+          status: 'APPROVED',
+          applicantId: adminId,
+          approvedAt: new Date(),
+        },
+      })
+      .catch(() => {});
   });
 
   afterAll(async () => {

@@ -96,6 +96,7 @@ const mappableCount = (p: { mappableProjects?: Array<unknown> }): number =>
 
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
+  await prisma.initialBudgetApplication.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.businessRecordHistory
     .deleteMany({ where: { businessRecord: { projectId } } })
     .catch(() => {});
@@ -137,6 +138,17 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     );
     projectId = project.id;
     createdProjectIds.push(project.id);
+    await prisma.initialBudgetApplication
+      .create({
+        data: {
+          id: uuidv7(),
+          projectId: project.id,
+          status: 'APPROVED',
+          applicantId: adminId,
+          approvedAt: new Date(),
+        },
+      })
+      .catch(() => {});
     // 科目树:根 → 两叶(差旅费/市内交通费),叶名与真实开支细项末段一致。
     const root = await prisma.budgetSubject.create({
       data: {
@@ -337,6 +349,17 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     );
     projectIdB = projectB.id;
     createdProjectIds.push(projectB.id);
+    await prisma.initialBudgetApplication
+      .create({
+        data: {
+          id: uuidv7(),
+          projectId: projectB.id,
+          status: 'APPROVED',
+          applicantId: adminId,
+          approvedAt: new Date(),
+        },
+      })
+      .catch(() => {});
     const rootB = uuidv7();
     await prisma.budgetSubject.create({
       data: {
@@ -446,6 +469,17 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     );
     projectIdB = projectB.id;
     createdProjectIds.push(projectB.id);
+    await prisma.initialBudgetApplication
+      .create({
+        data: {
+          id: uuidv7(),
+          projectId: projectB.id,
+          status: 'APPROVED',
+          applicantId: adminId,
+          approvedAt: new Date(),
+        },
+      })
+      .catch(() => {});
     const rootB = uuidv7();
     await prisma.budgetSubject.create({
       data: {
@@ -612,5 +646,85 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
         role: UserRole.USER,
       }),
     ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('v3 门禁:目标项目初始预算未审批 → 行级 error;已审批目标行正常', async () => {
+    // 第二个项目:从未审批(无编制单),名称可被文件命中自动预映射。
+    const projectB = await createProject(
+      {
+        code: `V3-${uuidv7().slice(0, 8)}-${Math.random().toString(36).slice(2, 6)}`,
+        name: '门禁未审批项目B',
+      },
+      adminUser(),
+    );
+    projectIdB = projectB.id;
+    createdProjectIds.push(projectB.id);
+    await prisma.budgetSubject.create({
+      data: {
+        id: uuidv7(),
+        projectId: projectB.id,
+        parentId: null,
+        code: 'G1',
+        name: '专家咨询费',
+        level: 1,
+        isLeaf: true,
+      },
+    });
+
+    const buf = await buildV3Xlsx([
+      {
+        docNo: 'GATE-A',
+        applyDate: '2025-08-01',
+        amount: 100,
+        handler: '甲',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+        remark: 'A项目行',
+        projectName: '其他专项科学技术费/图谱驱动测试专属项目甲',
+      },
+      {
+        docNo: 'GATE-B',
+        applyDate: '2025-08-02',
+        amount: 200,
+        handler: '乙',
+        detailPath: '直接费用/专家咨询费',
+        remark: 'B项目行',
+        projectName: '其他专项科学技术费/门禁未审批项目B',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    const batchId = await parseSettlement(wb!, projectId, adminUser(), 'gate.xlsx');
+    const preview = await getSettlementBatch(batchId, adminUser());
+
+    // 已审批目标(甲) → pending 正常;未审批目标(B) → 行级 error。
+    const rowA = preview.pending.find((r) => r.parsedData.docNo === 'GATE-A');
+    const rowB = preview.errors.find((r) => r.parsedData.docNo === 'GATE-B');
+    expect(rowA).toBeTruthy();
+    expect(rowB).toBeTruthy();
+    expect(rowB!.errors.some((e) => e.message.includes('初始预算尚未审批通过'))).toBe(true);
+    // 映射已自动命中 B(只是被门禁拦下),预览可改映射到已审批项目。
+    expect(
+      preview.projectMappings.find((m) => m.fileProjectName.includes('门禁未审批'))!
+        .targetProjectId,
+    ).toBe(projectB.id);
+
+    // 确认侧防御:把 A 行改映射到未审批的 B → 确认 422 并点名项目。
+    await updateSettlementRows(
+      batchId,
+      [{ rowId: rowA!.rowId, targetProjectId: projectB.id }],
+      adminUser(),
+    );
+    await expect(
+      confirmSettlementImport(batchId, [rowA!.rowId], adminUser()),
+    ).rejects.toMatchObject({
+      status: 422,
+    });
+    // 改回已审批目标 → 确认成功(不受 B 的 error 行影响)。
+    await updateSettlementRows(
+      batchId,
+      [{ rowId: rowA!.rowId, targetProjectId: projectId }],
+      adminUser(),
+    );
+    const res = await confirmSettlementImport(batchId, [rowA!.rowId], adminUser());
+    expect(res.created).toBe(1);
   });
 });

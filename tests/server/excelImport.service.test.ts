@@ -62,6 +62,7 @@ async function buildXlsx(rows: RowData[]): Promise<Buffer> {
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
   // 先清业务记录历史/记录,再清导入批次行/批次,再到账/科目/预算,最后项目。
+  await prisma.initialBudgetApplication.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.businessRecordHistory
     .deleteMany({
       where: { businessRecord: { projectId } },
@@ -117,6 +118,17 @@ describe('excelImport.service (integration, real PG)', () => {
     );
     createdProjectIds.push(project.id);
 
+    await prisma.initialBudgetApplication
+      .create({
+        data: {
+          id: uuidv7(),
+          projectId: project.id,
+          status: 'APPROVED',
+          applicantId: adminId,
+          approvedAt: new Date(),
+        },
+      })
+      .catch(() => {});
     const parentId = uuidv7();
     const leafId = uuidv7();
     await prisma.budgetSubject.create({
@@ -544,5 +556,53 @@ describe('excelImport.service (integration, real PG)', () => {
     });
     // 未产生任何批次/行。
     expect(await prisma.importBatch.count({ where: { projectId: project.id } })).toBe(0);
+  });
+
+  it('门禁:初始预算未审批 → parse 422;恢复审批放行;确认时复核暂存期变化', async () => {
+    const { project, leafCode } = await seedProject('GATE');
+    const buf = await buildXlsx([
+      {
+        projectCode: project.code,
+        budgetYear: 2026,
+        subjectCode: leafCode,
+        amount: 100,
+        businessDate: '2026-01-05',
+        handler: '经办',
+        summary: '门禁行',
+        businessStatus: '已支出',
+      },
+    ]);
+
+    // 降级为草稿 → parse 422。
+    await prisma.initialBudgetApplication.update({
+      where: { projectId: project.id },
+      data: { status: 'DRAFT' },
+    });
+    await expect(parseAndValidate(buf, project.id, adminUser())).rejects.toMatchObject({
+      status: 422,
+      message: '项目初始预算尚未审批通过,不能导入业务记录',
+    });
+
+    // 恢复审批 → parse 通过。
+    await prisma.initialBudgetApplication.update({
+      where: { projectId: project.id },
+      data: { status: 'APPROVED' },
+    });
+    const batchId = await parseAndValidate(buf, project.id, adminUser());
+    const preview = await getImportBatch(batchId, adminUser());
+    expect(preview.valid.length).toBe(1);
+
+    // 暂存期间又被降级 → 确认复核 422。
+    await prisma.initialBudgetApplication.update({
+      where: { projectId: project.id },
+      data: { status: 'DRAFT' },
+    });
+    await expect(
+      confirmImport(
+        batchId,
+        preview.valid.map((r) => r.rowId),
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({ status: 422 });
   });
 });

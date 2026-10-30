@@ -9,6 +9,7 @@ import { uuidv7 } from '@/lib/id';
 import { D, ZERO, fromStored, toStored } from '@/lib/decimal';
 import { createImportedRecords } from '@/server/services/importRecords.service';
 import { checkDuplicates, hardDupReason } from '@/server/services/duplicateCheck.service';
+import { requireApprovedInitialBudget } from '@/server/services/initialBudget.service';
 import {
   EXCEL_COLUMNS,
   STATUS_CN_TO_ENUM,
@@ -215,6 +216,8 @@ export async function parseAndValidate(
   if (!project) {
     throw new HTTPError(404, '项目不存在');
   }
+  // 门禁:初始预算审批生效前禁止导入(批量记账等预算下达;手工录入不受限)。
+  await requireApprovedInitialBudget(projectId);
 
   // 一次性取该项目所有科目,构建 { code -> subject } 与 leaf code 集合。
   const subjects = await prisma.budgetSubject.findMany({ where: { projectId } });
@@ -581,6 +584,8 @@ export async function confirmImport(
     throw new HTTPError(404, '导入批次不存在');
   }
   await requirePermission(user, 'record:import', batch.projectId);
+  // 门禁:确认时复核(批次可能创建于审批前,或项目状态在暂存期间变化)。
+  await requireApprovedInitialBudget(batch.projectId);
 
   if (batch.status === 'confirmed') {
     throw new HTTPError(409, '该批次已确认,不可重复确认');

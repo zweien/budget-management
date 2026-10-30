@@ -8,6 +8,39 @@ import { D, ZERO, fromStored, sumAmounts, toStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
 
 /**
+ * 导入门禁(业务规则):项目初始预算审批生效前,禁止导入业务记录
+ * (手工录入不受限——预算未下达期间允许零星登记,仅给超预算预警)。
+ * 依据:导入是批量记账,应等预算正式下达;导入口径统一 422 拒绝。
+ */
+export const INITIAL_BUDGET_NOT_APPROVED_MSG = '项目初始预算尚未审批通过,不能导入业务记录';
+
+/** 项目初始预算是否已审批生效(未编制/草稿/待审/驳回/撤回均视为未生效)。 */
+export async function hasApprovedInitialBudget(projectId: string): Promise<boolean> {
+  const app = await prisma.initialBudgetApplication.findUnique({
+    where: { projectId },
+    select: { status: true },
+  });
+  return app?.status === ApprovalStatus.APPROVED;
+}
+
+/** 导入门禁(单项目):未生效即抛 422,调用方无需各自拼文案。 */
+export async function requireApprovedInitialBudget(projectId: string): Promise<void> {
+  if (!(await hasApprovedInitialBudget(projectId))) {
+    throw new HTTPError(422, INITIAL_BUDGET_NOT_APPROVED_MSG);
+  }
+}
+
+/** 批量判定:返回 ids 中初始预算已审批生效的子集(供多目标导入逐行过滤)。 */
+export async function approvedInitialBudgetIds(projectIds: string[]): Promise<Set<string>> {
+  if (projectIds.length === 0) return new Set();
+  const rows = await prisma.initialBudgetApplication.findMany({
+    where: { projectId: { in: projectIds }, status: ApprovalStatus.APPROVED },
+    select: { projectId: true },
+  });
+  return new Set(rows.map((r) => r.projectId));
+}
+
+/**
  * §6 编制单入参(payload 来自表单)。
  * - 金额统一为 decimal 字符串(JSON 传输,§global 约定)。
  * - 科目在 payload 内引用 parentCode(此时尚无 id),由 service 在事务内解析。

@@ -8,6 +8,11 @@ import { denyApiKeyCrossProject, requirePermission } from '@/lib/auth/permission
 import { uuidv7 } from '@/lib/id';
 import { toStored, fromStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
+import {
+  INITIAL_BUDGET_NOT_APPROVED_MSG,
+  approvedInitialBudgetIds,
+  requireApprovedInitialBudget,
+} from '@/server/services/initialBudget.service';
 import { createImportedRecords } from '@/server/services/importRecords.service';
 import { snapshotRow } from '@/server/audit/snapshot';
 import {
@@ -283,6 +288,10 @@ export async function parseSettlement(
       return batchId;
     }
   }
+
+  // 门禁(v1/v2):初始预算审批生效前禁止导入(批量记账等预算下达;
+  // 手工录入不受限)。v3 走行级目标过滤(parseSettlementV3 内)。
+  await requireApprovedInitialBudget(projectId);
 
   // 版式判定:表头含「申请日期」→ v2(申请日期版);否则为 v1(填制日期版)。两者长期并存。
   const templateVersion = SETTLEMENT_TEMPLATE_VERSION;
@@ -716,6 +725,9 @@ async function parseSettlementV3(opts: {
   for (const tid of targetIds) {
     leafNameByTarget.set(tid, await leafNameMapByProject(tid));
   }
+  // 门禁(业务规则):目标项目初始预算审批生效前不可导入;未生效目标的行
+  // 标 error(预览页可见原因,改映射到已生效项目即可恢复),确认侧另有复核。
+  const approvedTargets = await approvedInitialBudgetIds(targetIds);
 
   const parsedRows: Array<{
     rowNo: number;
@@ -904,6 +916,8 @@ async function parseSettlementV3(opts: {
     const targetProjectId = mappingByName.get(first.projectFileName) ?? null;
     if (!targetProjectId) {
       errors.push({ field: 'project', message: '未映射项目;请在「项目映射」区选择目标项目' });
+    } else if (!approvedTargets.has(targetProjectId)) {
+      errors.push({ field: 'project', message: INITIAL_BUDGET_NOT_APPROVED_MSG });
     }
     // 科目自动预选:开支细项末段 == 目标项目唯一叶科目名。
     const preselected =
@@ -1646,8 +1660,24 @@ export async function confirmSettlementImport(
     const d = row.parsedData as unknown as SettlementParsedRow;
     return d.targetProjectId ?? batch.projectId;
   };
-  for (const pid of new Set(eligibleRows.map(rowProjectId))) {
+  const targetPids = [...new Set(eligibleRows.map(rowProjectId))];
+  for (const pid of targetPids) {
     await requirePermission(user, 'record:import', pid);
+  }
+  // 门禁复核:预览暂存期间目标项目状态可能变化(或行被改映射到未生效项目)。
+  {
+    const approvedNow = await approvedInitialBudgetIds(targetPids);
+    const bad = targetPids.filter((pid) => !approvedNow.has(pid));
+    if (bad.length > 0) {
+      const names = await prisma.project.findMany({
+        where: { id: { in: bad } },
+        select: { name: true },
+      });
+      throw new HTTPError(
+        422,
+        `以下${INITIAL_BUDGET_NOT_APPROVED_MSG}:${names.map((n) => n.name).join('、')}`,
+      );
+    }
   }
 
   const subjectIdsByProject = new Map<string, Set<string>>();

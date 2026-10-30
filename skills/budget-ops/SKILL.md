@@ -67,6 +67,7 @@ python budget.py upload ~/budget-inbox/A-001/结算单.xlsx /projects/$PID/impor
 | 调整单列表         | `GET /projects/$PID/adjustments` — 全部调整单(状态/kind/明细/锁),响应 `{adjustments:[…]}`;`GET …/adjustments/:adjId` 取单张,响应 `{adjustment:{…}}`                          |
 | 上传解析(不改台账) | `upload <文件.xlsx> /projects/$PID/imports`(multipart 字段 `file`)→ `{batchId}`,格式自动识别(结算单 v1 填制日期版 / v2 申请日期版 / 标准模板)                                |
 | 补全更新预览       | 结算单再次导入命中同单据编号且金额一致、带来新信息(补完成日期/状态推进到已支出)→ 行标「补全更新」,确认后**更新**既有记录(非新增);金额不一致或无新信息 = 硬重复,禁止          |
+| 导入前置条件       | 目标项目**初始预算须已审批生效**:未审批项目的上传/确认统一 422「项目初始预算尚未审批通过」;v3 多项目文件中未审批目标的行标 error,改映射到已审批项目即可                      |
 | 暂存行修改         | `PATCH /projects/$PID/imports/:batchId`,body `{"updates":[{"rowId","subjectId"?,"budgetYear"?,"forcedImport"?}]}`                                                            |
 
 ### 指令授权

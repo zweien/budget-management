@@ -136,6 +136,7 @@ async function buildStandardXlsx(): Promise<Buffer> {
 
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
+  await prisma.initialBudgetApplication.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.businessRecordHistory
     .deleteMany({ where: { businessRecord: { projectId } } })
     .catch(() => {});
@@ -175,6 +176,17 @@ describe('settlementImport.service (integration, real PG)', () => {
       adminUser(),
     );
     createdProjectIds.push(project.id);
+    await prisma.initialBudgetApplication
+      .create({
+        data: {
+          id: uuidv7(),
+          projectId: project.id,
+          status: 'APPROVED',
+          applicantId: adminId,
+          approvedAt: new Date(),
+        },
+      })
+      .catch(() => {});
     projectId = project.id;
 
     parentId = uuidv7();
@@ -1220,5 +1232,36 @@ describe('settlementImport.service (integration, real PG)', () => {
     });
     // 不落任何批次/行(与测试前计数持平——本项目已有其他测试的批次)。
     expect(await prisma.importBatch.count({ where: { projectId } })).toBe(batchesBefore);
+  });
+
+  it('门禁:初始预算未审批 → parseSettlement 422;恢复审批放行(v1)', async () => {
+    const stl = await buildSettlementXlsx([
+      {
+        docNo: 'GATE-V1',
+        docStatus: '完成记账',
+        fillDate: '2026-08-01',
+        subject: 'x',
+        amount: 100,
+        handler: '甲',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(stl);
+    expect(wb).not.toBeNull();
+
+    await prisma.initialBudgetApplication.update({
+      where: { projectId },
+      data: { status: 'DRAFT' },
+    });
+    await expect(parseSettlement(wb!, projectId, adminUser())).rejects.toMatchObject({
+      status: 422,
+      message: '项目初始预算尚未审批通过,不能导入业务记录',
+    });
+
+    await prisma.initialBudgetApplication.update({
+      where: { projectId },
+      data: { status: 'APPROVED' },
+    });
+    const batchId = await parseSettlement(wb!, projectId, adminUser(), 'gate-v1.xlsx');
+    expect(batchId).toBeTruthy();
   });
 });
