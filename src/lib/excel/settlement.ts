@@ -52,14 +52,19 @@ export const SETTLEMENT_HEADERS = {
  */
 export const SETTLEMENT_V2_APPLY_DATE = '申请日期';
 
-/** 单据状态 → BusinessStatus 映射(两种版式同表)。 */
+/** 单据状态 → BusinessStatus 映射(三种版式同表)。 */
 export const SETTLEMENT_STATUS_TO_ENUM: Record<string, 'PAID' | 'FINANCE_APPROVAL'> = {
   完成记账: 'PAID',
   // 以下均为「尚未记账」的在途单据 → 财务系统审批(payable):
-  // 制单保存(v1)、打印审签/完成审核(v2 实际出现)。
+  // 制单保存(v1)、打印审签/完成审核(v2 实际出现)、
+  // 待记账/完成复核/提交审核/完成收单(财务系统导出的其余在途态)。
   制单保存: 'FINANCE_APPROVAL',
   打印审签: 'FINANCE_APPROVAL',
   完成审核: 'FINANCE_APPROVAL',
+  待记账: 'FINANCE_APPROVAL',
+  完成复核: 'FINANCE_APPROVAL',
+  提交审核: 'FINANCE_APPROVAL',
+  完成收单: 'FINANCE_APPROVAL',
 };
 
 /** 业务退单:不导入(解析时跳过,仅保留行供预览页提示条数)。 */

@@ -45,7 +45,7 @@ import {
  *   单据编号为明细行粒度,冲账重报产生同号多行 → 按单据编号分组、金额取组内代数和
  *   (净额)成一条记录;开支细项末段与本地叶科目名精确相等时自动预选科目)。
  * - 无科目列:科目在预览页由用户逐条指定(updateSettlementRows 暂存),确认时写入。
- * - 单据状态映射:完成记账→PAID,制单保存/完成审核→FINANCE_APPROVAL,业务退单→跳过。
+ * - 单据状态映射:完成记账→PAID;在途态(制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单)→FINANCE_APPROVAL;业务退单→跳过。
  * - 预算年度按日期(填制/申请)年份推导,预览页可改。
  * - **补全更新(refresh)**:docNo 命中项目内既有未作废记录且金额一致且带来新信息
  *   (新行有完成日期而已有记录缺 / 状态推进到已支出)→ 不判硬重复,确认后更新既有记录
@@ -59,7 +59,7 @@ export interface SettlementParsedRow {
   kind: 'settlement';
   /** 财务系统单据编号(A 列;非必填)。 */
   docNo: string | null;
-  /** 单据状态原文(完成记账/制单保存)。 */
+  /** 单据状态原文(完成记账/制单保存/待记账 等,见 SETTLEMENT_STATUS_TO_ENUM)。 */
   statusLabel: string;
   /** 映射后的业务状态。 */
   status: BusinessStatus;
@@ -387,7 +387,7 @@ export async function parseSettlement(
       errors.push({
         field: 'docStatus',
         message: statusLabel
-          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核,业务退单不导入)`
+          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单,业务退单不导入)`
           : '单据状态不能为空',
       });
     }
@@ -775,7 +775,7 @@ async function parseSettlementV3(opts: {
       errors.push({
         field: 'docStatus',
         message: statusLabel
-          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核,业务退单不导入)`
+          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单,业务退单不导入)`
           : '单据状态不能为空',
       });
     }
