@@ -442,14 +442,29 @@ function DateRangeFilter<TData>({
   const value = column.getFilterValue() as DateRangeFilterValue | undefined;
   const isEmptyOnly = value?.empty === true;
   const presets = useDatePresets();
-  /** 年份快捷:今年起往前 6 年(业务/完成日期按整年筛查高频)。 */
+  /**
+   * 年份快捷:去年起往前 6 年(业务/完成日期按整年筛查高频)。不含今年——
+   * 「本年」预设即今年整年区间,重复出现会两个按钮同时高亮(codex review)。
+   */
   const years = React.useMemo(() => {
     const y = new Date().getFullYear();
-    return Array.from({ length: 6 }, (_, i) => y - i);
+    return Array.from({ length: 6 }, (_, i) => y - 1 - i);
   }, []);
+  /**
+   * 起止输入草稿:原生 date input 分段键入的中间态(空串/年份段未输满如
+   * "0005-…")留在草稿展示,不写回筛选值,避免受控值在重渲染时把输入弹回
+   * 旧日期(已有日期时改年份打不进去);解析合法才提交,失焦清草稿回显
+   * 已提交区间(codex review major)。
+   */
+  const [fromDraft, setFromDraft] = React.useState<string | null>(null);
+  const [toDraft, setToDraft] = React.useState<string | null>(null);
+  /** 日历显示月:预设/年份快捷提交后跳转到区间起始月(外部 selected 变化
+   *  react-day-picker 不自动导航);用户手动翻月经 onMonthChange 同步。 */
+  const [month, setMonth] = React.useState<Date | undefined>(undefined);
 
   const apply = (r: DateRange | undefined) => {
     column.setFilterValue(r?.from || r?.to ? r : undefined);
+    if (r?.from) setMonth(startOfMonth(r.from));
   };
 
   return (
@@ -479,7 +494,7 @@ function DateRangeFilter<TData>({
               {p.label}
             </PresetButton>
           ))}
-          {/* 年份快捷:整年区间(1/1 ~ 12/31),与预设同高亮互斥 */}
+          {/* 年份快捷:整年区间(1/1 ~ 12/31),与预设高亮互斥(今年走「本年」) */}
           <div className="my-1 border-t border-border" />
           {years.map((y) => {
             const anchor = new Date(y, 0, 1);
@@ -496,30 +511,35 @@ function DateRangeFilter<TData>({
           <div className="flex items-center gap-1.5">
             <input
               type="date"
-              value={value?.from ? toDateInput(new Date(value.from)) : ''}
+              value={fromDraft ?? (value?.from ? toDateInput(new Date(value.from)) : '')}
               onChange={(e) => {
+                setFromDraft(e.target.value);
                 const from = parseDateInput(e.target.value);
-                // 中间态(空串/年份段未输满)不提交也不清空:键入途中把已设区间
-                // 整个抹掉,另一个输入框会跟着被清空。清空走「全部」预设。
+                // 中间态不提交也不清空已设区间;清空走「全部」预设。
                 if (from) apply({ from, to: value?.to ? new Date(value.to) : from });
               }}
+              onBlur={() => setFromDraft(null)}
               aria-label="起始日期"
               className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             />
             <span className="text-mute">—</span>
             <input
               type="date"
-              value={value?.to ? toDateInput(new Date(value.to)) : ''}
+              value={toDraft ?? (value?.to ? toDateInput(new Date(value.to)) : '')}
               onChange={(e) => {
+                setToDraft(e.target.value);
                 const to = parseDateInput(e.target.value);
                 if (to) apply({ from: value?.from ? new Date(value.from) : to, to });
               }}
+              onBlur={() => setToDraft(null)}
               aria-label="结束日期"
               className="h-7 w-[7.5rem] rounded-md border border-input bg-transparent px-1.5 text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             />
           </div>
           <Calendar
             mode="range"
+            month={month}
+            onMonthChange={setMonth}
             selected={value as DateRange | undefined}
             onSelect={apply}
             numberOfMonths={1}

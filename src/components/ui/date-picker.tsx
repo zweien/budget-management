@@ -51,7 +51,15 @@ export function DatePicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild onClick={(e) => e.preventDefault()}>
+      <PopoverTrigger
+        asChild
+        onClick={(e) => {
+          // 点击只开不关:抑制 Radix toggle;显式打开覆盖「Esc 关闭后输入框
+          // 仍持焦点、再点击不触发 onFocus」的场景(codex review)。
+          e.preventDefault();
+          setOpen(true);
+        }}
+      >
         <div className={cn('relative w-full', className)}>
           <CalendarDays className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-mute" />
           <Input
