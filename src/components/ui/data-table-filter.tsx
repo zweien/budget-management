@@ -462,9 +462,14 @@ function DateRangeFilter<TData>({
    *  react-day-picker 不自动导航);用户手动翻月经 onMonthChange 同步。 */
   const [month, setMonth] = React.useState<Date | undefined>(undefined);
 
-  const apply = (r: DateRange | undefined) => {
+  /**
+   * 提交区间;navigate=true 时日历跳到区间起始月。预设/年份快捷/手输日期
+   * 需要跳月(把选中的远期区间带进视野);日历点选传 false——用户已翻到
+   * 目标月,回跳起点月会把刚选的终点"藏起来"(codex review)。
+   */
+  const apply = (r: DateRange | undefined, navigate = true) => {
     column.setFilterValue(r?.from || r?.to ? r : undefined);
-    if (r?.from) setMonth(startOfMonth(r.from));
+    if (navigate && r?.from) setMonth(startOfMonth(r.from));
   };
 
   return (
@@ -541,7 +546,7 @@ function DateRangeFilter<TData>({
             month={month}
             onMonthChange={setMonth}
             selected={value as DateRange | undefined}
-            onSelect={apply}
+            onSelect={(r) => apply(r, false)}
             numberOfMonths={1}
             className="border-0 p-0"
           />
