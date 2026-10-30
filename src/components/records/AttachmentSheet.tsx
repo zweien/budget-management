@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Paperclip, Download, Trash2, Plus, FileWarning, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -65,6 +65,15 @@ export function AttachmentSheet({
   const [pending, setPending] = useState<PendingItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState<AttachmentMeta | null>(null);
+  /**
+   * 附件数镜像(供 onChanged 上报):并发删除/重叠上传时,各回调闭包里的
+   * items.length 是旧值(连删两个会都报 1,实际剩 0)。以 ref 跟随 items
+   * 同步为真值,操作成功时在 ref 上增减再上报(codex review)。
+   */
+  const countRef = useRef(0);
+  useEffect(() => {
+    countRef.current = items.length;
+  }, [items]);
 
   // 打开时拉取该记录的附件。
   useEffect(() => {
@@ -100,15 +109,15 @@ export function AttachmentSheet({
       ...prev,
       ...arr.map<PendingItem>((f) => ({ file: f, status: 'uploading' })),
     ]);
-    // 本地计数器:循环内 items 闭包不更新,累计后经 onChanged 通知父页。
-    let count = items.length;
+    // 计数走 countRef(并发批次闭包里的 items 是旧值);每个成功操作后
+    // 在 ref 上增减再上报,items 变化经 effect 重同步为服务端真值。
     for (const file of arr) {
       try {
         const meta = await uploadAttachment(projectId, record.id, file);
         setItems((prev) => [...prev, meta]);
         setPending((prev) => prev.map((p) => (p.file === file ? { ...p, status: 'done' } : p)));
-        count += 1;
-        onChanged?.(record.id, count);
+        countRef.current += 1;
+        onChanged?.(record.id, countRef.current);
       } catch (e) {
         setPending((prev) =>
           prev.map((p) =>
@@ -130,7 +139,8 @@ export function AttachmentSheet({
       await deleteAttachment(projectId, record.id, att.id);
       setItems((prev) => prev.filter((x) => x.id !== att.id));
       toast.success('已删除附件');
-      onChanged?.(record.id, items.length - 1);
+      countRef.current -= 1;
+      onChanged?.(record.id, countRef.current);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '删除失败');
     }

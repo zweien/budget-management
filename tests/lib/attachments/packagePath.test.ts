@@ -114,6 +114,21 @@ describe('buildFolderPaths(全树批量 + 兄弟同名消歧)', () => {
     expect(paths.get('a')).toBe('设备费');
     expect(paths.get('b')).toBe('材料费');
   });
+  it('三方碰撞链式消歧:x / x_B / x_B_C,最终目录名互不重复', () => {
+    // (名 x,码 A)、(名 x,码 B)、(名 x_B,码 C):第三个的消歧候选 x_B
+    // 撞上第二个的最终名 → 须继续探测到 x_B_C(codex review major)。
+    const subs: SubjectNode[] = [
+      { id: 'a', code: 'A', name: 'x', parentId: null, level: 1, isLeaf: true },
+      { id: 'b', code: 'B', name: 'x', parentId: null, level: 1, isLeaf: true },
+      { id: 'c', code: 'C', name: 'x_B', parentId: null, level: 1, isLeaf: true },
+    ];
+    const paths = buildFolderPaths(subs);
+    expect(paths.get('a')).toBe('x');
+    expect(paths.get('b')).toBe('x_B');
+    expect(paths.get('c')).toBe('x_B_C');
+    // 全树目录名唯一性不变式。
+    expect(new Set([...paths.values()]).size).toBe(paths.size);
+  });
   it('消歧后目录名含危险编码也已消毒', () => {
     const subs: SubjectNode[] = [
       { id: 'a', code: 'A1', name: 'x', parentId: null, level: 1, isLeaf: true },

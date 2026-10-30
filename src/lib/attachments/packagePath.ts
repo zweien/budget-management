@@ -76,8 +76,9 @@ export function buildFolderPath(subjectId: string, subjectById: Map<string, Subj
 /**
  * 全树批量构建 subjectId → 文件夹路径(打包路由入口)。
  * 在 buildFolderPath 基础上做兄弟同名消歧:同一父节点下消毒后同名的
- * 科目(名称不保证唯一,如「试验/测试」与「试验:测试」),后出现者追加
- * `_${编码}`,避免两个科目的附件被合并进同一目录、科目归属丢失。
+ * 科目(名称不保证唯一,如「试验/测试」与「试验:测试」)后者追加
+ * `_${编码}`;追加后仍与其他最终目录名相同时继续加序号,保证全树
+ * 目录名互不重复(不同科目的附件绝不混入同一目录)。
  * subjects 顺序即消歧顺序,调用方应传 sortOrder/code 排序后的全量。
  */
 export function buildFolderPaths(subjects: SubjectNode[]): Map<string, string> {
@@ -89,15 +90,21 @@ export function buildFolderPaths(subjects: SubjectNode[]): Map<string, string> {
     list.push(s);
     childrenOf.set(s.parentId ?? null, list);
   }
-  // 段名消歧:同级消毒后同名 → 后者 `${name}_${code}`。
+  // 段名消歧:对「最终目录名」探测去重——同名兄弟追加 `_${编码}`;
+  // 追加后仍撞(与第三方的原名或其他消歧名相同,如 x/x/x_B 三方)继续加序号。
   const segById = new Map<string, string>();
   for (const kids of childrenOf.values()) {
-    const seen = new Map<string, number>();
+    const usedNames = new Set<string>();
     for (const k of kids) {
       const base = sanitizeSegment(k.name) || sanitizeSegment(k.code) || k.id;
-      const n = (seen.get(base) ?? 0) + 1;
-      seen.set(base, n);
-      segById.set(k.id, n > 1 ? `${base}_${sanitizeSegment(k.code) || k.id}` : base);
+      let seg = base;
+      if (usedNames.has(seg)) {
+        const suffix = sanitizeSegment(k.code) || k.id;
+        seg = `${base}_${suffix}`;
+        for (let i = 2; usedNames.has(seg); i++) seg = `${base}_${suffix}(${i})`;
+      }
+      usedNames.add(seg);
+      segById.set(k.id, seg);
     }
   }
   const paths = new Map<string, string>();
