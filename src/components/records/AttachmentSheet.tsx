@@ -74,6 +74,13 @@ export function AttachmentSheet({
   useEffect(() => {
     countRef.current = items.length;
   }, [items]);
+  /** 当前展示的记录 id:组件随抽屉开合保持挂载,在途上传/删除完成时
+   *  须校验未切换——否则迟到的 setItems 会把旧记录的附件混进新记录
+   *  列表,共享 countRef 也已被新记录清零(codex review)。 */
+  const activeRecordIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeRecordIdRef.current = record?.id ?? null;
+  }, [record?.id]);
 
   // 打开时拉取该记录的附件。
   useEffect(() => {
@@ -111,11 +118,19 @@ export function AttachmentSheet({
     ]);
     // 计数走 countRef(并发批次闭包里的 items 是旧值);每个成功操作后
     // 在 ref 上增减再上报,items 变化经 effect 重同步为服务端真值。
+    // 批次起拍快照:操作期间用户切换到别的记录时,countRef 已被新记录
+    // 清零,退回快照累计上报,且不再落新记录的列表。
+    let fallbackCount = countRef.current;
     for (const file of arr) {
       try {
         const meta = await uploadAttachment(projectId, record.id, file);
-        setItems((prev) => [...prev, meta]);
         setPending((prev) => prev.map((p) => (p.file === file ? { ...p, status: 'done' } : p)));
+        if (activeRecordIdRef.current !== record.id) {
+          fallbackCount += 1;
+          onChanged?.(record.id, fallbackCount);
+          continue;
+        }
+        setItems((prev) => [...prev, meta]);
         countRef.current += 1;
         onChanged?.(record.id, countRef.current);
       } catch (e) {
@@ -135,8 +150,13 @@ export function AttachmentSheet({
   };
 
   const handleDelete = async (att: AttachmentMeta) => {
+    const startCount = countRef.current; // 记录切换后的兜底快照
     try {
       await deleteAttachment(projectId, record.id, att.id);
+      if (activeRecordIdRef.current !== record.id) {
+        onChanged?.(record.id, Math.max(0, startCount - 1));
+        return;
+      }
       setItems((prev) => prev.filter((x) => x.id !== att.id));
       toast.success('已删除附件');
       countRef.current -= 1;
