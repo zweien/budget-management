@@ -1252,6 +1252,65 @@ export async function getSettlementBatch(
     throw new HTTPError(409, '该批次不是个人结算单导入批次');
   }
 
+  // 门禁现值同步(codex review):解析期按「当时」审批状态落库,此后项目
+  // 审批状态可能变化——读取预览时按当前状态双向重估并回写:
+  // - 审批已通过 → 剥掉门禁错误(无其他错误则恢复 valid,确认侧可见);
+  // - 审批被撤销/降级 → valid 行补门禁错误降为 error。
+  // 仅处理结算单批次行(v1/v2 目标=批次项目,v3 目标=行级映射)。
+  {
+    const gateError = (v: (typeof batch.rows)[number]) =>
+      ((v.errors ?? null) as unknown as SettlementRowError[] | null)?.some(
+        (e) => e.field === 'project' && e.message === INITIAL_BUDGET_NOT_APPROVED_MSG,
+      ) ?? false;
+    const candidates =
+      batch.status === 'pending'
+        ? batch.rows.filter(
+            (r) =>
+              r.validationStatus !== 'skipped' && (gateError(r) || r.validationStatus === 'valid'),
+          )
+        : [];
+    const targetOf = (r: (typeof batch.rows)[number]) =>
+      (r.parsedData as unknown as SettlementParsedRow).targetProjectId ?? batch.projectId;
+    if (candidates.length > 0) {
+      const approvedNow = await approvedInitialBudgetIds([...new Set(candidates.map(targetOf))]);
+      for (const r of candidates) {
+        const approved = approvedNow.has(targetOf(r));
+        const errs = (((r.errors ?? null) as unknown as SettlementRowError[] | null) ?? []).filter(
+          (e) => !(e.field === 'project' && e.message === INITIAL_BUDGET_NOT_APPROVED_MSG),
+        );
+        const hadGate = gateError(r);
+        if (approved && hadGate) {
+          // 复活:剥门禁错误;仍有其他错误则维持 error。
+          const revived = errs.length > 0 ? errs : null;
+          r.errors = revived as unknown as typeof r.errors;
+          r.validationStatus = errs.length === 0 ? 'valid' : 'error';
+          await prisma.importRow.update({
+            where: { id: r.id },
+            data: {
+              errors: r.errors as unknown as Prisma.InputJsonValue,
+              validationStatus: r.validationStatus,
+            },
+          });
+        } else if (!approved && !hadGate && r.validationStatus === 'valid') {
+          // 降级:审批在暂存期间被撤销。
+          const next = [
+            ...errs,
+            { field: 'project', message: INITIAL_BUDGET_NOT_APPROVED_MSG } as SettlementRowError,
+          ];
+          r.errors = next as unknown as typeof r.errors;
+          r.validationStatus = 'error';
+          await prisma.importRow.update({
+            where: { id: r.id },
+            data: {
+              errors: next as unknown as Prisma.InputJsonValue,
+              validationStatus: 'error',
+            },
+          });
+        }
+      }
+    }
+  }
+
   const toPreview = (r: (typeof batch.rows)[number]): SettlementPreviewRow => {
     const data = r.parsedData as unknown as SettlementParsedRow;
     const errs = (r.errors ?? null) as unknown as SettlementRowError[] | null;
@@ -1564,6 +1623,10 @@ export async function updateSettlementRows(
     if (g) g.push(job);
     else remapByTarget.set(job.target, [job]);
   }
+  // 门禁重算(codex review):改映射按「当前」审批状态补/清门禁错误——
+  // baseErrors 已滤掉旧 project 错误,审批通过的目标自然恢复 valid,
+  // 未审批的目标保持 error,预览与确认口径一致(不再出现预览 valid、确认 422)。
+  const remapApproved = await approvedInitialBudgetIds([...remapByTarget.keys()]);
   for (const [target, jobs] of remapByTarget) {
     const verdicts = await checkDuplicates(
       target,
@@ -1593,10 +1656,14 @@ export async function updateSettlementRows(
             : 'none';
       if (v?.hard) job.data.dupReason = hardDupReason(v);
       else job.data.dupReason = null;
-      const nextErrors: SettlementRowError[] | null =
-        job.baseErrors.length > 0 ? job.baseErrors : null;
-      job.nextErrors = nextErrors;
-      job.row.validationStatus = job.baseErrors.length === 0 ? 'valid' : 'error';
+      const finalErrors: SettlementRowError[] = remapApproved.has(target)
+        ? job.baseErrors
+        : [
+            ...job.baseErrors,
+            { field: 'project', message: INITIAL_BUDGET_NOT_APPROVED_MSG } as SettlementRowError,
+          ];
+      job.nextErrors = finalErrors.length > 0 ? finalErrors : null;
+      job.row.validationStatus = finalErrors.length === 0 ? 'valid' : 'error';
     }
   }
   if (remapJobs.length > 0) {
