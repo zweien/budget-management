@@ -1,0 +1,6 @@
+# 换行符规范:仓库内统一 LF 存储,防止 Windows 端 core.autocrlf 提交时混入 CRLF
+* text=auto
+
+# Shell 脚本强制 LF(含工作区):docker-entrypoint.sh 会被 COPY 进镜像作为
+# ENTRYPOINT 执行,若被 Windows git 检出为 CRLF,容器启动会报 bad interpreter
+*.sh text eol=lf
