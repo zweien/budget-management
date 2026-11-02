@@ -282,6 +282,7 @@ export default function ReceiptsPage() {
               <TableHead>备注</TableHead>
               <TableHead className="w-28">录入人</TableHead>
               <TableHead className="w-40">录入时间</TableHead>
+              <TableHead className="w-20">附件</TableHead>
               <TableHead className="w-36">操作</TableHead>
             </TableRow>
           </TableHeader>
@@ -296,7 +297,7 @@ export default function ReceiptsPage() {
               ))
             ) : records.length === 0 ? (
               <TableRow className="">
-                <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                   暂无到账记录
                 </TableCell>
               </TableRow>
