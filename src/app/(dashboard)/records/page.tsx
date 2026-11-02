@@ -26,6 +26,7 @@ import { useLatestCallback } from '@/lib/hooks/use-latest-callback';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ColumnSettingsPopover, useStoredColumnVisibility } from '@/components/ui/column-settings';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { HeaderFilter } from '@/components/ui/data-table-filter';
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips';
 import { describeDateRangeValue } from '@/lib/table/describe-date-range';
@@ -113,6 +114,28 @@ interface UnifiedRecordRow {
   createdAt: string;
   attachmentCount: number;
   subject: { id: string; code: string; name: string } | null;
+}
+
+/** §17.7 变更历史动作标签(与项目台账页同款)。 */
+const HISTORY_ACTION_LABEL: Record<string, string> = {
+  create: '新增',
+  update: '修改',
+  void: '作废',
+  status_switch: '状态切换',
+  carryover_out: '结转(源)',
+  carryover_in: '结转(新)',
+};
+
+/** 变更历史行(对应 business_record_history;与项目台账页同构)。 */
+interface RecordHistoryRow {
+  id: string;
+  businessRecordId: string;
+  action: string;
+  beforeData: Record<string, unknown> | null;
+  afterData: Record<string, unknown> | null;
+  operatorId: string;
+  operatedAt: string;
+  reason: string | null;
 }
 
 const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] as const;
@@ -232,6 +255,25 @@ function UnifiedRecordsPageInner() {
     businessDate: string;
     isVoid: boolean;
   } | null>(null);
+  // §17.7 变更历史:目标行 + 历史行(操作列 History 按钮弹出)。
+  const [historyTarget, setHistoryTarget] = useState<UnifiedRecordRow | null>(null);
+  const [historyRows, setHistoryRows] = useState<RecordHistoryRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const openHistory = useCallback(async (row: UnifiedRecordRow) => {
+    setHistoryTarget(row);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const data = await apiFetch<{ history: RecordHistoryRow[] }>(
+        `/api/projects/${row.projectId}/records/${row.id}/history`,
+      );
+      setHistoryRows(data.history ?? []);
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
   const [submitting, setSubmitting] = useState(false);
 
   // ---- 列表 ----
@@ -873,14 +915,15 @@ function UnifiedRecordsPageInner() {
             </Button>
           </>
         ) : null}
-        <Button variant="ghost" size="icon" className={iconBtn} asChild>
-          <Link
-            href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}`}
-            title="查看该科目的记录"
-            aria-label={`查看科目记录:${row.summary}`}
-          >
-            <History />
-          </Link>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={iconBtn}
+          title="变更历史"
+          aria-label={`查看变更历史:${row.summary}`}
+          onClick={() => void openHistory(row)}
+        >
+          <History />
         </Button>
       </div>
     );
@@ -1651,6 +1694,89 @@ function UnifiedRecordsPageInner() {
           )
         }
       />
+
+      {/* §17.7 变更历史 Sheet(与项目台账页同款交互) */}
+      <Sheet open={historyTarget !== null} onOpenChange={(open) => !open && setHistoryTarget(null)}>
+        <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-6 sm:max-w-xl">
+          <SheetHeader className="p-0 pb-4">
+            <SheetTitle>变更历史</SheetTitle>
+          </SheetHeader>
+          {historyTarget ? (
+            <div className="space-y-4">
+              <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border">
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">申请日期</dt>
+                  <dd className="mt-1 text-sm tabular-nums">
+                    {format(new Date(historyTarget.businessDate), 'yyyy-MM-dd')}
+                  </dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">摘要</dt>
+                  <dd className="mt-1 text-sm">{historyTarget.summary}</dd>
+                </div>
+                <div className="bg-card p-3">
+                  <dt className="text-xs text-mute">金额</dt>
+                  <dd className="mt-1 text-sm">
+                    <MoneyText value={historyTarget.amount} riskOnNegative={false} />
+                  </dd>
+                </div>
+              </dl>
+
+              <p className="text-sm text-muted-foreground">
+                变更链(按时间正序),共 {historyRows.length} 条。
+              </p>
+
+              {historyLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-8 w-full" />
+                  ))}
+                </div>
+              ) : historyRows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">暂无变更历史</p>
+              ) : (
+                <div className="space-y-3">
+                  {historyRows.map((h) => (
+                    <div
+                      key={h.id}
+                      className="rounded-lg border border-border bg-card p-3 text-sm shadow-l1"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">
+                          {HISTORY_ACTION_LABEL[h.action] ?? h.action}
+                        </Badge>
+                        <span className="text-xs text-mute tabular-nums">
+                          {format(new Date(h.operatedAt), 'yyyy-MM-dd HH:mm')}
+                        </span>
+                        <span className="font-mono text-xs text-mute">
+                          {h.operatorId.slice(0, 8)}
+                        </span>
+                      </div>
+                      {h.reason ? (
+                        <p className="mt-1.5 text-sm text-muted-foreground">原因:{h.reason}</p>
+                      ) : null}
+                      {h.beforeData || h.afterData ? (
+                        <div className="mt-2 grid gap-2">
+                          {h.beforeData ? (
+                            <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap">
+                              {JSON.stringify(h.beforeData, null, 2)}
+                            </pre>
+                          ) : null}
+                          {h.afterData ? (
+                            <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap">
+                              {JSON.stringify(h.afterData, null, 2)}
+                            </pre>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
