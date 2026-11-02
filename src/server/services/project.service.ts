@@ -1,6 +1,7 @@
 import { Prisma, Project, User, MemberRole } from '@prisma/client';
 
 import { prisma, BULK_TX_OPTIONS } from '@/lib/prisma';
+import { ZERO } from '@/lib/decimal';
 import { HTTPError } from '@/lib/auth/session';
 import {
   requirePermission,
@@ -201,7 +202,7 @@ export async function listProjects(
     keyProjectIds?: string[];
   },
   opts: { includeArchived?: boolean } = {},
-): Promise<(Project & { canEdit: boolean })[]> {
+): Promise<(Project & { canEdit: boolean; totalSpent: string })[]> {
   const scoped =
     user.viaApiKey && user.keyProjectScope === 'selected'
       ? { id: { in: user.keyProjectIds ?? [] } }
@@ -224,16 +225,29 @@ export async function listProjects(
       projectBudget: true,
     },
   });
+  // 总支出:各项目有效(未作废)业务记录金额合计,与台账「总占用」口径一致
+  // (已支出 + 应付未付);一次 groupBy 批量取回,避免逐项目聚合查询。
+  const spendAgg = await prisma.businessRecord.groupBy({
+    by: ['projectId'],
+    where: { projectId: { in: projects.map((p) => p.id) }, isVoid: false },
+    _sum: { amount: true },
+  });
+  const spentByProject = new Map(spendAgg.map((g) => [g.projectId, g._sum.amount]));
+  const withSpent = projects.map((p) => ({
+    ...p,
+    totalSpent: (spentByProject.get(p.id) ?? ZERO).toFixed(2),
+  }));
+
   // canEdit 随行下发(项目管理页编辑/归档按钮的行级门控):ADMIN 恒可,否则需 OWNER。
   if (user.role === 'ADMIN') {
-    return projects.map((p) => ({ ...p, canEdit: true }));
+    return withSpent.map((p) => ({ ...p, canEdit: true }));
   }
   const owned = await prisma.projectMember.findMany({
     where: { userId: user.id, memberRole: 'OWNER' },
     select: { projectId: true },
   });
   const ownedIds = new Set(owned.map((m) => m.projectId));
-  return projects.map((p) => ({ ...p, canEdit: ownedIds.has(p.id) }));
+  return withSpent.map((p) => ({ ...p, canEdit: ownedIds.has(p.id) }));
 }
 
 /** 项目 + 当前用户权限标记(统一录入页的数据源)。 */

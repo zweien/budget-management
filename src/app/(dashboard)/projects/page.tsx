@@ -72,6 +72,8 @@ interface ProjectRow {
   members: { user: { id: string; name: string } }[];
   /** 总经费(当前口径);未编制初始预算的项目为 null。 */
   projectBudget: { currentAmount: string } | null;
+  /** 总支出:有效(未作废)业务记录金额合计,与台账「总占用」同口径。 */
+  totalSpent: string;
   createdAt: string;
   /** 行级编辑权(ADMIN 或该项目 OWNER):编辑/归档/恢复按钮的门控。 */
   canEdit: boolean;
@@ -110,11 +112,15 @@ function ValuesHeader({
 }
 
 /** 表头宽度/对齐(与旧手写表一致)。 */
+/** 默认隐藏的列(仅当用户未显式设置过显隐时生效;列设置里可随时打开)。 */
+const DEFAULT_HIDDEN_COLUMNS = ['level', 'undertakingUnit', 'createdAt'];
+
 const HEAD_CLASS: Record<string, string> = {
   code: 'w-40',
   members: 'w-28',
   budgetMode: 'w-24',
   projectBudget: 'w-36 text-right',
+  totalSpent: 'w-36 text-right',
   level: 'w-20',
   projectType: 'w-28',
   undertakingUnit: 'w-36',
@@ -136,8 +142,10 @@ export default function ProjectsPage() {
   /** 是否包含已归档项目(项目管理:归档可恢复,开关切换查看)。 */
   const [showArchived, setShowArchived] = useState(false);
   // 列显隐偏好(cookie 持久化,与录入页同款交互);TanStack 受控 state 驱动。
-  const [columnVisibility, toggleColumnVisibility] =
-    useStoredColumnVisibility('ui.projects.columns');
+  const [columnVisibility, toggleColumnVisibility] = useStoredColumnVisibility(
+    'ui.projects.columns',
+    DEFAULT_HIDDEN_COLUMNS,
+  );
 
   // 表头筛选(客户端组合)与排序。
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -376,6 +384,24 @@ export default function ProjectsPage() {
         ),
       },
       {
+        id: 'totalSpent',
+        // 服务端恒带值('0.00' 起),数值化安全;排序/筛选与总经费同款。
+        accessorFn: (r) => Number(r.totalSpent),
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="总支出" type="range" sortable />
+        ),
+        filterFn: numberRange<ProjectRow>(),
+        sortingFn: 'basic',
+        cell: ({ row }) => (
+          <span className="block text-right tabular-nums">
+            {Number(row.original.totalSpent).toLocaleString('zh-CN', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </span>
+        ),
+      },
+      {
         accessorFn: (r) => r.level ?? '',
         id: 'level',
         header: ({ column }) => (
@@ -564,6 +590,7 @@ export default function ProjectsPage() {
               { id: 'members', label: '负责人' },
               { id: 'budgetMode', label: '预算类型' },
               { id: 'projectBudget', label: '总经费' },
+              { id: 'totalSpent', label: '总支出' },
               { id: 'level', label: '级别' },
               { id: 'projectType', label: '项目类型' },
               { id: 'undertakingUnit', label: '承担单位' },
