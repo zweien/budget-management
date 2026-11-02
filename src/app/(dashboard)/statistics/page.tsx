@@ -727,7 +727,16 @@ function CustomStatisticsTab() {
       {/* 报销凭证附件抽屉(跨项目按行打开;统计页只读,不可上传) */}
       <AttachmentSheet
         projectId={attachmentTarget?.projectId ?? ''}
-        record={attachmentTarget}
+        owner={
+          attachmentTarget
+            ? {
+                kind: 'record',
+                id: attachmentTarget.id,
+                description: `${attachmentTarget.summary} · ${attachmentTarget.handler} · ¥${attachmentTarget.amount} · ${attachmentTarget.businessDate}${attachmentTarget.isVoid ? ' · 已作废' : ''}`,
+                locked: attachmentTarget.isVoid,
+              }
+            : null
+        }
         canWrite={false}
         open={attachmentTarget !== null}
         onOpenChange={(open) => {

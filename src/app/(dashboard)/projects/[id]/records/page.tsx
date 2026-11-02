@@ -1871,15 +1871,13 @@ function BusinessRecordsPageInner() {
       {/* 报销凭证附件 Sheet(Task 9 集成) */}
       <AttachmentSheet
         projectId={projectId}
-        record={
+        owner={
           attachmentTarget
             ? {
+                kind: 'record',
                 id: attachmentTarget.id,
-                summary: attachmentTarget.summary,
-                handler: attachmentTarget.handler,
-                amount: attachmentTarget.amount,
-                businessDate: attachmentTarget.businessDate,
-                isVoid: attachmentTarget.isVoid,
+                description: `${attachmentTarget.summary} · ${attachmentTarget.handler} · ¥${attachmentTarget.amount} · ${attachmentTarget.businessDate}${attachmentTarget.isVoid ? ' · 已作废' : ''}`,
+                locked: attachmentTarget.isVoid,
               }
             : null
         }

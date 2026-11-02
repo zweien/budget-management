@@ -1,5 +1,5 @@
 /**
- * 报销凭证附件的客户端 API 封装。
+ * 附件的客户端 API 封装(业务记录报销凭证 + 到账流水)。
  *
  * 上传走 multipart,必须绕过 apiFetch(它强制 Content-Type: application/json),
  * 改用裸 fetch + bootstrapMockUser() 注入 x-mock-user-id,对齐 imports/page.tsx。
@@ -8,9 +8,11 @@
 
 import { apiFetch, bootstrapMockUser, downloadFile } from '@/lib/api/client';
 
+/** 附件宿主类型:业务记录(records)或到账流水(receipts)。 */
+export type AttachmentOwnerKind = 'record' | 'receipt';
+
 export interface AttachmentMeta {
   id: string;
-  recordId: string;
   fileName: string;
   contentType: string;
   sizeBytes: number;
@@ -18,13 +20,21 @@ export interface AttachmentMeta {
   createdAt: string;
 }
 
-/** 列出某业务记录的全部附件元数据。 */
+/** 宿主附件接口的路径前缀(kind 缺省 record,既有调用零改动)。 */
+function ownerBase(projectId: string, ownerId: string, kind: AttachmentOwnerKind = 'record') {
+  return kind === 'receipt'
+    ? `/api/projects/${projectId}/receipts/${ownerId}/attachments`
+    : `/api/projects/${projectId}/records/${ownerId}/attachments`;
+}
+
+/** 列出某宿主(业务记录/到账)的全部附件元数据。 */
 export async function listAttachments(
   projectId: string,
-  recordId: string,
+  ownerId: string,
+  kind: AttachmentOwnerKind = 'record',
 ): Promise<AttachmentMeta[]> {
   const data = await apiFetch<{ attachments: AttachmentMeta[] }>(
-    `/api/projects/${projectId}/records/${recordId}/attachments`,
+    ownerBase(projectId, ownerId, kind),
   );
   return data.attachments;
 }
@@ -32,13 +42,14 @@ export async function listAttachments(
 /** 上传单个附件(multipart)。失败抛 Error(message 为服务端 error 文案)。 */
 export async function uploadAttachment(
   projectId: string,
-  recordId: string,
+  ownerId: string,
   file: File,
+  kind: AttachmentOwnerKind = 'record',
 ): Promise<AttachmentMeta> {
   const mockUserId = await bootstrapMockUser();
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`/api/projects/${projectId}/records/${recordId}/attachments`, {
+  const res = await fetch(ownerBase(projectId, ownerId, kind), {
     method: 'POST',
     headers: mockUserId ? { 'x-mock-user-id': mockUserId } : {},
     body: form,
@@ -58,10 +69,11 @@ export async function uploadAttachment(
 /** 删除单个附件。 */
 export async function deleteAttachment(
   projectId: string,
-  recordId: string,
+  ownerId: string,
   attId: string,
+  kind: AttachmentOwnerKind = 'record',
 ): Promise<void> {
-  await apiFetch(`/api/projects/${projectId}/records/${recordId}/attachments/${attId}`, {
+  await apiFetch(`${ownerBase(projectId, ownerId, kind)}/${attId}`, {
     method: 'DELETE',
   });
 }
@@ -69,13 +81,11 @@ export async function deleteAttachment(
 /** 下载单个附件(浏览器触发文件保存)。 */
 export function downloadAttachment(
   projectId: string,
-  recordId: string,
+  ownerId: string,
   attId: string,
+  kind: AttachmentOwnerKind = 'record',
 ): Promise<void> {
-  return downloadFile(
-    `/api/projects/${projectId}/records/${recordId}/attachments/${attId}`,
-    'attachment',
-  );
+  return downloadFile(`${ownerBase(projectId, ownerId, kind)}/${attId}`, 'attachment');
 }
 
 /** 批量导出附件 zip(沿用筛选:年度/科目)。 */
@@ -119,11 +129,12 @@ export function packageAttachmentsBySubject(
  */
 export async function fetchAttachmentBlob(
   projectId: string,
-  recordId: string,
+  ownerId: string,
   attId: string,
+  kind: AttachmentOwnerKind = 'record',
 ): Promise<Blob> {
   const mockUserId = await bootstrapMockUser();
-  const res = await fetch(`/api/projects/${projectId}/records/${recordId}/attachments/${attId}`, {
+  const res = await fetch(`${ownerBase(projectId, ownerId, kind)}/${attId}`, {
     headers: {
       ...(mockUserId ? { 'x-mock-user-id': mockUserId } : {}),
       Accept: 'application/octet-stream',

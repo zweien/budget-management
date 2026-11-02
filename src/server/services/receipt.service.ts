@@ -153,11 +153,14 @@ export async function listReceipts(
 
   if (paging) {
     // 分页:记录取当页;累计/总数走 SQL 聚合(累计是全集口径,与分页无关)。
-    const [records, agg] = await Promise.all([
+    const [rows, agg] = await Promise.all([
       prisma.receiptRecord.findMany({
         where: { projectId },
         orderBy: [{ receiptDate: 'desc' }, { createdAt: 'desc' }],
-        include: { creator: { select: { id: true, name: true } } },
+        include: {
+          creator: { select: { id: true, name: true } },
+          _count: { select: { attachments: true } },
+        },
         skip: (paging.page - 1) * paging.pageSize,
         take: paging.pageSize,
       }),
@@ -168,15 +171,20 @@ export async function listReceipts(
       }),
     ]);
     const cumulative = agg._sum.amount ? fromStored(agg._sum.amount).toFixed(2) : '0.00';
+    const records = rows.map(({ _count, ...r }) => ({ ...r, attachmentCount: _count.attachments }));
     return { records, cumulative, total: agg._count._all };
   }
 
-  const records = await prisma.receiptRecord.findMany({
+  const rows = await prisma.receiptRecord.findMany({
     where: { projectId },
     orderBy: [{ receiptDate: 'desc' }, { createdAt: 'desc' }],
-    include: { creator: { select: { id: true, name: true } } },
+    include: {
+      creator: { select: { id: true, name: true } },
+      _count: { select: { attachments: true } },
+    },
   });
 
+  const records = rows.map(({ _count, ...r }) => ({ ...r, attachmentCount: _count.attachments }));
   const cumulative = sumAmounts(records.map((r) => fromStored(r.amount)));
   return { records, cumulative: cumulative.toFixed(2) };
 }

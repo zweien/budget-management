@@ -41,7 +41,9 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Paperclip } from 'lucide-react';
 import { MoneyText } from '@/components/ui/MoneyText';
+import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -65,6 +67,8 @@ interface ReceiptRow {
   creatorId: string;
   createdAt: string;
   creator: { id: string; name: string };
+  /** 附件数(附件列计数显示,上传/删除后经 onChanged 就地更新)。 */
+  attachmentCount: number;
 }
 
 interface ReceiptListResponse {
@@ -108,11 +112,28 @@ export default function ReceiptsPage() {
   // 新增/修改 Dialog。
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ReceiptRow | null>(null);
+  const [attachmentTarget, setAttachmentTarget] = useState<ReceiptRow | null>(null);
+  /** 当前用户对该项目的编辑权(附件上传/删除门控);默认 false,拉到后再开。 */
+  const [canEditProject, setCanEditProject] = useState(false);
 
   const form = useForm<ReceiptFormValues>({
     resolver: zodResolver(receiptSchema),
     defaultValues: { summary: '', remark: '' },
   });
+
+  // 附件上传/删除门控:一次性拉取当前用户对该项目的编辑权(403/404 静默,
+  // 只读用户仍可查看/预览附件,服务端 project:view 放行)。
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ canEdit: boolean }>(`/api/projects/${projectId}`)
+      .then((p) => {
+        if (!cancelled) setCanEditProject(!!p.canEdit);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   /** 拉取到账列表 + 累计(项目名由项目壳承载,失败态在此呈现)。 */
   const reload = useCallback(async () => {
@@ -266,7 +287,7 @@ export default function ReceiptsPage() {
             {loadingRecords ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="">
-                  <TableCell colSpan={7}>
+                  <TableCell colSpan={8}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
@@ -292,6 +313,20 @@ export default function ReceiptsPage() {
                   </TableCell>
                   <TableCell>{row.creator?.name ?? row.creatorId.slice(0, 8)}</TableCell>
                   <TableCell className="tabular-nums">{formatDateTime(row.createdAt)}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`h-7 gap-1 px-2 ${row.attachmentCount > 0 ? 'text-link' : 'text-mute'}`}
+                      onClick={() => setAttachmentTarget(row)}
+                      aria-label={`查看到账凭证:${formatDate(row.receiptDate)}`}
+                    >
+                      <Paperclip className="size-4" />
+                      {row.attachmentCount > 0 ? (
+                        <span className="tabular-nums">{row.attachmentCount}</span>
+                      ) : null}
+                    </Button>
+                  </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>
@@ -413,6 +448,28 @@ export default function ReceiptsPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* 到账凭证附件抽屉(与业务记录附件同一组件,宿主为到账记录) */}
+      <AttachmentSheet
+        projectId={projectId}
+        owner={
+          attachmentTarget
+            ? {
+                kind: 'receipt',
+                id: attachmentTarget.id,
+                description: `到账 ${formatDate(attachmentTarget.receiptDate)} · ¥${attachmentTarget.amount}${attachmentTarget.summary ? ` · ${attachmentTarget.summary}` : ''}`,
+              }
+            : null
+        }
+        canWrite={canEditProject}
+        open={!!attachmentTarget}
+        onOpenChange={(o) => !o && setAttachmentTarget(null)}
+        onChanged={(receiptId, count) =>
+          setRecords((prev) =>
+            prev.map((r) => (r.id === receiptId ? { ...r, attachmentCount: count } : r)),
+          )
+        }
+      />
     </div>
   );
 }

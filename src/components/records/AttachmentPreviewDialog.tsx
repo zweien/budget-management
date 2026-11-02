@@ -12,6 +12,7 @@ import {
   downloadAttachment,
   fetchAttachmentBlob,
   type AttachmentMeta,
+  type AttachmentOwnerKind,
 } from '@/lib/api/attachments';
 
 // file-viewer 装配(Worker/WASM)只能在浏览器加载:禁用 SSR,骨架占位。
@@ -29,7 +30,10 @@ const SUPPORTED_PREFIXES = ['image/', 'application/pdf'];
 
 interface AttachmentPreviewDialogProps {
   projectId: string;
-  recordId: string;
+  /** 宿主 id(业务记录或到账流水)。 */
+  ownerId: string;
+  /** 宿主类型(决定取数路径)。 */
+  ownerKind: AttachmentOwnerKind;
   /** 当前预览的附件;null 时 Dialog 关闭。 */
   attachment: AttachmentMeta | null;
   onOpenChange: (open: boolean) => void;
@@ -47,7 +51,8 @@ interface AttachmentPreviewDialogProps {
  */
 export function AttachmentPreviewDialog({
   projectId,
-  recordId,
+  ownerId,
+  ownerKind,
   attachment,
   onOpenChange,
 }: AttachmentPreviewDialogProps) {
@@ -67,7 +72,7 @@ export function AttachmentPreviewDialog({
     if (!attachmentId || !supported) return;
     let cancelled = false;
     let revokeUrl: string | null = null;
-    fetchAttachmentBlob(projectId, recordId, attachmentId)
+    fetchAttachmentBlob(projectId, ownerId, attachmentId, ownerKind)
       .then((blob) => {
         if (cancelled) return;
         // PDF 走浏览器原生查看器(blob URL + iframe):file-viewer 的 PDF 渲染器
@@ -102,7 +107,7 @@ export function AttachmentPreviewDialog({
       setPdfUrl(null);
       setError(null);
     };
-  }, [attachmentId, projectId, recordId, supported, isPdf]);
+  }, [attachmentId, projectId, ownerId, ownerKind, supported, isPdf]);
 
   // 渲染期派生 loading:支持预览、非 PDF、尚无 buffer 与 error = 加载中(PDF 以 pdfUrl 为准)。
   const loading =
@@ -122,14 +127,16 @@ export function AttachmentPreviewDialog({
             <FallbackMsg
               msg={`预览失败:${error}`}
               projectId={projectId}
-              recordId={recordId}
+              ownerId={ownerId}
+              ownerKind={ownerKind}
               attachment={attachment}
             />
           ) : !supported ? (
             <FallbackMsg
               msg="该格式不支持在线预览,请下载"
               projectId={projectId}
-              recordId={recordId}
+              ownerId={ownerId}
+              ownerKind={ownerKind}
               attachment={attachment}
             />
           ) : isPdf && pdfUrl ? (
@@ -157,12 +164,14 @@ export function AttachmentPreviewDialog({
 function FallbackMsg({
   msg,
   projectId,
-  recordId,
+  ownerId,
+  ownerKind,
   attachment,
 }: {
   msg: string;
   projectId: string;
-  recordId: string;
+  ownerId: string;
+  ownerKind: AttachmentOwnerKind;
   attachment: AttachmentMeta | null;
 }) {
   return (
@@ -174,7 +183,7 @@ function FallbackMsg({
         <Button
           variant="outline"
           onClick={() =>
-            downloadAttachment(projectId, recordId, attachment.id).catch((e: unknown) =>
+            downloadAttachment(projectId, ownerId, attachment.id, ownerKind).catch((e: unknown) =>
               toast.error(e instanceof Error ? e.message : '下载失败'),
             )
           }

@@ -21,19 +21,22 @@ import {
   listAttachments,
   uploadAttachment,
 } from '@/lib/api/attachments';
+
+/** 附件宿主:业务记录或到账流水(决定 API 路径与抽屉头描述)。 */
+export interface AttachmentOwner {
+  kind: 'record' | 'receipt';
+  id: string;
+  /** 抽屉头描述行(如「差旅费 · 张三 · ¥100.00 · 2026-01-01」)。 */
+  description: string;
+  /** 锁定只读(如业务记录已作废);到账流水无此态。 */
+  locked?: boolean;
+}
 import { humanFileSize } from '@/lib/attachments/config';
 import { AttachmentPreviewDialog } from '@/components/records/AttachmentPreviewDialog';
 
 interface AttachmentSheetProps {
   projectId: string;
-  record: {
-    id: string;
-    summary: string;
-    handler: string;
-    amount: string;
-    businessDate: string;
-    isVoid: boolean;
-  } | null;
+  owner: AttachmentOwner | null;
   canWrite: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -54,7 +57,7 @@ const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx
 
 export function AttachmentSheet({
   projectId,
-  record,
+  owner,
   canWrite,
   open,
   onOpenChange,
@@ -74,20 +77,20 @@ export function AttachmentSheet({
   useEffect(() => {
     countRef.current = items.length;
   }, [items]);
-  /** 当前展示的记录 id:组件随抽屉开合保持挂载,在途上传/删除完成时
-   *  须校验未切换——否则迟到的 setItems 会把旧记录的附件混进新记录
-   *  列表,共享 countRef 也已被新记录清零(codex review)。 */
+  /** 当前展示的宿主 id:组件随抽屉开合保持挂载,在途上传/删除完成时
+   *  须校验未切换——否则迟到的 setItems 会把旧宿主的附件混进新宿主
+   *  列表,共享 countRef 也已被新宿主清零(codex review)。 */
   const activeRecordIdRef = useRef<string | null>(null);
   useEffect(() => {
-    activeRecordIdRef.current = record?.id ?? null;
-  }, [record?.id]);
+    activeRecordIdRef.current = owner?.id ?? null;
+  }, [owner?.id]);
 
-  // 打开时拉取该记录的附件。
+  // 打开时拉取该宿主的附件。
   useEffect(() => {
-    if (!open || !record) return;
+    if (!open || !owner) return;
     let cancelled = false;
     setLoading(true);
-    listAttachments(projectId, record.id)
+    listAttachments(projectId, owner.id, owner.kind)
       .then((list) => {
         if (!cancelled) setItems(list);
       })
@@ -100,14 +103,14 @@ export function AttachmentSheet({
     return () => {
       cancelled = true;
     };
-  }, [open, record?.id, projectId]);
+  }, [open, owner?.id, owner?.kind, projectId]);
 
-  if (!record) return null;
+  if (!owner) return null;
 
-  const readonly = !canWrite || record.isVoid;
+  const readonly = !canWrite || !!owner.locked;
 
   const handleFiles = async (files: FileList | File[]) => {
-    if (!record || readonly) return;
+    if (!owner || readonly) return;
     const arr = Array.from(files);
     // 大小上限以服务端为准(env.MAX_ATTACHMENT_BYTES):超限服务端返回 413,
     // uploadAttachment 的失败分支会把服务端文案(含真实上限 humanFileSize)经 toast 透出。
@@ -123,16 +126,16 @@ export function AttachmentSheet({
     let fallbackCount = countRef.current;
     for (const file of arr) {
       try {
-        const meta = await uploadAttachment(projectId, record.id, file);
+        const meta = await uploadAttachment(projectId, owner.id, file, owner.kind);
         setPending((prev) => prev.map((p) => (p.file === file ? { ...p, status: 'done' } : p)));
-        if (activeRecordIdRef.current !== record.id) {
+        if (activeRecordIdRef.current !== owner.id) {
           fallbackCount += 1;
-          onChanged?.(record.id, fallbackCount);
+          onChanged?.(owner.id, fallbackCount);
           continue;
         }
         setItems((prev) => [...prev, meta]);
         countRef.current += 1;
-        onChanged?.(record.id, countRef.current);
+        onChanged?.(owner.id, countRef.current);
       } catch (e) {
         setPending((prev) =>
           prev.map((p) =>
@@ -150,17 +153,17 @@ export function AttachmentSheet({
   };
 
   const handleDelete = async (att: AttachmentMeta) => {
-    const startCount = countRef.current; // 记录切换后的兜底快照
+    const startCount = countRef.current; // 宿主切换后的兜底快照
     try {
-      await deleteAttachment(projectId, record.id, att.id);
-      if (activeRecordIdRef.current !== record.id) {
-        onChanged?.(record.id, Math.max(0, startCount - 1));
+      await deleteAttachment(projectId, owner.id, att.id, owner.kind);
+      if (activeRecordIdRef.current !== owner.id) {
+        onChanged?.(owner.id, Math.max(0, startCount - 1));
         return;
       }
       setItems((prev) => prev.filter((x) => x.id !== att.id));
       toast.success('已删除附件');
       countRef.current -= 1;
-      onChanged?.(record.id, countRef.current);
+      onChanged?.(owner.id, countRef.current);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '删除失败');
     }
@@ -175,10 +178,7 @@ export function AttachmentSheet({
               <Paperclip className="size-4" />
               报销凭证
             </SheetTitle>
-            <SheetDescription>
-              {record.summary} · {record.handler} · ¥{record.amount} · {record.businessDate}
-              {record.isVoid ? ' · 已作废' : ''}
-            </SheetDescription>
+            <SheetDescription>{owner.description}</SheetDescription>
           </SheetHeader>
 
           {/* 上传区(只读时隐藏) */}
@@ -248,14 +248,14 @@ export function AttachmentSheet({
                       className="size-7"
                       aria-label="下载"
                       onClick={() =>
-                        downloadAttachment(projectId, record.id, att.id).catch((e: unknown) =>
-                          toast.error(e instanceof Error ? e.message : '下载失败'),
+                        downloadAttachment(projectId, owner.id, att.id, owner.kind).catch(
+                          (e: unknown) => toast.error(e instanceof Error ? e.message : '下载失败'),
                         )
                       }
                     >
                       <Download className="size-4" />
                     </Button>
-                    {canWrite && !record.isVoid && (
+                    {canWrite && !owner.locked && (
                       <Button
                         variant="ghost"
                         size="icon"
@@ -302,7 +302,8 @@ export function AttachmentSheet({
       </Sheet>
       <AttachmentPreviewDialog
         projectId={projectId}
-        recordId={record.id}
+        ownerId={owner.id}
+        ownerKind={owner.kind}
         attachment={previewAttachment}
         onOpenChange={(o) => !o && setPreviewAttachment(null)}
       />
