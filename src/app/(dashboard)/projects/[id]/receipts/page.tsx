@@ -113,21 +113,23 @@ export default function ReceiptsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ReceiptRow | null>(null);
   const [attachmentTarget, setAttachmentTarget] = useState<ReceiptRow | null>(null);
-  /** 当前用户对该项目的编辑权(附件上传/删除门控);默认 false,拉到后再开。 */
-  const [canEditProject, setCanEditProject] = useState(false);
+  /** 附件上传/删除门控:record:edit 对 OWNER/HANDLER 均放行(与到账修改同款),
+   *  故取 canWriteRecords 而非 canEdit(后者仅 OWNER/HANDLER 之 OWNER,
+   *  会把能登记到账的录入人员挡在附件维护外,codex PR#59 P1)。 */
+  const [canWriteProject, setCanWriteProject] = useState(false);
 
   const form = useForm<ReceiptFormValues>({
     resolver: zodResolver(receiptSchema),
     defaultValues: { summary: '', remark: '' },
   });
 
-  // 附件上传/删除门控:一次性拉取当前用户对该项目的编辑权(403/404 静默,
+  // 附件上传/删除门控:一次性拉取当前用户的记录写权限标记(403/404 静默,
   // 只读用户仍可查看/预览附件,服务端 project:view 放行)。
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ canEdit: boolean }>(`/api/projects/${projectId}`)
+    apiFetch<{ canWriteRecords: boolean }>(`/api/projects/${projectId}`)
       .then((p) => {
-        if (!cancelled) setCanEditProject(!!p.canEdit);
+        if (!cancelled) setCanWriteProject(!!p.canWriteRecords);
       })
       .catch(() => {});
     return () => {
@@ -461,7 +463,7 @@ export default function ReceiptsPage() {
               }
             : null
         }
-        canWrite={canEditProject}
+        canWrite={canWriteProject}
         open={!!attachmentTarget}
         onOpenChange={(o) => !o && setAttachmentTarget(null)}
         onChanged={(receiptId, count) =>
