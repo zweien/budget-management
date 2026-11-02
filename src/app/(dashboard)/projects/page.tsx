@@ -627,8 +627,9 @@ export default function ProjectsPage() {
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-          <Table>
-            <TableHeader>
+          {/* 滚动区限高 + 表头冻结(与业务录入页同款):长列表下表头常驻。 */}
+          <Table wrapperClassName="max-h-[calc(100vh-300px)]">
+            <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="hover:bg-transparent">
                   {hg.headers.map((header) => (
