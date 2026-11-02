@@ -4,12 +4,15 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import {
-  ChevronDown,
+  ArrowLeftRight,
+  Ban,
   Download,
   FolderArchive,
   Funnel,
+  History,
   Paperclip,
   Package,
+  Pencil,
   Plus,
   Upload,
 } from 'lucide-react';
@@ -792,23 +795,36 @@ function BusinessRecordsPageInner() {
   /** 行内操作:修改/状态切换/作废(可录入者且未作废);历史全员可见。 */
   const renderRowActions = useCallback(
     (row: BusinessRecordRow) => {
+      // 紧凑图标布局(与全局业务录入页同款):悬停提示 + aria-label 保语义。
+      const iconBtn =
+        'size-7 [&_svg]:size-3.5 text-mute transition-colors hover:text-foreground hover:bg-accent';
+      const disableActions = !resultsReady || row.isVoid;
       return (
-        <div className="flex gap-1">
+        <div className="flex items-center gap-0.5">
           {project?.canWriteRecords ? (
             <>
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
+                className={iconBtn}
+                title="修改"
+                aria-label={`修改记录:${row.summary}`}
                 onClick={() => openEdit(row)}
-                disabled={!resultsReady || row.isVoid}
+                disabled={disableActions}
               >
-                修改
+                <Pencil />
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" disabled={!resultsReady || row.isVoid}>
-                    状态
-                    <ChevronDown />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={iconBtn}
+                    title="状态切换"
+                    aria-label={`状态切换:${row.summary}`}
+                    disabled={disableActions}
+                  >
+                    <ArrowLeftRight />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -829,20 +845,29 @@ function BusinessRecordsPageInner() {
           {project?.canEdit ? (
             <Button
               variant="ghost"
-              size="sm"
-              className="text-error-deep hover:bg-error-soft"
+              size="icon"
+              className={`${iconBtn} text-error-deep hover:bg-error-soft hover:text-error-deep`}
+              title="作废"
+              aria-label={`作废记录:${row.summary}`}
               onClick={() => {
                 setVoidTarget(row);
                 setVoidReason('');
                 setVoidError(null);
               }}
-              disabled={!resultsReady || row.isVoid}
+              disabled={disableActions}
             >
-              作废
+              <Ban />
             </Button>
           ) : null}
-          <Button variant="ghost" size="sm" onClick={() => void openHistory(row)}>
-            历史
+          <Button
+            variant="ghost"
+            size="icon"
+            className={iconBtn}
+            title="变更历史"
+            aria-label={`查看变更历史:${row.summary}`}
+            onClick={() => void openHistory(row)}
+          >
+            <History />
           </Button>
         </div>
       );
@@ -1366,7 +1391,7 @@ function BusinessRecordsPageInner() {
                       header.column.id === 'amount'
                         ? 'w-32 text-right'
                         : header.column.id === 'actions'
-                          ? 'w-60'
+                          ? 'w-36'
                           : undefined
                     }
                   >
