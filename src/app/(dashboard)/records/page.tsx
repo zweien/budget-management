@@ -279,6 +279,13 @@ function UnifiedRecordsPageInner() {
     for (const p of projects ?? []) m.set(p.id, `${p.code} ${p.name}`);
     return m;
   }, [projects]);
+  /** 表格项目列展示用短名(仅名称,不带编号);编号保留在悬停提示与筛选候选里
+   *  (筛选 label→id 映射依赖编号区分同名项目,不能一并去掉)。 */
+  const projectShortName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of projects ?? []) m.set(p.id, p.name);
+    return m;
+  }, [projects]);
 
   const entryForm = useForm<RecordFormValues>({
     resolver: zodResolver(recordSchema),
@@ -500,8 +507,11 @@ function UnifiedRecordsPageInner() {
             href={`/projects/${row.original.projectId}/records`}
             className="text-link underline-offset-4 hover:underline"
           >
-            <span className="line-clamp-2">
-              {projectName.get(row.original.projectId) ?? row.original.projectId.slice(0, 8)}
+            <span
+              className="line-clamp-2"
+              title={projectName.get(row.original.projectId) ?? undefined}
+            >
+              {projectShortName.get(row.original.projectId) ?? row.original.projectId.slice(0, 8)}
             </span>
           </Link>
         ),
@@ -719,9 +729,9 @@ function UnifiedRecordsPageInner() {
         cell: ({ row }) => <RowActions row={row.original} />,
       },
     ],
-    // RowActions 闭包内引用稳定函数;projectName 随项目元数据变化。
+    // RowActions 闭包内引用稳定函数;projectName/projectShortName 随项目元数据变化。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectName, creatorOptions, facets, selectedIds, voidableIds],
+    [projectName, projectShortName, creatorOptions, facets, selectedIds, voidableIds],
   );
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
