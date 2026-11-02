@@ -91,7 +91,7 @@ describe('project purge (integration, real PG)', () => {
   }
 
   it('purge: 未归档 409;机器凭证 403(含 attended,无人值守落被拒审计);非管理员 403;编号不符 422', async () => {
-    const { project, code } = await seedProjectWithRecord();
+    const { project, record, code } = await seedProjectWithRecord();
 
     await expect(
       purgeArchivedProject(project.id, { id: adminId, role: UserRole.ADMIN }, undefined),
@@ -150,14 +150,37 @@ describe('project purge (integration, real PG)', () => {
   });
 
   it('purge: 归档项目 → 子数据物理删除 + 审计留痕(projectId SetNull)+ 预览数字正确', async () => {
-    const { project, code } = await seedProjectWithRecord();
-    await prisma.receiptRecord.create({
+    const { project, record, code } = await seedProjectWithRecord();
+    const receipt = await prisma.receiptRecord.create({
       data: {
         id: uuidv7(),
         projectId: project.id,
         receiptDate: new Date('2026-07-01'),
         amount: 100,
         creatorId: adminId,
+      },
+    });
+    // 两类附件各一:预览/审计的 attachmentCount 须合并计数(codex PR#59)。
+    await prisma.recordAttachment.create({
+      data: {
+        id: uuidv7(),
+        recordId: record.id,
+        fileName: 'record.png',
+        contentType: 'image/png',
+        sizeBytes: 4,
+        data: Buffer.from('rec!'),
+        uploadedById: adminId,
+      },
+    });
+    await prisma.receiptAttachment.create({
+      data: {
+        id: uuidv7(),
+        receiptId: receipt.id,
+        fileName: 'receipt.png',
+        contentType: 'image/png',
+        sizeBytes: 4,
+        data: Buffer.from('rpt!'),
+        uploadedById: adminId,
       },
     });
     await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
@@ -170,6 +193,7 @@ describe('project purge (integration, real PG)', () => {
     expect(preview.paidAmount).toBe('500.00');
     expect(preview.totalOccupied).toBe('500.00');
     expect(preview.receiptCount).toBe(1);
+    expect(preview.attachmentCount).toBe(2);
 
     const result = await purgeArchivedProject(
       project.id,

@@ -532,7 +532,12 @@ async function buildPurgePreview(
         where: { projectId: project.id, isVoid: false, status: 'PAID' },
         _sum: { amount: true },
       }),
-      prisma.recordAttachment.count({ where: { record: { projectId: project.id } } }),
+      // 附件 = 业务记录凭证 + 到账凭证(均随宿主级联删除);合并计数,
+      // 否则仅有到账附件的项目在确认弹窗显示「附件:0」却实际删除文件(codex PR#59)。
+      Promise.all([
+        prisma.recordAttachment.count({ where: { record: { projectId: project.id } } }),
+        prisma.receiptAttachment.count({ where: { receipt: { projectId: project.id } } }),
+      ]).then(([recordAtt, receiptAtt]) => recordAtt + receiptAtt),
       prisma.receiptRecord.count({ where: { projectId: project.id } }),
       prisma.importBatch.count({ where: { projectId: project.id } }),
       prisma.projectMember.count({ where: { projectId: project.id } }),
