@@ -123,11 +123,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Dashboard"
-        title="工作台"
-        description={`欢迎回来,${currentUser.name}(§12.1 项目概览 / 预算指标 / 风险预警 / 待办)`}
-      />
+      <PageHeader eyebrow="Dashboard" title="工作台" description={`欢迎回来,${currentUser.name}`} />
 
       <ProjectOverview />
       <BudgetMetricCards />

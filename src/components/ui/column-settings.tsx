@@ -94,9 +94,12 @@ export function ColumnPrefsProvider({
  * 返回 [显隐状态, 单列切换]。
  * 兼容:Provider 缺席时回落 localStorage + rAF(旧行为);
  * Provider 在场但该 key 尚无偏好时,一次性迁移旧 localStorage 值到 cookie(迁移后移除)。
+ * defaultHidden:默认隐藏的列(稀疏偏好语义——仅当用户未显式设置过该列时生效,
+ * 显式设置始终优先;调用方应传模块级常量保持引用稳定)。
  */
 export function useStoredColumnVisibility(
   key: string,
+  defaultHidden: readonly string[] = [],
 ): [VisibilityState, (id: string, visible: boolean) => void] {
   const store = React.useContext(ColumnPrefsContext);
 
@@ -153,7 +156,17 @@ export function useStoredColumnVisibility(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅在挂载/该 key 首次缺偏好时迁移一次
   }, [key, store?.prefs[key]]);
 
-  const visibility: VisibilityState = store ? (store.prefs[key] ?? {}) : fallback;
+  const storedPrefs = store?.prefs[key];
+  const visibility: VisibilityState = React.useMemo(() => {
+    const stored = store ? (storedPrefs ?? {}) : fallback;
+    if (defaultHidden.length === 0) return stored;
+    const merged = { ...stored };
+    for (const id of defaultHidden) {
+      if (merged[id] === undefined) merged[id] = false;
+    }
+    return merged;
+    // defaultHidden 为模块级常量(引用稳定),作依赖安全。
+  }, [store, storedPrefs, fallback, key, defaultHidden]);
 
   const toggle = React.useCallback(
     (id: string, visible: boolean) => {

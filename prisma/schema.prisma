@@ -74,6 +74,7 @@ model User {
   approvalLogs      ApprovalLog[]
   receipts          ReceiptRecord[]
   uploadedAttachments RecordAttachment[] @relation("AttachmentUploader")
+  uploadedReceiptAttachments ReceiptAttachment[] @relation("ReceiptAttachmentUploader")
   apiKeys           ApiKey[]
 
   @@map("users")
@@ -416,9 +417,29 @@ model ReceiptRecord {
 
   project Project @relation(fields: [projectId], references: [id])
   creator User    @relation(fields: [creatorId], references: [id])
+  attachments ReceiptAttachment[]
 
   @@index([projectId, receiptDate]) // 到账列表按日期倒序 + 求和
   @@map("receipt_records")
+}
+
+/// 到账流水附件(§渐进增强):与 RecordAttachment 同构,bytea 入库,
+/// 不参与预算校验;权限复用 record:edit / project:view。
+model ReceiptAttachment {
+  id           String   @id @db.Uuid
+  receiptId    String   @map("receipt_id") @db.Uuid
+  fileName     String   @map("file_name")
+  contentType  String   @map("content_type")
+  sizeBytes    Int      @map("size_bytes")
+  data         Bytes
+  uploadedById String   @map("uploaded_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  receipt    ReceiptRecord @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  uploadedBy User          @relation("ReceiptAttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@index([receiptId])
+  @@map("receipt_attachments")
 }
 
 model ImportBatch {

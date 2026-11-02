@@ -41,7 +41,9 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Paperclip } from 'lucide-react';
 import { MoneyText } from '@/components/ui/MoneyText';
+import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -65,6 +67,8 @@ interface ReceiptRow {
   creatorId: string;
   createdAt: string;
   creator: { id: string; name: string };
+  /** 附件数(附件列计数显示,上传/删除后经 onChanged 就地更新)。 */
+  attachmentCount: number;
 }
 
 interface ReceiptListResponse {
@@ -108,11 +112,30 @@ export default function ReceiptsPage() {
   // 新增/修改 Dialog。
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ReceiptRow | null>(null);
+  const [attachmentTarget, setAttachmentTarget] = useState<ReceiptRow | null>(null);
+  /** 附件上传/删除门控:record:edit 对 OWNER/HANDLER 均放行(与到账修改同款),
+   *  故取 canWriteRecords 而非 canEdit(后者仅 OWNER/HANDLER 之 OWNER,
+   *  会把能登记到账的录入人员挡在附件维护外,codex PR#59 P1)。 */
+  const [canWriteProject, setCanWriteProject] = useState(false);
 
   const form = useForm<ReceiptFormValues>({
     resolver: zodResolver(receiptSchema),
     defaultValues: { summary: '', remark: '' },
   });
+
+  // 附件上传/删除门控:一次性拉取当前用户的记录写权限标记(403/404 静默,
+  // 只读用户仍可查看/预览附件,服务端 project:view 放行)。
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ canWriteRecords: boolean }>(`/api/projects/${projectId}`)
+      .then((p) => {
+        if (!cancelled) setCanWriteProject(!!p.canWriteRecords);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   /** 拉取到账列表 + 累计(项目名由项目壳承载,失败态在此呈现)。 */
   const reload = useCallback(async () => {
@@ -259,6 +282,7 @@ export default function ReceiptsPage() {
               <TableHead>备注</TableHead>
               <TableHead className="w-28">录入人</TableHead>
               <TableHead className="w-40">录入时间</TableHead>
+              <TableHead className="w-20">附件</TableHead>
               <TableHead className="w-36">操作</TableHead>
             </TableRow>
           </TableHeader>
@@ -266,14 +290,14 @@ export default function ReceiptsPage() {
             {loadingRecords ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i} className="">
-                  <TableCell colSpan={7}>
+                  <TableCell colSpan={8}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
               ))
             ) : records.length === 0 ? (
               <TableRow className="">
-                <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                   暂无到账记录
                 </TableCell>
               </TableRow>
@@ -292,6 +316,20 @@ export default function ReceiptsPage() {
                   </TableCell>
                   <TableCell>{row.creator?.name ?? row.creatorId.slice(0, 8)}</TableCell>
                   <TableCell className="tabular-nums">{formatDateTime(row.createdAt)}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`h-7 gap-1 px-2 ${row.attachmentCount > 0 ? 'text-link' : 'text-mute'}`}
+                      onClick={() => setAttachmentTarget(row)}
+                      aria-label={`查看到账凭证:${formatDate(row.receiptDate)}`}
+                    >
+                      <Paperclip className="size-4" />
+                      {row.attachmentCount > 0 ? (
+                        <span className="tabular-nums">{row.attachmentCount}</span>
+                      ) : null}
+                    </Button>
+                  </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>
@@ -413,6 +451,28 @@ export default function ReceiptsPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* 到账凭证附件抽屉(与业务记录附件同一组件,宿主为到账记录) */}
+      <AttachmentSheet
+        projectId={projectId}
+        owner={
+          attachmentTarget
+            ? {
+                kind: 'receipt',
+                id: attachmentTarget.id,
+                description: `到账 ${formatDate(attachmentTarget.receiptDate)} · ¥${attachmentTarget.amount}${attachmentTarget.summary ? ` · ${attachmentTarget.summary}` : ''}`,
+              }
+            : null
+        }
+        canWrite={canWriteProject}
+        open={!!attachmentTarget}
+        onOpenChange={(o) => !o && setAttachmentTarget(null)}
+        onChanged={(receiptId, count) =>
+          setRecords((prev) =>
+            prev.map((r) => (r.id === receiptId ? { ...r, attachmentCount: count } : r)),
+          )
+        }
+      />
     </div>
   );
 }

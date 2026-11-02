@@ -17,6 +17,11 @@ import { requirePermission } from '@/lib/auth/permissions';
 // 需级联清理;ProjectBudget / ProjectMember 无独立查询入口,通过 projectId 一并清。
 const cleanupProject = async (projectId: string) => {
   if (!projectId) return;
+  await prisma.businessRecordHistory
+    .deleteMany({ where: { businessRecord: { projectId } } })
+    .catch(() => {});
+  await prisma.businessRecord.deleteMany({ where: { projectId } }).catch(() => {});
+  await prisma.budgetSubject.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.projectBudget.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.projectMember.deleteMany({ where: { projectId } }).catch(() => {});
   await prisma.auditLog.deleteMany({ where: { projectId } }).catch(() => {});
@@ -468,5 +473,51 @@ describe('project.service (integration, real PG)', () => {
       { startDate: '2026-01-01' },
       { id: adminId, role: UserRole.ADMIN },
     );
+  });
+
+  it('listProjects: totalSpent 为有效记录金额合计(作废不计,无记录为 0.00)', async () => {
+    const code = `SPENT-${uuidv7().slice(0, 8)}-${Math.random().toString(36).slice(2, 6)}`;
+    const project = await createProject(
+      { code, name: 'spent test' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+
+    const subjectId = uuidv7();
+    await prisma.budgetSubject.create({
+      data: {
+        id: subjectId,
+        projectId: project.id,
+        parentId: null,
+        code: 'SPENT-LEAF',
+        name: '总支出测试科目',
+        level: 1,
+        isLeaf: true,
+      },
+    });
+    const mk = (amount: string, isVoid = false) =>
+      prisma.businessRecord.create({
+        data: {
+          id: uuidv7(),
+          projectId: project.id,
+          subjectId,
+          budgetYear: 2026,
+          amount,
+          businessDate: new Date('2026-03-01T00:00:00Z'),
+          status: 'PAID',
+          handler: '经办',
+          summary: '总支出测试',
+          isVoid,
+          createdById: adminId,
+        },
+      });
+    await mk('100.50');
+    await mk('200.25');
+    const voided = await mk('999.99', true);
+
+    const list = await listProjects({ id: adminId, role: UserRole.ADMIN });
+    const row = list.find((p) => p.id === project.id)!;
+    expect(row.totalSpent).toBe('300.75');
+    expect(voided).toBeTruthy();
   });
 });
