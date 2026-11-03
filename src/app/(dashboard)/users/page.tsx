@@ -19,6 +19,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Combobox } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -54,6 +55,7 @@ interface AdminUserRow {
 
 interface ProjectRow {
   id: string;
+  code: string;
   name: string;
   archivedAt: string | null;
 }
@@ -509,19 +511,20 @@ export default function UsersPage() {
 
                   {/* 添加项目权限 */}
                   <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                    <select
-                      className="h-8 min-w-56 rounded-md border border-border bg-card px-2 text-sm"
+                    <Combobox
+                      options={pickerProjects.map((pr) => ({
+                        value: pr.id,
+                        label: pr.name,
+                        keywords: pr.code,
+                      }))}
                       value={addProjectId}
-                      onChange={(e) => setAddProjectId(e.target.value)}
-                      aria-label="选择项目"
-                    >
-                      <option value="">选择项目…</option>
-                      {pickerProjects.map((pr) => (
-                        <option key={pr.id} value={pr.id}>
-                          {pr.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setAddProjectId}
+                      placeholder="选择项目…"
+                      searchPlaceholder="搜索项目名称或编号…"
+                      emptyText="无匹配项目"
+                      disabled={busy}
+                      className="h-8 min-w-56"
+                    />
                     <select
                       className="h-8 rounded-md border border-border bg-card px-2 text-sm"
                       value={addRole}
