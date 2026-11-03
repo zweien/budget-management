@@ -1,13 +1,21 @@
+# 基础镜像可覆盖:构建机无法直连 Docker Hub(国内网络常见)时用镜像加速器,如
+#   docker build --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:20-alpine …
+ARG NODE_IMAGE=node:20-alpine
+
 # deps
-FROM node:20-alpine AS deps
+FROM ${NODE_IMAGE} AS deps
+# npm 源同样可覆盖(--build-arg NPM_REGISTRY=https://registry.npmmirror.com)
+ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /app
 COPY package*.json ./
 # postinstall 会执行该脚本生成 public/file-viewer 自托管资产(见 scripts/ 内注释)
 COPY scripts/copy-file-viewer-assets.mjs ./scripts/
-RUN npm ci
+# playwright(devDep)postinstall 会下载浏览器二进制,镜像构建用不到,跳过省时省流量
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN npm ci --registry=${NPM_REGISTRY}
 
 # builder
-FROM node:20-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -23,11 +31,14 @@ RUN npx prisma generate
 RUN npm run build
 
 # runner
-FROM node:20-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 # 运行期同样需要 openssl CLI 供 prisma 客户端选择正确引擎
 RUN apk add --no-cache openssl
-ENV NODE_ENV=production
+# Next standalone server.js 以 HOSTNAME 作为监听地址,而 Docker 会注入 HOSTNAME=<容器ID>,
+# 导致进程绑到容器 IP、127.0.0.1 探针(下方 HEALTHCHECK)全部落空。显式绑 0.0.0.0。
+ENV NODE_ENV=production \
+    HOSTNAME=0.0.0.0
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
@@ -36,6 +47,8 @@ COPY --from=builder /app/prisma ./prisma
 # 符号链接,CLI 内部按 __dirname 找 wasm 会失效),入口脚本以 node 直调 CLI 入口
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+# 管理员提升工具(SSO 首个 ADMIN 引导;离线内网没有带仓库的机器,在容器内直接执行)
+COPY --chown=node:node docker/make-admin.mjs ./docker/make-admin.mjs
 COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh && chown -R node:node /app
 USER node

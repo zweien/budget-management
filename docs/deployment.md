@@ -42,9 +42,18 @@ Authentik 建应用 → 准备 PostgreSQL → 构建镜像 → 启动容器 → 
 docker build -t budget-management .
 ```
 
+构建机无法直连 Docker Hub / npm 官方源（国内网络常见）时，覆盖基础镜像与 npm 源再构建：
+
+```bash
+docker build \
+  --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:20-alpine \
+  --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+  -t budget-management .
+```
+
 镜像为多阶段构建，运行 standalone 产物；入口脚本先执行 `prisma migrate deploy`（幂等）再起服务，**空库可直接启动**，无手动迁移步骤。
 
-**离线内网**：`docker save budget-management | gzip > bm.tar.gz` 拷贝到部署机后 `docker load`。
+**离线内网（推荐一键打包）**：`sh scripts/pack-deploy-bundle.sh` 自动完成 build + `docker save`（`<版本>` 与 `latest` 双 tag）并组装 `dist/budget-deploy_<版本>/`——内含镜像 tar.gz、`docker-compose.prod.yml`、`.env.production.example` 与内网机操作说明 [DEPLOY-OFFLINE.md](../docker/DEPLOY-OFFLINE.md)，整目录拷贝到部署机按说明执行即可。网络受限的构建机同样以环境变量注入源覆盖：`NODE_IMAGE=… NPM_REGISTRY=… sh scripts/pack-deploy-bundle.sh`。手动方式：`docker save budget-management | gzip > bm.tar.gz` 拷贝到部署机后 `docker load`。
 
 ## 4. 配置与启动
 
@@ -116,15 +125,21 @@ docker run -d -p 3000:3000 --env-file .env.production budget-management
 SSO 首次登录走 **JIT 自动建档**（默认 `USER`，全局只读）。第一个管理员：
 
 1. 用自己的 Authentik 账号登录一次系统（完成建档）。
-2. 在**有仓库代码的机器**（运维机/开发机）上，把 `DATABASE_URL` 指向生产库执行提升脚本：
+2. 提升为 ADMIN，二选一：
+   - **容器内工具（离线内网推荐）**：镜像内置 `docker/make-admin.mjs`，与 `scripts/make-admin.ts` 语义一致，直连容器 env 的 `DATABASE_URL`，无需仓库代码与 Node 环境：
 
-   ```bash
-   DATABASE_URL="postgresql://…生产库…" npx tsx scripts/make-admin.ts <显示名 或 SSO sub UUID>
-   ```
+     ```bash
+     docker exec -it budget-app node docker/make-admin.mjs <显示名 或 SSO sub UUID>
+     ```
 
-   > 该脚本不在应用镜像内（standalone 镜像仅含运行时），不能 `docker exec` 进容器执行。
+   - **仓库脚本**：在**有仓库代码的机器**（运维机/开发机）上，把 `DATABASE_URL` 指向生产库执行：
+
+     ```bash
+     DATABASE_URL="postgresql://…生产库…" npx tsx scripts/make-admin.ts <显示名 或 SSO sub UUID>
+     ```
+
    > 若 Authentik 回调按「显示名优先」建档，Authentik 登录名不入库，请传**显示名**或 **sub UUID**；
-   > 同名多行时脚本会拒绝并要求用 UUID 精确指定（防绑错账号，见 `scripts/make-admin.ts`）。
+   > 同名多行时两种方式都会拒绝并要求用 UUID 精确指定（防绑错账号，见 `scripts/make-admin.ts`）。
 
 3. 之后所有授权都在界面内完成：管理员在项目概览页「成员管理」把用户加为 OWNER（可编辑预算）/ HANDLER（仅录入）；全局角色只有 ADMIN / USER 两级，日常无需再碰数据库。
 
@@ -161,8 +176,11 @@ SSO 首次登录走 **JIT 自动建档**（默认 `USER`，全局只读）。第
 
 ```bash
 # 构建机
-git pull && docker build -t budget-management:vX.Y.Z .
+git pull && sh scripts/pack-deploy-bundle.sh   # 或手动 docker build -t budget-management:vX.Y.Z .
 docker save … # 离线则 save/load 传输
+# 存量部署的镜像名若不是默认 budget-management(如 budget-management-app),打包时同名覆盖:
+#   IMAGE_NAME=budget-management-app sh scripts/pack-deploy-bundle.sh
+# 内网侧仅需把 compose 里 image 的版本号改新、up -d,数据卷与 PG 不动,入口自动增量迁移。
 
 # 部署机
 docker load … && docker compose -f … up -d   # 换镜像 tag 后重建容器

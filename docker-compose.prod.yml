@@ -1,0 +1,14 @@
+# 生产编排(内网):应用单容器,直连内网已有 PostgreSQL 16(连接串在 .env.production)。
+# 首次使用: cp .env.production.example .env.production 并填齐必填项(操作步骤见 docker/DEPLOY-OFFLINE.md)。
+services:
+  app:
+    image: budget-management:latest
+    container_name: budget-app
+    restart: unless-stopped
+    env_file: .env.production
+    # standalone node 以 PID 1 运行,init 负责信号转发与僵尸进程回收
+    init: true
+    ports:
+      # 对外端口改这里(如 '8080:3000'),并同步更新 .env.production 的 APP_BASE_URL
+      # 与 Authentik Redirect URI
+      - '3000:3000'

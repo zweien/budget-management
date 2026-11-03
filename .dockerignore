@@ -2,4 +2,14 @@ node_modules
 .next
 .git
 .env
+.env.*
 *.log
+# 打包产物与本地工作目录,不进构建上下文(.venv 此前仅被 Turbopack tracing 排除)
+dist
+.venv
+coverage
+test-results
+playwright-report
+.zcode
+.scratch
+.mimosa
