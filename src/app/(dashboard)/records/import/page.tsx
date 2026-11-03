@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Upload } from 'lucide-react';
+import { Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
+import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -56,6 +56,7 @@ export default function UnifiedImportPage() {
 
   // 上传
   const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [needsHost, setNeedsHost] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [hostProjectId, setHostProjectId] = useState('');
@@ -190,22 +191,45 @@ export default function UnifiedImportPage() {
 
       <Card className="p-4">
         <div className="space-y-3">
-          <Label className="flex items-center gap-2 text-sm font-medium">
-            <Upload className="size-4" />
-            上传财务结算单(仅支持 2025 导出格式;系统模板/个人结算单请在项目内导入页上传)
-          </Label>
-          <input
-            type="file"
-            accept=".xlsx"
-            disabled={uploading}
-            className="block w-full cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
-            aria-label="选择财务结算单 xlsx 文件"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void uploadFile(f);
-              e.target.value = '';
+          {/* 拖放上传区(与项目内导入页同款:原生 file input + drag events) */}
+          <label
+            className={cn(
+              'flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed bg-card px-6 py-10 text-center transition-colors',
+              dragOver
+                ? 'border-ring bg-accent/60'
+                : 'border-hairline-strong hover:border-ring hover:bg-accent/40',
+            )}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
             }}
-          />
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (uploading) return;
+              const f = e.dataTransfer.files?.[0];
+              if (f) void uploadFile(f);
+            }}
+          >
+            <Inbox className="size-8 text-mute" />
+            <p className="text-sm">点击或拖拽财务结算单 .xlsx 文件到此处上传</p>
+            <p className="text-xs text-mute">
+              仅支持 2025 导出格式(可含多个项目);系统模板/个人结算单请在项目内导入页上传
+            </p>
+            <input
+              type="file"
+              accept=".xlsx"
+              disabled={uploading}
+              className="hidden"
+              aria-label="选择财务结算单 xlsx 文件"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadFile(f);
+                e.target.value = '';
+              }}
+            />
+          </label>
           {uploading ? <Skeleton className="h-6 w-full" /> : null}
           {needsHost ? (
             <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 p-3">
