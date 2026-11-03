@@ -216,11 +216,13 @@ export default function ProjectLedgerPage() {
               rate={totalInfo.totalExecutionRate}
             />
           ) : null}
+          {/* 默认收起 原始/调整(总与年度),只留当前预算;列设置可再打开。 */}
           <BudgetTreeTable
             nodes={ledger.nodes}
             showLevel1Total
             yearLabel={mode === 'annual' ? year : undefined}
             hideAnnualColumns={mode === 'total'}
+            defaultHiddenColumns={['totalInitial', 'totalAdjustment', 'initial', 'adjustment']}
             totalGroupLabel={
               mode === 'total' && totalInfo?.budgetMode === 'LUMP_SUM' ? '累计计划' : '总预算'
             }

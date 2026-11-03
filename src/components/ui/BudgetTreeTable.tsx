@@ -81,6 +81,11 @@ interface Props {
    */
   hideTotalColumns?: boolean;
   /**
+   * 默认隐藏的列 id(TOGGLE_COLUMNS 之一;用户仍可在列设置里打开)。
+   * 台账页用它默认收起 原始/调整,只留 当前(总与年度);缺省全显。
+   */
+  defaultHiddenColumns?: string[];
+  /**
    * 总预算列组的列名(默认「总预算」)。包干制总口径下科目分母 = Σ 历年科目计划,
    * 与项目总预算无加法关系,传「累计计划」如实标注。
    */
@@ -168,6 +173,7 @@ export function BudgetTreeTable({
   hideAnnualColumns = false,
   hideTotalColumns = false,
   totalGroupLabel = '总预算',
+  defaultHiddenColumns = [],
 }: Props) {
   const treeData = useMemo(() => buildTree(nodes), [nodes]);
 
@@ -196,7 +202,10 @@ export function BudgetTreeTable({
   }, [nodes, hideAnnualColumns]);
 
   // 列显隐(TanStack columnVisibility);科目列固定不参与。
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  // 初始值种入 defaultHiddenColumns(一次性;列设置里可再打开,不持久化)。
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() =>
+    Object.fromEntries(defaultHiddenColumns.map((id) => [id, false])),
+  );
   // 默认全部展开(对齐原 defaultExpandAllRows)。
   const [expanded, setExpanded] = useState<ExpandedState>(true);
 
