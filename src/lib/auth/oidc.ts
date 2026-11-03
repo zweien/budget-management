@@ -36,6 +36,21 @@ export function oidcRedirectUri(): string {
   return `${env.APP_BASE_URL}/api/auth/callback`;
 }
 
+/**
+ * 以对外回调地址为基座重建当前请求 URL(保留 query)。
+ *
+ * Next.js 16 下 req.url 的 origin 是容器内监听地址(standalone 按 HOSTNAME:PORT 构造,
+ * 如 http://0.0.0.0:3000),并非用户实际访问的对外地址;OIDC 规范要求 token 交换回传
+ * 与授权请求完全一致的 redirect_uri(Authentik 按 strict 模式校验),直接传 new URL(req.url)
+ * 会以容器地址回传 → invalid_client,SSO 登录失败(内网 0.26.0 实测回归)。
+ * 故与授权阶段 oidcRedirectUri() 同源重建,仅保留 query 中的 code/state 等参数。
+ */
+export function rebuildCallbackUrl(rawUrl: string, callbackBase: string): URL {
+  const url = new URL(callbackBase);
+  url.search = new URL(rawUrl).search;
+  return url;
+}
+
 /** OIDC 流程暂存 cookie(state/nonce/PKCE verifier/returnTo),短寿命。 */
 export const OIDC_FLOW_COOKIE = 'bm_oidc_flow';
 

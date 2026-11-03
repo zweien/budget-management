@@ -7,6 +7,8 @@ import { prisma } from '@/lib/prisma';
 import { signSession } from '@/lib/auth/session';
 import {
   getOidcConfig,
+  oidcRedirectUri,
+  rebuildCallbackUrl,
   sanitizeReturnTo,
   OIDC_FLOW_COOKIE,
   AUTH_MODE_COOKIE,
@@ -42,13 +44,19 @@ export async function GET(req: NextRequest) {
     const flow = JSON.parse(rawFlow) as OidcFlowState;
 
     const config = await getOidcConfig();
-    // 注意:不能传 req.nextUrl(NextURL 非 URL 实例,v6 会拒绝),需显式构造。
-    const tokens = await client.authorizationCodeGrant(config, new URL(req.url), {
-      pkceCodeVerifier: flow.codeVerifier,
-      expectedState: flow.state,
-      expectedNonce: flow.nonce,
-      idTokenExpected: true,
-    });
+    // 不能传 req.nextUrl(NextURL 非 URL 实例,v6 会拒绝);也不能直接 new URL(req.url)——
+    // Next 16 下其 origin 是容器内监听地址(如 http://0.0.0.0:3000),token 交换回传的
+    // redirect_uri 必须与授权请求一致(Authentik strict 匹配),以对外地址重建(保留 query)。
+    const tokens = await client.authorizationCodeGrant(
+      config,
+      rebuildCallbackUrl(req.url, oidcRedirectUri()),
+      {
+        pkceCodeVerifier: flow.codeVerifier,
+        expectedState: flow.state,
+        expectedNonce: flow.nonce,
+        idTokenExpected: true,
+      },
+    );
 
     const claims = tokens.claims();
     if (!claims?.sub) {
