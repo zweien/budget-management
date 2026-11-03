@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-03
+
+### 新增
+
+- **内网离线部署链路**：镜像内置管理员提升工具 `docker/make-admin.mjs`（与 `scripts/make-admin.ts` 语义一致，`docker exec` 一条命令引导首个 ADMIN，离线内网不再需要带仓库代码的机器）；一键打包脚本 `scripts/pack-deploy-bundle.sh`（build + `docker save` + 组装 `dist/budget-deploy_<版本>/` 离线包，支持 `IMAGE_NAME`/`NODE_IMAGE`/`NPM_REGISTRY` 覆盖）；生产编排 `docker-compose.prod.yml` 与配置模板 `.env.production.example`；内网机操作说明 `docker/DEPLOY-OFFLINE.md`；部署指南同步更新
+- Dockerfile 构建源可覆盖：`--build-arg NODE_IMAGE=… / NPM_REGISTRY=…`（Docker Hub / npm 官方源直连受限的构建机走镜像加速）；`.dockerignore` 收窄构建上下文（`.venv`/`dist` 等）
+
+### 修复
+
+- **SSO 登录回归**：Next.js 16 下 `req.url` 的 origin 是容器内监听地址（standalone 按 `HOSTNAME:PORT` 构造，如 `http://0.0.0.0:3000`），token 交换把该值作为 redirect_uri 回传，与 Authentik strict 登记值不匹配 → `invalid_client`，SSO 登录失败。改为以授权阶段同一 `oidcRedirectUri()` 为基座重建回调 URL、保留 query（`rebuildCallbackUrl`，与 login 阶段构造天然对称，含单测；mock OIDC 提供者容器化 E2E 对照验证：修复前 redirect_uri mismatch 复现、修复后全流程登录 + JIT 建档通过）
+- 容器监听地址：Next standalone `server.js` 以 `HOSTNAME` 环境变量为监听地址，Docker 注入 `HOSTNAME=<容器ID>` 导致进程绑定容器 IP、镜像内置 HEALTHCHECK（127.0.0.1 探针）永远 unhealthy——镜像内显式 `ENV HOSTNAME=0.0.0.0`
+
 ## [0.27.0] - 2026-11-03
 
 ### 新增
