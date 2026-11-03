@@ -154,6 +154,8 @@ interface SubjectNode {
   parentId: string | null;
   level: number;
   isLeaf: boolean;
+  /** 叶科目可否挂子科目(预算 current 全 0 且无业务记录);非叶恒 true。 */
+  canAttachChild: boolean;
 }
 
 let keySeq = 0;
@@ -343,21 +345,21 @@ export default function AdjustmentsPage() {
     }
   };
 
-  /** 父节点候选:一级科目哨兵 + 全部非叶科目 + 无预算的叶科目(挂上子科目后即转为非叶;
-   *  已有预算的叶科目被服务端拒绝,其预算基数即明细行科目候选)。 */
-  const parentOptions = useMemo(() => {
-    const budgeted = new Set(baseline.map((s) => s.subjectId));
-    return [
+  /** 父节点候选:一级科目哨兵 + 全部非叶科目 + 可挂子科目的叶(canAttachChild,
+   *  与服务端校验同口径:预算 current 全 0 且无业务记录;挂上后叶转为非叶)。 */
+  const parentOptions = useMemo(
+    () => [
       { value: NEW_ROOT, label: '★ 作为一级科目(顶层)', keywords: '一级 顶层 根' },
       ...subjectTree
-        .filter((s) => !s.isLeaf || !budgeted.has(s.id))
+        .filter((s) => !s.isLeaf || s.canAttachChild !== false)
         .map((s) => ({
           value: s.id,
           label: `${'　'.repeat(Math.max(0, s.level - 1))}${s.name}`,
           keywords: s.name,
         })),
-    ];
-  }, [subjectTree, baseline]);
+    ],
+    [subjectTree],
+  );
 
   /** 明细行科目候选:叶科目(名称/编号可搜)+ 新增科目哨兵项。 */
   const subjectPickOptions = useMemo(

@@ -1200,7 +1200,7 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       ),
     ).rejects.toMatchObject({
       status: 422,
-      message: expect.stringContaining('已有预算'),
+      message: expect.stringContaining('已有非 0 预算'),
     });
 
     // 无预算叶父 → 审批建档成功,且父节点转为非叶。
@@ -1231,6 +1231,121 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(created!.parentId).toBe(budgetlessLeafId);
     const parent = await prisma.budgetSubject.findUnique({ where: { id: budgetlessLeafId } });
     expect(parent!.isLeaf).toBe(false);
+  });
+
+  it('ALLOCATE: 预算行 current 全 0 的叶可挂子科目(0 额行不算「已有预算」)', async () => {
+    const { project } = await seedPartialProject('ZEROBUDG');
+    // 构造带 0 额预算行的叶(编制期 0 额行 / 调减至 0 的历史行):按金额口径应可挂。
+    const zeroLeafId = uuidv7();
+    await prisma.budgetSubject.create({
+      data: {
+        id: zeroLeafId,
+        projectId: project.id,
+        parentId: null,
+        code: `ZERO-${uuidv7().slice(0, 6)}`,
+        name: '零额叶',
+        level: 1,
+        isLeaf: true,
+      },
+    });
+    await prisma.subjectBudget.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        year: 2027,
+        subjectId: zeroLeafId,
+        initialAmount: 0,
+        adjustmentAmount: 0,
+        currentAmount: 0,
+      },
+    });
+    await prisma.subjectTotalBudget.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        subjectId: zeroLeafId,
+        initialAmount: 0,
+        adjustmentAmount: 0,
+        currentAmount: 0,
+      },
+    });
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2027,
+        kind: 'ALLOCATE',
+        lines: [
+          {
+            subjectId: null,
+            newSubjectName: '挂零额叶',
+            newSubjectParentId: zeroLeafId,
+            totalAdjustment: '0',
+            annualAdjustment: '10.00',
+          },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    await approveAdjustment(adj.id, adminUser());
+
+    const parent = await prisma.budgetSubject.findUnique({ where: { id: zeroLeafId } });
+    expect(parent!.isLeaf).toBe(false);
+  });
+
+  it('ALLOCATE: 叶父有未作废业务记录(即使预算为 0)→ 422', async () => {
+    const { project } = await seedPartialProject('RECPARENT');
+    // 有记录的叶:挂子科目会使记录从叶上卷汇总消失,须拒绝。
+    const recLeafId = uuidv7();
+    await prisma.budgetSubject.create({
+      data: {
+        id: recLeafId,
+        projectId: project.id,
+        parentId: null,
+        code: `REC-${uuidv7().slice(0, 6)}`,
+        name: '有记录叶',
+        level: 1,
+        isLeaf: true,
+      },
+    });
+    await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        budgetYear: 2027,
+        subjectId: recLeafId,
+        amount: 50,
+        businessDate: new Date('2027-01-15'),
+        handler: 'tester',
+        summary: '既有记录',
+        status: BusinessStatus.PAID,
+        createdById: adminId,
+      },
+    });
+
+    await expect(
+      createAdjustment(
+        project.id,
+        {
+          year: 2027,
+          kind: 'ALLOCATE',
+          lines: [
+            {
+              subjectId: null,
+              newSubjectName: '挂有记录叶',
+              newSubjectParentId: recLeafId,
+              totalAdjustment: '0',
+              annualAdjustment: '10.00',
+            },
+          ],
+        },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('业务记录'),
+    });
   });
 
   it('ALLOCATE: 新增科目可不带父节点直接建为一级科目(level=1)', async () => {

@@ -156,10 +156,53 @@ async function requireLeafSubject(
 }
 
 /**
+ * 叶科目挂子科目的阻塞原因(按科目批量;subjects 路由与校验共用同一口径)。
+ *
+ * 口径按**金额**而非行数:非叶节点的自身预算行/业务记录不进台账与统计的叶上卷,
+ * 挂子科目会使它们从汇总中消失——因此任一年度预算或总预算 current ≠ 0、
+ * 或存在未作废业务记录的叶科目不可挂子科目;预算行 current 全为 0 的叶
+ * (编制期 0 额行、历次调减至 0 的行)不影响汇总,允许挂上后转为非叶。
+ *
+ * @returns Map<subjectId, 阻塞原因 | null>;null = 可挂子科目。
+ */
+export async function leafAttachBlockers(
+  tx: Prisma.TransactionClient | typeof prisma,
+  projectId: string,
+): Promise<Map<string, string | null>> {
+  const [annualRows, totalRows, recordCounts] = await Promise.all([
+    tx.subjectBudget.findMany({
+      where: { projectId },
+      select: { subjectId: true, currentAmount: true },
+    }),
+    tx.subjectTotalBudget.findMany({
+      where: { projectId },
+      select: { subjectId: true, currentAmount: true },
+    }),
+    tx.businessRecord.groupBy({
+      by: ['subjectId'],
+      where: { projectId, isVoid: false },
+      _count: { _all: true },
+    }),
+  ]);
+  const result = new Map<string, string | null>();
+  const mark = (subjectId: string, reason: string) => {
+    if (!result.has(subjectId)) result.set(subjectId, reason);
+  };
+  annualRows.forEach((r) => {
+    if (!fromStored(String(r.currentAmount)).isZero()) mark(r.subjectId, '已有非 0 预算');
+  });
+  totalRows.forEach((r) => {
+    if (!fromStored(String(r.currentAmount)).isZero()) mark(r.subjectId, '已有非 0 预算');
+  });
+  recordCounts.forEach((g) => mark(g.subjectId, '已有业务记录'));
+  return result;
+}
+
+/**
  * 校验新增科目:父节点存在;名称项目内不重名。
  * 父节点(codex 放宽):**无预算的叶节点亦可挂子科目**——挂上后该节点转为非叶,
- * 预算由子科目汇总;已有预算(年度科目预算或科目总预算)的叶节点仍拒绝,
- * 否则其原有预算会因转为非叶而从汇总中消失,须先走拆分流程。
+ * 预算由子科目汇总;"无预算"按金额判定(见 leafAttachBlockers):预算行 current
+ * 全为 0 且无未作废业务记录的叶可挂;否则其预算/记录会因转为非叶而从汇总消失,拒绝。
  */
 async function validateNewSubject(
   tx: Prisma.TransactionClient | typeof prisma,
@@ -176,14 +219,12 @@ async function validateNewSubject(
     parent = { name: found.name, isLeaf: found.isLeaf };
   }
   if (parent?.isLeaf && parentId) {
-    const [hasAnnual, hasTotal] = await Promise.all([
-      tx.subjectBudget.count({ where: { subjectId: parentId } }),
-      tx.subjectTotalBudget.count({ where: { subjectId: parentId } }),
-    ]);
-    if (hasAnnual > 0 || hasTotal > 0) {
+    const blockers = await leafAttachBlockers(tx, projectId);
+    const blocker = blockers.get(parentId);
+    if (blocker) {
       throw new HTTPError(
         422,
-        `新增科目必须挂在无预算的节点下,${parent.name} 已有预算;如需拆分请先调整其预算结构`,
+        `新增科目必须挂在无预算、无业务记录的节点下,${parent.name} ${blocker};如需拆分,请先将其预算调减至 0(有业务记录须先处理)`,
       );
     }
   }
