@@ -113,7 +113,7 @@ function ValuesHeader({
 
 /** 表头宽度/对齐(与旧手写表一致)。 */
 /** 默认隐藏的列(仅当用户未显式设置过显隐时生效;列设置里可随时打开)。 */
-const DEFAULT_HIDDEN_COLUMNS = ['level', 'undertakingUnit', 'createdAt'];
+const DEFAULT_HIDDEN_COLUMNS = ['code', 'level', 'undertakingUnit', 'createdAt'];
 
 const HEAD_CLASS: Record<string, string> = {
   code: 'w-40',
