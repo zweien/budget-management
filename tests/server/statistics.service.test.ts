@@ -17,6 +17,7 @@ import {
   customStatistics,
   customStatisticsFacets,
   monthlyHistory,
+  managementOverview,
   riskSummary,
   VALUES_FILTER_NONE,
   type CustomStatisticsFilters,
@@ -1037,5 +1038,105 @@ describe('statistics.service (integration, real PG)', () => {
     expect(facets.handlerNames).toContain('facet-甲');
     expect(facets.creatorNames).toContain('admin-stat');
     expect(facets.subjectNames).toEqual(expect.arrayContaining(['叶A', '叶B']));
+  });
+
+  // ---------------- managementOverview(工作台管理决策) ----------------
+
+  it('managementOverview: 应结题/执行率不足/超支三类信号 + 月度趋势(全局只读)', async () => {
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
+
+    // p1:3 年期(已过 1 年,时间进度约 1/3),执行率 10% → 执行率不足;
+    //    结束日期在两年后 → 不应结题;占用 100 < 1000 → 不超支。
+    const { project: p1, leafA: leafA1 } = await seedApprovedProject('MGR1');
+    await prisma.project.update({
+      where: { id: p1.id },
+      data: { startDate: daysAgo(365), endDate: new Date(now.getTime() + 730 * 86_400_000) },
+    });
+    await createRecord(
+      p1.id,
+      {
+        budgetYear: y,
+        subjectId: leafA1.id,
+        amount: '100.00',
+        businessDate: now.toISOString().slice(0, 10),
+        handler: 'mgr',
+        summary: 'mgr-lag-payable',
+        status: BusinessStatus.PLACEHOLDER,
+      },
+      adminUser(),
+    );
+
+    // p2:结束日期已过 30 天(逾期应结题,时间进度=1);占用 1100 > 1000 → 超支;
+    //    执行率 110% ≥ 100% → 不属执行率不足。
+    const { project: p2, leafA: leafA2 } = await seedApprovedProject('MGR2');
+    await prisma.project.update({
+      where: { id: p2.id },
+      data: { startDate: daysAgo(400), endDate: daysAgo(30) },
+    });
+    await createRecord(
+      p2.id,
+      {
+        budgetYear: y,
+        subjectId: leafA2.id,
+        amount: '1100.00',
+        businessDate: now.toISOString().slice(0, 10),
+        handler: 'mgr',
+        summary: 'mgr-overspend-paid',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // p3:结束日期 = 今年年末 → 应结题(今年内到期);无起始 → 不参与时间进度。
+    const { project: p3 } = await seedApprovedProject('MGR3');
+    await prisma.project.update({
+      where: { id: p3.id },
+      data: { endDate: new Date(Date.UTC(y, 11, 31)) },
+    });
+
+    const result = await managementOverview(adminUser());
+    // 全局只读:USER 同样可取(不抛)。
+    await expect(managementOverview(outsiderUser())).resolves.toBeTruthy();
+
+    // —— 应结题:逾期 p2 在前、年末 p3 其后;p1(两年后)不在。
+    const dueIds = result.dueForCompletion.map((r) => r.projectId);
+    expect(dueIds).toContain(p2.id);
+    expect(dueIds).toContain(p3.id);
+    expect(dueIds.indexOf(p2.id)).toBeLessThan(dueIds.indexOf(p3.id));
+    expect(dueIds).not.toContain(p1.id);
+    const p2Due = result.dueForCompletion.find((r) => r.projectId === p2.id)!;
+    expect(p2Due.remainingDays).toBeLessThan(0);
+
+    // —— 执行率不足:p1(10% < 约 1/3)在列;p2(110%)不在。
+    const lagIds = result.executionLagging.map((r) => r.projectId);
+    expect(lagIds).toContain(p1.id);
+    expect(lagIds).not.toContain(p2.id);
+    const p1Lag = result.executionLagging.find((r) => r.projectId === p1.id)!;
+    expect(p1Lag.timeProgress).not.toBeNull();
+    expect(p1Lag.timeProgress!).toBeGreaterThan(0.2);
+    expect(p1Lag.timeProgress!).toBeLessThan(0.5);
+    expect(p1Lag.executionRate).toBeCloseTo(0.1, 5);
+
+    // —— 超支:p2(结余 -100)在列;p1(结余 900)不在。(测试库含他组数据,断言用包含式。)
+    const overIds = result.overspend.map((r) => r.projectId);
+    expect(overIds).toContain(p2.id);
+    expect(overIds).not.toContain(p1.id);
+    const p2Over = result.overspend.find((r) => r.projectId === p2.id)!;
+    expect(p2Over.balance).toBe('-100.00');
+    expect(p2Over.executionRate).toBeCloseTo(1.1, 5);
+
+    // —— 月度趋势:12 个连续月桶,末桶为当月;两笔记录落入窗口(paid/payable 均非 0)。
+    expect(result.monthlyTrend).toHaveLength(12);
+    expect(result.monthlyTrend[11].month).toBe(now.toISOString().slice(0, 7));
+    const paidSum = result.monthlyTrend.reduce((a, m) => a + Number(m.paid), 0);
+    const payableSum = result.monthlyTrend.reduce((a, m) => a + Number(m.payable), 0);
+    expect(paidSum).toBeGreaterThanOrEqual(1100);
+    expect(payableSum).toBeGreaterThanOrEqual(100);
+
+    // —— 起止缺失(p3 无 startDate)不参与时间进度:字段为 null。
+    const p3Row = result.dueForCompletion.find((r) => r.projectId === p3.id)!;
+    expect(p3Row.timeProgress).toBeNull();
   });
 });

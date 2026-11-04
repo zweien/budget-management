@@ -1153,6 +1153,175 @@ export async function riskSummary(
   return { rows };
 }
 
+// ---------------- 管理决策总览(工作台) ----------------
+
+/** 管理决策项目行:项目级现行预算/占用/执行率 + 起止日期推导信号(应结题/时间进度)。 */
+export interface ManagementProjectRow {
+  projectId: string;
+  code: string;
+  name: string;
+  /** yyyy-MM-dd;起止缺失为 null(不参与时间进度/应结题信号)。 */
+  startDate: string | null;
+  endDate: string | null;
+  /** 项目现行总预算(ProjectBudget.currentAmount,一般/包干通用)。 */
+  currentBudget: string;
+  totalOccupied: string;
+  /** 总结余 = 现行总预算 − 总占用;负 = 超支。 */
+  balance: string;
+  executionRate: number | null;
+  /** 时间进度 0~1(起止齐全才算;未开始=0,已逾期=1);缺失为 null。 */
+  timeProgress: number | null;
+  /** 距结束日期天数(今天=0,已过为负);无结束日期为 null。 */
+  remainingDays: number | null;
+}
+
+/** 管理决策总览结果:月度趋势 + 三类决策信号(全量列表,前端截取 Top N)。 */
+export interface ManagementOverviewResult {
+  year: number;
+  /** 近 12 个月跨项目月度执行(按申请日期所在月)。 */
+  monthlyTrend: { month: string; paid: string; payable: string; totalOccupied: string }[];
+  /** 应结题:结束日期 ≤ 本年度年末的未归档项目,按结束日期升序(逾期在前)。 */
+  dueForCompletion: ManagementProjectRow[];
+  /** 执行率不足:执行率 < 时间进度(起止齐全、预算非 0),按差距降序。 */
+  executionLagging: ManagementProjectRow[];
+  /** 超支:总结余 < 0,按结余升序(缺口大者在前)。 */
+  overspend: ManagementProjectRow[];
+}
+
+/**
+ * 管理决策总览(工作台「管理决策」区一次取回)。
+ *
+ * 口径:项目现行总预算 vs 全部有效记录总占用(computeOccupancy 四态,作废不计),
+ * 与跨项目统计/台账一致;不按年度过滤(决策信号看项目全生命周期)。
+ * - 应结题:结束日期 ≤ 年末的未归档项目(逾期含在内,前端标红);
+ * - 执行率不足:执行率 < 时间进度。边界:起止缺失不参与;未开始时间进度=0
+ *   (不会触发);已逾期时间进度=1(执行率<100% 即预警);
+ * - 超支:项目总结余 < 0(与「风险预警」科目级负结余粒度不同,互为补充)。
+ * 全局只读(所有登录用户);selected-scope 凭证拒绝(跨项目接口)。
+ */
+export async function managementOverview(
+  user: Pick<User, 'id' | 'role'>,
+): Promise<ManagementOverviewResult> {
+  await denyApiKeyCrossProject(user, 'project:view');
+
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  // 年末(UTC):应结题上界 = 今年 12-31(含)。
+  const yearEnd = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+  const todayUtcMidnight = new Date(`${now.toISOString().slice(0, 10)}T00:00:00Z`);
+
+  // 一次取回:项目(含起止)+ 总预算 + 全量占用(按项目×状态分组)。
+  const projects = await prisma.project.findMany({
+    where: { archivedAt: null },
+    select: { id: true, code: true, name: true, startDate: true, endDate: true },
+  });
+  const [projectBudgets, groups, trendRaw] = await Promise.all([
+    prisma.projectBudget.findMany({ select: { projectId: true, currentAmount: true } }),
+    prisma.businessRecord.groupBy({
+      by: ['projectId', 'status'],
+      where: { projectId: { in: projects.map((p) => p.id) }, isVoid: false },
+      _sum: { amount: true },
+    }),
+    prisma.$queryRaw<Array<{ month: string; status: string; total: Prisma.Decimal }>>`
+      SELECT to_char(date_trunc('month', business_date), 'YYYY-MM') AS month,
+             status::text AS status,
+             SUM(amount) AS total
+      FROM business_records
+      WHERE is_void = false
+        AND business_date >= date_trunc('month', CURRENT_DATE) - interval '11 months'
+      GROUP BY 1, 2
+    `,
+  ]);
+
+  const budgetByProject = new Map(projectBudgets.map((pb) => [pb.projectId, pb.currentAmount]));
+  const recordsByProject = new Map<string, { amount: Prisma.Decimal; status: string }[]>();
+  for (const g of groups) {
+    const list = recordsByProject.get(g.projectId) ?? [];
+    list.push({ amount: g._sum.amount ?? ZERO, status: g.status });
+    recordsByProject.set(g.projectId, list);
+  }
+
+  const rows: ManagementProjectRow[] = projects.map((p) => {
+    const currentBudget = fromStored(String(budgetByProject.get(p.id) ?? '0'));
+    const occ = computeOccupancy({
+      records: (recordsByProject.get(p.id) ?? []).map((r) => ({
+        amount: r.amount,
+        status: r.status as BusinessStatus,
+        isVoid: false,
+      })),
+    });
+    const balance = currentBudget.minus(occ.totalOccupied);
+    // 时间进度:连续时间占比,夹在 [0,1];未开始=0,已逾期=1;起止缺失=null。
+    let timeProgress: number | null = null;
+    if (p.startDate && p.endDate) {
+      const start = p.startDate.getTime();
+      const end = p.endDate.getTime();
+      if (end > start) {
+        const raw = (now.getTime() - start) / (end - start);
+        timeProgress = Math.min(1, Math.max(0, raw));
+      }
+    }
+    const remainingDays =
+      p.endDate !== null
+        ? Math.round((p.endDate.getTime() - todayUtcMidnight.getTime()) / 86_400_000)
+        : null;
+    return {
+      projectId: p.id,
+      code: p.code,
+      name: p.name,
+      startDate: p.startDate ? p.startDate.toISOString().slice(0, 10) : null,
+      endDate: p.endDate ? p.endDate.toISOString().slice(0, 10) : null,
+      currentBudget: currentBudget.toFixed(2),
+      totalOccupied: occ.totalOccupied.toFixed(2),
+      balance: balance.toFixed(2),
+      executionRate: executionRate(occ.totalOccupied, currentBudget),
+      timeProgress,
+      remainingDays,
+    };
+  });
+
+  // 三类决策信号(全量返回,前端 Top N 截取)。
+  const dueForCompletion = rows
+    .filter((r) => r.endDate !== null && new Date(`${r.endDate}T23:59:59.999Z`) <= yearEnd)
+    .sort((a, b) => a.endDate!.localeCompare(b.endDate!));
+
+  const executionLagging = rows
+    .filter(
+      (r) =>
+        r.executionRate !== null &&
+        r.timeProgress !== null &&
+        r.executionRate < r.timeProgress - 1e-9,
+    )
+    .sort((a, b) => b.timeProgress! - b.executionRate! - (a.timeProgress! - a.executionRate!));
+
+  const overspend = rows
+    .filter((r) => fromStored(r.balance).isNeg())
+    .sort((a, b) => fromStored(a.balance).cmp(fromStored(b.balance)));
+
+  // 近 12 个月桶(11 个月前 ~ 当月),缺月补 0。
+  const trendMap = new Map<string, { paid: D; payable: D }>();
+  for (const r of trendRaw) {
+    const bucket = trendMap.get(r.month) ?? { paid: ZERO, payable: ZERO };
+    if (r.status === 'PAID') bucket.paid = bucket.paid.plus(fromStored(r.total.toFixed(2)));
+    else bucket.payable = bucket.payable.plus(fromStored(r.total.toFixed(2)));
+    trendMap.set(r.month, bucket);
+  }
+  const monthlyTrend: ManagementOverviewResult['monthlyTrend'] = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const month = d.toISOString().slice(0, 7);
+    const bucket = trendMap.get(month) ?? { paid: ZERO, payable: ZERO };
+    monthlyTrend.push({
+      month,
+      paid: bucket.paid.toFixed(2),
+      payable: bucket.payable.toFixed(2),
+      totalOccupied: bucket.paid.plus(bucket.payable).toFixed(2),
+    });
+  }
+
+  return { year, monthlyTrend, dueForCompletion, executionLagging, overspend };
+}
+
 // ---------------- 全局录入页筛选候选(§11.3 配套) ----------------
 
 /** 筛选候选清单(值列漏斗的稳定选项,不随分页页内数据漂移)。 */
