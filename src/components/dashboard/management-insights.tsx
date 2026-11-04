@@ -314,9 +314,11 @@ function SignalSheet({
   onOpenChange: (o: boolean) => void;
   thresholds: DashThresholds;
 }) {
-  const [page, setPage] = useState(0);
+  // 页码 1 起始(与 TablePagination 口径一致;codex review:此前 0 起始导致
+  // 第二页起「上一页」被禁、末页再下一页出现空列表)。
+  const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const paged = rows.slice(page * pageSize, page * pageSize + pageSize);
+  const paged = rows.slice((page - 1) * pageSize, page * pageSize);
   const title =
     kind === 'due'
       ? '应结题项目(全量)'
@@ -327,7 +329,7 @@ function SignalSheet({
     <Sheet
       open={open}
       onOpenChange={(o) => {
-        if (!o) setPage(0); // 关闭时复位分页(事件处理器内;下次打开从头看)。
+        if (!o) setPage(1); // 关闭时复位分页(事件处理器内;下次打开从头看)。
         onOpenChange(o);
       }}
     >
@@ -401,7 +403,7 @@ function SignalSheet({
             onPageChange={setPage}
             onPageSizeChange={(ps) => {
               setPageSize(ps);
-              setPage(0);
+              setPage(1);
             }}
           />
         </div>
