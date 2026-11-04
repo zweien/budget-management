@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, Inbox } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api/client';
+import { ManagementInsights } from '@/components/dashboard/management-insights';
 import { PageHeader } from '@/components/layout/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -127,6 +128,7 @@ export default function DashboardPage() {
 
       <ProjectOverview />
       <BudgetMetricCards />
+      <ManagementInsights />
       <RiskWarnings />
       {isAdmin ? <PendingApprovals /> : null}
     </div>
