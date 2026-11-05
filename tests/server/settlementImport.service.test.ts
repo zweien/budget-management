@@ -324,7 +324,13 @@ describe('settlementImport.service (integration, real PG)', () => {
     ]);
     const wb = await loadSettlementWorkbookIfMatch(buf);
     expect(wb).not.toBeNull();
-    const batchId = await parseSettlement(wb!, projectId, adminUser(), 'sample.xlsx');
+    const batchId = await parseSettlement(wb!, projectId, adminUser(), 'sample.xlsx', buf);
+    // 原件留存(codex 评审 P2):上传字节须随批次落库,下载端点据此回放。
+    const stored = await prisma.importBatch.findUnique({
+      where: { id: batchId },
+      select: { fileData: true, fileSizeBytes: true },
+    });
+    expect(stored?.fileData?.equals(buf)).toBe(true);
 
     const preview = await getSettlementBatch(batchId, adminUser());
     expect(preview.templateVersion).toBe(SETTLEMENT_TEMPLATE_VERSION);

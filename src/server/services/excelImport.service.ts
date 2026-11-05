@@ -17,6 +17,20 @@ import {
   TEMPLATE_VERSION,
 } from '@/lib/excel/template';
 
+/** 批次元信息 select:不含 fileData(bytea 单条可达 MAX_IMPORT_BYTES;codex 评审 P1——
+ *  预览/确认/删除等批次操作不得隐式拖带原件字节,只留给下载端点显式取用)。 */
+const BATCH_META_SELECT = {
+  id: true,
+  projectId: true,
+  fileName: true,
+  templateVersion: true,
+  status: true,
+  createdAt: true,
+  confirmedAt: true,
+  createdCount: true,
+  updatedCount: true,
+} as const;
+
 /**
  * §10 Excel 批量导入服务。
  *
@@ -227,11 +241,12 @@ export async function parseAndValidate(
   // ---- 解析 xlsx ----
   // exceljs.xlsx.load 期望 Buffer;统一转换(ArrayBuffer / Buffer 均可入参)。
   // 经 unknown 转换到 load 的形参类型,规避 @types/node Buffer 泛型与 exceljs 声明的类型噪声。
+  // fileBytes 同时承载原件留存(批次列表「下载原件」),预载 workbook 时仅作存储用。
+  const fileBytes = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
   const workbook = preloadedWorkbook ?? new ExcelJS.Workbook();
   if (!preloadedWorkbook) {
-    const buf = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
     try {
-      await workbook.xlsx.load(buf as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+      await workbook.xlsx.load(fileBytes as unknown as Parameters<typeof workbook.xlsx.load>[0]);
     } catch {
       throw new HTTPError(422, '无法解析 Excel 文件:格式损坏或非 .xlsx');
     }
@@ -459,6 +474,8 @@ export async function parseAndValidate(
         templateVersion: TEMPLATE_VERSION,
         status: 'pending',
         creatorId: user.id,
+        fileData: fileBytes,
+        fileSizeBytes: fileBytes.length,
       },
     });
 
@@ -496,7 +513,9 @@ export async function getImportBatch(
 ): Promise<ImportBatchPreview> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
-    include: { rows: { orderBy: { rowNo: 'asc' } } },
+    // 不取 fileData(bytea 单条可达 MAX_IMPORT_BYTES;codex 评审 P1:预览/确认等
+    // 批次操作不得隐式拖带原件字节)。
+    select: { ...BATCH_META_SELECT, rows: { orderBy: { rowNo: 'asc' } } },
   });
   if (!batch) {
     throw new HTTPError(404, '导入批次不存在');
@@ -578,7 +597,7 @@ export async function confirmImport(
 ): Promise<ConfirmResult> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
-    include: { rows: true },
+    select: { ...BATCH_META_SELECT, rows: true },
   });
   if (!batch) {
     throw new HTTPError(404, '导入批次不存在');

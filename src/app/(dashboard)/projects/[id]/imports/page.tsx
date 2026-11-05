@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { FileSpreadsheet, Inbox } from 'lucide-react';
+import { Download, FileSpreadsheet, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
@@ -96,6 +96,8 @@ interface BatchListItem {
   createdCount: number | null;
   /** 补全更新行数(未确认为 null)。 */
   updatedCount: number | null;
+  /** 原件大小(字节);null=未留存(功能上线前的历史批次),不显示下载。 */
+  fileSizeBytes: number | null;
 }
 
 /** 上传文件(走原生 fetch + mock header,不用 apiFetch 的 JSON Content-Type)。 */
@@ -138,6 +140,38 @@ async function downloadTemplate(): Promise<void> {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/** 下载批次留存的上传原件(走原生 fetch + mock header,以触发文件下载)。 */
+async function downloadImportFile(projectId: string, b: BatchListItem): Promise<void> {
+  const mockUserId = await bootstrapMockUser();
+  const res = await fetch(`/api/projects/${projectId}/imports/${b.batchId}/file`, {
+    headers: mockUserId ? { 'x-mock-user-id': mockUserId } : {},
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(
+      body && typeof body === 'object' && 'error' in body
+        ? String((body as { error: unknown }).error)
+        : `下载失败 (${res.status})`,
+    );
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = b.fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** 字节数 → 人类可读(列表「文件」列展示原件大小)。 */
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
 }
 
 function PreviewTable({
@@ -649,14 +683,19 @@ function ImportPageInner() {
                   <TableHead className="w-28 tabular-nums">实际导入</TableHead>
                   <TableHead className="w-40">上传时间</TableHead>
                   <TableHead className="w-40">导入日期</TableHead>
-                  <TableHead className="w-32" />
+                  <TableHead className="w-44" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {batches.map((b) => (
                   <TableRow key={b.batchId}>
                     <TableCell className="max-w-64 truncate" title={b.fileName}>
-                      {b.fileName}
+                      <span className="block truncate">{b.fileName}</span>
+                      {b.fileSizeBytes !== null ? (
+                        <span className="block text-xs text-mute">
+                          {formatFileSize(b.fileSizeBytes)}
+                        </span>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       {isSettlementTemplateVersion(b.templateVersion) ? (
@@ -704,6 +743,18 @@ function ImportPageInner() {
                         >
                           {b.status === 'confirmed' ? '查看' : '继续'}
                         </Button>
+                        {b.fileSizeBytes !== null ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="下载上传原件"
+                            onClick={() =>
+                              downloadImportFile(projectId, b).catch((e) => toast.error(e.message))
+                            }
+                          >
+                            <Download className="size-4" />
+                          </Button>
+                        ) : null}
                         {b.status !== 'confirmed' ? (
                           <Button
                             variant="ghost"

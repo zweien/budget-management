@@ -174,8 +174,9 @@ export async function assertApiKeyProjectsInScope(
 }
 
 /** 机器凭证被拒审计:operator=凭证所属用户,失败不掩盖随后的 403。
- *  projectId 仅在真实存在时落库(外键约束);否则置 null,原始值进 afterData。 */
-async function auditMachineDenied(
+ *  projectId 仅在真实存在时落库(外键约束);否则置 null,原始值进 afterData。
+ *  (导出供 service 层自定范围的拒绝路径复用,如导入原件下载的「未映射行」分支。) */
+export async function auditMachineDenied(
   user: { id: string; apiKeyPrefix?: string },
   action: Action,
   projectId: string | undefined,

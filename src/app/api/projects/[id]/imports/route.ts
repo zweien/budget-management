@@ -52,11 +52,13 @@ export const POST = withRoute(
     await requirePermission(user, 'record:import', id);
 
     const arrayBuffer = await file.arrayBuffer();
+    // 原件留存字节(bytea 入库,批次列表可「下载原件」)。
+    const fileBytes = Buffer.from(arrayBuffer);
     // 格式自动识别:命中个人结算单表头(单据编号+单据状态)走结算单解析,否则标准模板。
     // 整个 workbook 只 load 一次,探测与解析复用同一对象(此前标准模板被解析两遍)。
     const { workbook, isSettlement } = await loadWorkbookWithFormatDetection(arrayBuffer);
     const batchId = isSettlement
-      ? await parseSettlement(workbook, id, user, name)
+      ? await parseSettlement(workbook, id, user, name, fileBytes)
       : await parseAndValidate(arrayBuffer, id, user, name, workbook);
     return NextResponse.json({ batchId }, { status: 201 });
   },

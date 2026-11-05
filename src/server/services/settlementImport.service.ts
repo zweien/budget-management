@@ -4,7 +4,12 @@ import { BusinessStatus, Prisma, User } from '@prisma/client';
 import { BULK_TX_OPTIONS, prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
 import { env } from '@/lib/env';
-import { denyApiKeyCrossProject, requirePermission } from '@/lib/auth/permissions';
+import {
+  assertApiKeyProjectsInScope,
+  auditMachineDenied,
+  denyApiKeyCrossProject,
+  requirePermission,
+} from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
 import { toStored, fromStored } from '@/lib/decimal';
 import { recordAudit } from '@/server/audit/interceptor';
@@ -39,6 +44,20 @@ import {
   hardDupReason,
   type DuplicateRowVerdict,
 } from '@/server/services/duplicateCheck.service';
+
+/** 批次元信息 select:不含 fileData(bytea 单条可达 MAX_IMPORT_BYTES;codex 评审 P1——
+ *  预览/暂存/确认/删除等批次操作不得隐式拖带原件字节,只留给下载端点显式取用)。 */
+const BATCH_META_SELECT = {
+  id: true,
+  projectId: true,
+  fileName: true,
+  templateVersion: true,
+  status: true,
+  createdAt: true,
+  confirmedAt: true,
+  createdCount: true,
+  updatedCount: true,
+} as const;
 
 /**
  * 个人结算单查询 Excel 导入(财务系统导出格式,与标准模板 §10 并存)。
@@ -160,6 +179,8 @@ export interface ImportBatchListItem {
   createdCount: number | null;
   /** 补全更新行数(仅结算单 v2 场景;未确认为 null)。 */
   updatedCount: number | null;
+  /** 原件大小(字节);null=未留存(功能上线前的历史批次),前端不显示下载。 */
+  fileSizeBytes: number | null;
 }
 
 /** 行更新入参(暂存:科目/年度/强制导入)。 */
@@ -234,6 +255,8 @@ export async function parseSettlement(
   projectId: string,
   user: Pick<User, 'id' | 'role'>,
   fileName = 'upload.xlsx',
+  /** 上传原件字节(批次留存,供「下载原件」);缺省不留存。 */
+  fileData?: Buffer,
 ): Promise<string> {
   await requirePermission(user, 'record:import', projectId);
 
@@ -284,6 +307,7 @@ export async function parseSettlement(
         projectId,
         user,
         fileName,
+        fileData,
       });
       return batchId;
     }
@@ -522,6 +546,8 @@ export async function parseSettlement(
         templateVersion,
         status: 'pending',
         creatorId: user.id,
+        fileData: fileData ?? undefined,
+        fileSizeBytes: fileData?.length ?? undefined,
       },
     });
     await tx.importRow.createMany({
@@ -657,8 +683,10 @@ async function parseSettlementV3(opts: {
   fileName: string;
   /** 统一入口:强制批次承载项目(缺省回退上传项目上下文)。 */
   batchProjectId?: string;
+  /** 上传原件字节(批次留存,供「下载原件」);缺省不留存。 */
+  fileData?: Buffer;
 }): Promise<{ batchId: string; batchProjectId: string }> {
-  const { sheet, headerRowNo, projectId, user, fileName } = opts;
+  const { sheet, headerRowNo, projectId, user, fileName, fileData } = opts;
 
   const colIndex = new Map<string, number>();
   sheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell, colNumber) => {
@@ -1016,6 +1044,8 @@ async function parseSettlementV3(opts: {
         templateVersion: SETTLEMENT_V3_TEMPLATE_VERSION,
         status: 'pending',
         creatorId: user.id,
+        fileData: fileData ?? undefined,
+        fileSizeBytes: fileData?.length ?? undefined,
       },
     });
     await tx.importRow.createMany({
@@ -1132,6 +1162,7 @@ export async function parseSettlementUnified(
     user,
     fileName,
     batchProjectId: hostProjectId,
+    fileData: Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer),
   });
   return { batchId, batchProjectId, needsHost: false, mappableProjects: undefined };
 }
@@ -1242,7 +1273,7 @@ export async function getSettlementBatch(
 ): Promise<SettlementBatchPreview> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
-    include: { rows: { orderBy: { rowNo: 'asc' } } },
+    select: { ...BATCH_META_SELECT, rows: { orderBy: { rowNo: 'asc' } } },
   });
   if (!batch) {
     throw new HTTPError(404, '导入批次不存在');
@@ -1434,7 +1465,7 @@ export async function updateSettlementRows(
 ): Promise<void> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
-    include: { rows: true },
+    select: { ...BATCH_META_SELECT, rows: true },
   });
   if (!batch) {
     throw new HTTPError(404, '导入批次不存在');
@@ -1701,7 +1732,7 @@ export async function confirmSettlementImport(
 ): Promise<{ created: number; updated: number; batchId: string }> {
   const batch = await prisma.importBatch.findUnique({
     where: { id: batchId },
-    include: { rows: { orderBy: { rowNo: 'asc' } } },
+    select: { ...BATCH_META_SELECT, rows: { orderBy: { rowNo: 'asc' } } },
   });
   if (!batch) {
     throw new HTTPError(404, '导入批次不存在');
@@ -2013,11 +2044,23 @@ export async function listImportBatches(
   user: Pick<User, 'id' | 'role'>,
 ): Promise<ImportBatchListItem[]> {
   await requirePermission(user, 'project:view', projectId);
+  // 显式 select:不取 fileData(bytea,单条可达 MAX_IMPORT_BYTES)——存在性用 fileSizeBytes 表达。
   const batches = await prisma.importBatch.findMany({
     where: { projectId },
     orderBy: { createdAt: 'desc' },
     take: 20,
-    include: { _count: { select: { rows: true } } },
+    select: {
+      id: true,
+      fileName: true,
+      templateVersion: true,
+      status: true,
+      createdAt: true,
+      confirmedAt: true,
+      createdCount: true,
+      updatedCount: true,
+      fileSizeBytes: true,
+      _count: { select: { rows: true } },
+    },
   });
   return batches.map((b) => ({
     batchId: b.id,
@@ -2029,7 +2072,74 @@ export async function listImportBatches(
     rowCount: b._count.rows,
     createdCount: b.createdCount,
     updatedCount: b.updatedCount,
+    fileSizeBytes: b.fileSizeBytes,
   }));
+}
+
+/**
+ * 取批次留存的上传原件(下载用)。
+ * - 权限:project:view(与附件下载一致,含全局只读 USER);
+ *   批次不属于该项目 → 404;未留存原件(历史批次)→ 404。
+ * - selected 项目范围凭证(codex 评审 P1):原件是整份文件,v3 多项目批次挂单个
+ *   承载项目时,仅授权部分项目的凭证下载会带出其余项目(含未映射/跳过行)的数据——
+ *   行级目标项目全集 ⊆ 凭证允许清单才放行;存在「有项目名但未映射」的行时无法
+ *   证明归属,直接拒绝(审计 apikey.denied)。
+ */
+export async function getImportFile(
+  batchId: string,
+  projectId: string,
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    apiKeyPrefix?: string;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  },
+): Promise<{ fileName: string; data: Buffer }> {
+  await requirePermission(user, 'project:view', projectId);
+  const batch = await prisma.importBatch.findUnique({
+    where: { id: batchId },
+    select: { projectId: true, fileName: true, fileData: true },
+  });
+  if (!batch || batch.projectId !== projectId) {
+    throw new HTTPError(404, '导入批次不存在');
+  }
+  if (!batch.fileData) {
+    throw new HTTPError(404, '该批次未留存原始文件(仅功能上线后上传的文件可下载)');
+  }
+
+  if (user.viaApiKey && (user.keyProjectScope ?? 'all') === 'selected') {
+    // 行级归属归并:v1/v2/标准模板行无映射字段 → 全归承载项目;v3 行带 targetProjectId。
+    const rows = await prisma.importRow.findMany({
+      where: { batchId },
+      select: { parsedData: true },
+    });
+    const targets = new Set<string>([projectId]);
+    let hasUnmapped = false;
+    for (const r of rows) {
+      const d = (r.parsedData ?? null) as {
+        targetProjectId?: unknown;
+        fileProjectName?: unknown;
+      } | null;
+      const target = typeof d?.targetProjectId === 'string' ? d.targetProjectId : null;
+      const name = typeof d?.fileProjectName === 'string' ? d.fileProjectName : null;
+      if (target) {
+        targets.add(target);
+      } else if (name) {
+        // 有项目名但未映射(含 v3 跳过/待映射行):无法证明其归属授权范围。
+        hasUnmapped = true;
+      }
+    }
+    if (hasUnmapped) {
+      await auditMachineDenied(user, 'project:view', projectId, 'apikey.denied', {
+        reason: '原件含未映射到具体项目的行,无法证明凭证范围覆盖',
+        keyProjectScope: 'selected',
+      });
+      throw new HTTPError(403, '凭证项目范围无法覆盖该原件(存在未映射项目的行)');
+    }
+    await assertApiKeyProjectsInScope(user, [...targets]);
+  }
+
+  return { fileName: batch.fileName, data: Buffer.from(batch.fileData) };
 }
 
 /**
@@ -2042,7 +2152,10 @@ export async function deleteImportBatch(
   batchId: string,
   user: Pick<User, 'id' | 'role'>,
 ): Promise<void> {
-  const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
+  const batch = await prisma.importBatch.findUnique({
+    where: { id: batchId },
+    select: { ...BATCH_META_SELECT },
+  });
   if (!batch) {
     throw new HTTPError(404, '导入批次不存在');
   }

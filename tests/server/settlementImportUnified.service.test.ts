@@ -143,6 +143,12 @@ describe('settlementImport unified entry (integration, real PG)', () => {
     );
     expect(ok.needsHost).toBe(false);
     expect(ok.batchProjectId).toBe(projectAId);
+    // 原件留存(codex 评审 P2):统一入口上传字节须随批次落库,下载端点据此回放。
+    const stored = await prisma.importBatch.findUnique({
+      where: { id: ok.batchId! },
+      select: { fileData: true, fileSizeBytes: true },
+    });
+    expect(stored?.fileData?.equals(buf)).toBe(true);
     const preview = await getSettlementBatch(ok.batchId!, { id: adminId, role: UserRole.ADMIN });
     expect(preview.pending.filter((r) => r.parsedData.targetProjectId === projectAId)).toHaveLength(
       1,

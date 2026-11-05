@@ -454,6 +454,10 @@ model ImportBatch {
   /// 确认时落定的结果计数(批次列表「已导入」列);未确认为 null。
   createdCount    Int?     @map("created_count")
   updatedCount    Int?     @map("updated_count")
+  /// 上传原件留存(xlsx 字节,bytea 入库,与附件子系统同模式);历史批次为 null → 无下载。
+  fileData        Bytes?   @map("file_data")
+  /// 原件大小(字节);兼作「是否留存」的轻量存在标志(列表不取 fileData)。
+  fileSizeBytes   Int?     @map("file_size_bytes")
 
   project Project   @relation(fields: [projectId], references: [id])
   rows    ImportRow[]

@@ -185,6 +185,13 @@ describe('excelImport.service (integration, real PG)', () => {
 
     const batchId = await parseAndValidate(buf, project.id, adminUser(), 'ok.xlsx');
     expect(batchId).toBeTruthy();
+    // 原件留存(codex 评审 P2):上传字节须随批次落库,下载端点据此回放。
+    const stored = await prisma.importBatch.findUnique({
+      where: { id: batchId },
+      select: { fileData: true, fileSizeBytes: true },
+    });
+    expect(stored?.fileSizeBytes).toBe(buf.length);
+    expect(stored?.fileData?.equals(buf)).toBe(true);
 
     const preview = await getImportBatch(batchId, adminUser());
     expect(preview.status).toBe('pending');
