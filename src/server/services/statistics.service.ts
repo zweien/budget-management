@@ -1375,6 +1375,11 @@ export async function customStatisticsFacets(
       .map((c) => c.name)
       .filter((n): n is string => !!n)
       .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
-    subjectNames: subjects.map((s) => s.name),
+    // 去重(全局录入页科目筛选候选):科目按项目各自建表,同名科目(如「差旅费」)
+    // 每个项目一行;筛选项按名称跨项目匹配,候选必须唯一——重复项会让前端弹层
+    // 撞 React key 报错,且「全选=不过滤」的长度判定失真。
+    subjectNames: [...new Set(subjects.map((s) => s.name))].sort((a, b) =>
+      a.localeCompare(b, 'zh-Hans-CN'),
+    ),
   };
 }

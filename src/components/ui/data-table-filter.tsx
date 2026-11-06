@@ -173,7 +173,9 @@ function ValuesFilter<TData>({
   //  过滤会改变自身 faceted 集合的列必须传 options,否则勾选后选项漂移)。
   const allValues = React.useMemo(
     () =>
-      (options ?? Array.from(faceted.keys())).sort((a, b) =>
+      // 先去重再排序:候选源可能含重复(如各项目同名科目「差旅费」)——重复项会撞
+      // React key 报错,且「全选=不过滤」的 next.size === allValues.length 判定失真。
+      Array.from(new Set(options ?? Array.from(faceted.keys()))).sort((a, b) =>
         String(a).localeCompare(String(b), 'zh-CN', { numeric: true }),
       ),
     [faceted, options],

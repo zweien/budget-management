@@ -1040,6 +1040,17 @@ describe('statistics.service (integration, real PG)', () => {
     expect(facets.subjectNames).toEqual(expect.arrayContaining(['叶A', '叶B']));
   });
 
+  it('customStatisticsFacets: 同名科目跨项目去重(全局录入页科目筛选候选唯一)', async () => {
+    // 两个项目各有一套同名的「叶A/叶B」——筛选候选按名称跨项目匹配,必须只出现一次,
+    // 否则前端弹层撞 React key 报错且「全选=不过滤」长度判定失真(codex 复现)。
+    const { project: pa } = await seedApprovedProject('CSF3D1');
+    const { project: pb } = await seedApprovedProject('CSF3D2');
+    const facets = await customStatisticsFacets([pa.id, pb.id], adminUser());
+    expect(facets.subjectNames.filter((n) => n === '叶A')).toHaveLength(1);
+    // 整体无重复(Set 尺寸 = 数组长度)。
+    expect(new Set(facets.subjectNames).size).toBe(facets.subjectNames.length);
+  });
+
   // ---------------- managementOverview(工作台管理决策) ----------------
 
   it('managementOverview: 应结题/执行率不足/超支三类信号 + 月度趋势(全局只读)', async () => {
