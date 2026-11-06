@@ -14,6 +14,7 @@ import {
   type AttachmentMeta,
   type AttachmentOwnerKind,
 } from '@/lib/api/attachments';
+import { PREVIEWABLE_ATTACHMENT_EXTENSIONS } from '@/lib/attachments/config';
 
 // file-viewer 装配(Worker/WASM)只能在浏览器加载:禁用 SSR,骨架占位。
 const ViewerCanvas = dynamic(() => import('@/components/file-viewer/ViewerCanvas'), {
@@ -22,17 +23,11 @@ const ViewerCanvas = dynamic(() => import('@/components/file-viewer/ViewerCanvas
 });
 
 /**
- * 预览白名单(双通道):
- * - 图片/PDF 按 contentType 前缀(浏览器原生预览);
- * - Office 文档/表格按文件名扩展名——file-viewer 的格式识别本就只认文件名
- *   后缀,且上传时扩展名/MIME 已双白名单校验一致。docx/xlsx 渲染资产
- *   (public/file-viewer/vendor/{docx,xlsx})已自托管,doc/xls 老格式由
- *   renderer-word 内置二进制解析器 / BIFF 表格渲染器覆盖。
- * ppt/pptx 渲染资产未自托管(见 scripts/copy-file-viewer-assets.mjs 裁剪),
- * 维持"不支持在线预览,请下载"兜底。
+ * 预览白名单:不自维护副本,由上传白名单(config.ts)的 previewable 标记派生,
+ * 按文件名后缀判定——file-viewer 的格式识别本就只认后缀,上传时扩展名/MIME
+ * 已双白名单校验一致(图片/PDF 同样由扩展名覆盖)。ppt/pptx 不可预览的
+ * 原因(渲染资产未自托管)见该表注释。
  */
-const SUPPORTED_PREFIXES = ['image/', 'application/pdf'];
-const SUPPORTED_OFFICE_EXTENSIONS = ['.doc', '.docx', '.xls', '.xlsx'];
 
 /** Office 附件经 file-viewer 渲染的追加 options:docx 页式预览与调整单审批表同款观感。 */
 const OFFICE_VIEWER_OPTIONS = { docx: { visualPagination: true } };
@@ -74,9 +69,9 @@ export function AttachmentPreviewDialog({
   const attachmentId = attachment?.id;
   const contentType = attachment?.contentType ?? '';
   const fileName = attachment?.fileName ?? '';
-  const supported =
-    SUPPORTED_PREFIXES.some((p) => contentType.startsWith(p)) ||
-    SUPPORTED_OFFICE_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
+  const supported = PREVIEWABLE_ATTACHMENT_EXTENSIONS.some((ext) =>
+    fileName.toLowerCase().endsWith(ext),
+  );
 
   const isPdf = contentType === 'application/pdf';
 

@@ -4,6 +4,8 @@ import {
   MAX_ATTACHMENT_BYTES_DEFAULT,
   validateAttachment,
   humanFileSize,
+  ALLOWED_ATTACHMENT_SPEC,
+  PREVIEWABLE_ATTACHMENT_EXTENSIONS,
 } from '@/lib/attachments/config';
 
 const MAX = MAX_ATTACHMENT_BYTES_DEFAULT; // 50MB
@@ -71,4 +73,30 @@ describe('humanFileSize', () => {
   it('字节级显示 B', () => expect(humanFileSize(500)).toBe('500 B'));
   it('KB 一位小数', () => expect(humanFileSize(1024)).toBe('1.0 KB'));
   it('MB 一位小数', () => expect(humanFileSize(1024 * 1024 * 1.5)).toBe('1.5 MB'));
+});
+
+describe('PREVIEWABLE_ATTACHMENT_EXTENSIONS', () => {
+  it('含图片/PDF/Office 文档表格,不含 ppt/pptx', () => {
+    expect(PREVIEWABLE_ATTACHMENT_EXTENSIONS).toEqual(
+      expect.arrayContaining([
+        '.jpg',
+        '.jpeg',
+        '.png',
+        '.webp',
+        '.gif',
+        '.pdf',
+        '.doc',
+        '.docx',
+        '.xls',
+        '.xlsx',
+      ]),
+    );
+    expect(PREVIEWABLE_ATTACHMENT_EXTENSIONS).not.toContain('.ppt');
+    expect(PREVIEWABLE_ATTACHMENT_EXTENSIONS).not.toContain('.pptx');
+  });
+
+  it('是上传白名单扩展名的子集(派生不自造)', () => {
+    const all: string[] = ALLOWED_ATTACHMENT_SPEC.flatMap((s) => [...s.extensions]);
+    expect(PREVIEWABLE_ATTACHMENT_EXTENSIONS.every((e) => all.includes(e))).toBe(true);
+  });
 });
