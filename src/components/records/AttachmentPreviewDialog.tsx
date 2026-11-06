@@ -22,11 +22,20 @@ const ViewerCanvas = dynamic(() => import('@/components/file-viewer/ViewerCanvas
 });
 
 /**
- * 预览白名单:浏览器原生支持的预览前缀。
- * 本次仅把渲染层切换为 file-viewer(§issue18),类型范围不扩大;
- * 放开 docx/xlsx 附件上传是另一个议题,届时白名单放开即得在线预览。
+ * 预览白名单(双通道):
+ * - 图片/PDF 按 contentType 前缀(浏览器原生预览);
+ * - Office 文档/表格按文件名扩展名——file-viewer 的格式识别本就只认文件名
+ *   后缀,且上传时扩展名/MIME 已双白名单校验一致。docx/xlsx 渲染资产
+ *   (public/file-viewer/vendor/{docx,xlsx})已自托管,doc/xls 老格式由
+ *   renderer-word 内置二进制解析器 / BIFF 表格渲染器覆盖。
+ * ppt/pptx 渲染资产未自托管(见 scripts/copy-file-viewer-assets.mjs 裁剪),
+ * 维持"不支持在线预览,请下载"兜底。
  */
 const SUPPORTED_PREFIXES = ['image/', 'application/pdf'];
+const SUPPORTED_OFFICE_EXTENSIONS = ['.doc', '.docx', '.xls', '.xlsx'];
+
+/** Office 附件经 file-viewer 渲染的追加 options:docx 页式预览与调整单审批表同款观感。 */
+const OFFICE_VIEWER_OPTIONS = { docx: { visualPagination: true } };
 
 interface AttachmentPreviewDialogProps {
   projectId: string;
@@ -42,7 +51,8 @@ interface AttachmentPreviewDialogProps {
 /**
  * 预览 Dialog(§issue18):渲染层统一为 file-viewer(与调整单预览同一底座)。
  * 取数鉴权附件 blob → ArrayBuffer 直喂 ViewerCanvas,不再有 <img>/<iframe>
- * 分支与 object URL 生命周期管理;图片/PDF 由内建基线 + preset-office 覆盖。
+ * 分支与 object URL 生命周期管理;图片/PDF/Office 文档表格由内建基线 +
+ * preset-office 覆盖(白名单见上)。
  *
  * 交互与失败提示沿用现状:白名单外仍提示"不支持在线预览"+ 下载兜底。
  *
@@ -64,7 +74,9 @@ export function AttachmentPreviewDialog({
   const attachmentId = attachment?.id;
   const contentType = attachment?.contentType ?? '';
   const fileName = attachment?.fileName ?? '';
-  const supported = SUPPORTED_PREFIXES.some((p) => contentType.startsWith(p));
+  const supported =
+    SUPPORTED_PREFIXES.some((p) => contentType.startsWith(p)) ||
+    SUPPORTED_OFFICE_EXTENSIONS.some((ext) => fileName.toLowerCase().endsWith(ext));
 
   const isPdf = contentType === 'application/pdf';
 
@@ -148,6 +160,7 @@ export function AttachmentPreviewDialog({
               key={attachment.id}
               buffer={buffer}
               filename={fileName}
+              viewerOptions={OFFICE_VIEWER_OPTIONS}
               // 损坏/不可渲染文件:下载成功但渲染失败时,把错误交给既有
               // 错误兜底(提示 + 下载原文件),避免"渲染中"遮罩永不消失。
               onError={setError}

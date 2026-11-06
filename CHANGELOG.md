@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-06
+
+### 新增
+
+- **业务记录/到账流水附件在线预览支持 Office 文档与表格**：预览白名单由「图片 + PDF」扩展至 doc/docx/xls/xlsx 四种（与调整单审批表预览同一 file-viewer 底座，docx 启用页式预览；xls/doc 老格式分别由 BIFF 表格渲染器与 renderer-word 内置二进制解析器覆盖，无需新增自托管静态资产）。判定改为双通道：图片/PDF 按 MIME 前缀、Office 按文件名后缀（file-viewer 格式识别本就只认后缀，上传时扩展名/MIME 已双白名单校验一致）。ppt/pptx 渲染资产未自托管（见 `scripts/copy-file-viewer-assets.mjs` 裁剪），维持「不支持在线预览 + 下载原文件」兜底。业务记录与到账流水共用同一预览组件，一并生效；后端无改动
+
 ## [0.33.0] - 2026-11-06
 
 ### 新增
