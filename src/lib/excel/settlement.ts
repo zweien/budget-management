@@ -1,5 +1,5 @@
 /**
- * 结算单查询 Excel(财务系统导出)格式定义。三种版式长期并存:
+ * 结算单查询 Excel(财务系统导出)格式定义。四种版式长期并存:
  * - v1(填制日期版):单据编号/单据状态/填制日期/事项/金额/经办人。
  * - v2(申请日期版,0.12 起):单据编号/单据状态/申请日期/完成日期/金额/经办人/备注
  *   等(另有 单位/部门/单据类型/业务类型/合同编号/制单人/补录标识,忽略不导入;
@@ -8,6 +8,10 @@
  *   (层级路径「直接费用/…/末段」)/预算科目代码/摘要(常为空) 等列;单据编号为
  *   **明细行**粒度——冲账重报会产生同号多行(含负数行),导入按单据编号分组、
  *   金额取组内代数和(净额)成一条记录。
+ * - v4(单据台账,settlement-3.0):台账视图导出,33 列,**单据**粒度一行一单
+ *   (冲销为「冲销金额(元)」列而非负数行);金额 = 报销金额 − 冲销金额(净额 ≤ 0
+ *   视为纯冲销跳过);年度取「年度」列、业务日期 = 填报日期;「项目」「控制项」
+ *   与 v3 的 科研项目名称/开支细项名称 同语义(去口径前缀映射项目 + 末段预选科目)。
  *
  * 与系统标准模板(src/lib/excel/template.ts)并存:
  * - 表头不在首行(位于前 N 行内,按「单据编号」+「单据状态」定位)。
@@ -23,9 +27,16 @@ export const SETTLEMENT_TEMPLATE_VERSION = 'settlement-1.0';
 /** 结算单 v3(2025 财务导出,明细分组合并)批次模板版本。 */
 export const SETTLEMENT_V3_TEMPLATE_VERSION = 'settlement-2.0';
 
-/** 是否结算单批次版本(两种版本号的分流谓词;非结算单走标准模板 fallback)。 */
+/** 结算单 v4(单据台账,财务系统台账导出)批次模板版本。 */
+export const SETTLEMENT_V4_TEMPLATE_VERSION = 'settlement-3.0';
+
+/** 是否结算单批次版本(全部版本号的分流谓词;非结算单走标准模板 fallback)。 */
 export function isSettlementTemplateVersion(v: string): boolean {
-  return v === SETTLEMENT_TEMPLATE_VERSION || v === SETTLEMENT_V3_TEMPLATE_VERSION;
+  return (
+    v === SETTLEMENT_TEMPLATE_VERSION ||
+    v === SETTLEMENT_V3_TEMPLATE_VERSION ||
+    v === SETTLEMENT_V4_TEMPLATE_VERSION
+  );
 }
 
 /** 表头行定位:前 N 行内出现「单据编号」+「单据状态」即认定为本格式(v1/v2 皆然)。 */
@@ -82,4 +93,36 @@ export const SETTLEMENT_HEADERS_V3 = {
 export const SETTLEMENT_V3_MARKERS = [
   SETTLEMENT_HEADERS_V3.projectName,
   SETTLEMENT_HEADERS_V3.detailPath,
+] as const;
+
+/**
+ * v4(单据台账)特有列(按名匹配)。其余复用:单据编号/单据状态/完成日期/经办人/
+ * 摘要(SETTLEMENT_HEADERS)。忽略不导入:单据ID/支付金额/经办人电话/附件张数/
+ * 单位/部门/单据类型/经费类型/支出分类/合同编号/密级/审批状态/收款人/创建人/
+ * 最后修改人/流程实例/影像* 列。
+ */
+export const SETTLEMENT_HEADERS_V4 = {
+  /** 预算年度(直接取列值,不从日期推导)。 */
+  year: '年度',
+  /** 报销金额(元):单据申报金额。 */
+  claim: '报销金额(元)',
+  /** 冲销金额(元):已冲销部分(空 = 0);净额 = 报销 − 冲销。 */
+  offset: '冲销金额(元)',
+  /** 填报日期:业务日期(YYYY-MM-DD)。 */
+  fillDate: '填报日期',
+  /** 报销说明:摘要兜底(摘要列优先)。 */
+  explain: '报销说明',
+  /** 项目:与 v3 科研项目名称同语义(口径前缀/项目名)。 */
+  project: '项目',
+  /** 控制项:与 v3 开支细项名称同语义(科目层级路径,末段预选叶科目)。 */
+  controlPath: '控制项',
+  /** 经费科目:财务侧科目代码(仅展示,对应 v3 预算科目代码)。 */
+  finSubject: '经费科目',
+} as const;
+
+/** v4 版式判定:表头同时含「单据ID」「报销金额(元)」「控制项」(与 v1/v2/v3 互斥)。 */
+export const SETTLEMENT_V4_MARKERS = [
+  '单据ID',
+  SETTLEMENT_HEADERS_V4.claim,
+  SETTLEMENT_HEADERS_V4.controlPath,
 ] as const;

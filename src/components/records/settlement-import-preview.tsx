@@ -171,15 +171,22 @@ export function SettlementImportPreview({
 
   const confirmed = data.status === 'confirmed';
   const readOnly = confirmed || !canEdit;
-  // v3(财务结算单 2025 导出):行上展示 开支细项/科目代码,顶部做项目名核对警告。
-  // v3(财务结算单 2025 导出):行上展示 开支细项/科目代码,顶部做项目映射。
-  const isV3 = data.templateVersion === 'settlement-2.0';
+  // v3(财务结算单)/v4(单据台账):行级项目映射,行上展示 开支细项/控制项 + 科目代码,
+  // 顶部做项目映射核对;v1/v2 仅批次项目。
+  const isRowTargeted =
+    data.templateVersion === 'settlement-2.0' || data.templateVersion === 'settlement-3.0';
+  const versionLabel =
+    data.templateVersion === 'settlement-3.0'
+      ? '单据台账'
+      : data.templateVersion === 'settlement-2.0'
+        ? '财务结算单'
+        : '个人结算单';
   const projectMappings = data.projectMappings ?? [];
   const mappableProjects = data.mappableProjects ?? [];
   const [remapping, setRemapping] = useState(false);
-  // v3 勾选行跨多个目标项目时,批量设置科目不可用(科目须属于各自目标项目)。
-  const multiTargetV3 =
-    isV3 &&
+  // 勾选行跨多个目标项目时,批量设置科目不可用(科目须属于各自目标项目)。
+  const multiTarget =
+    isRowTargeted &&
     new Set([...data.pending, ...data.duplicates].map((r) => r.parsedData.targetProjectId ?? ''))
       .size > 1;
 
@@ -455,7 +462,7 @@ export function SettlementImportPreview({
         <TableCell className="max-w-56 truncate" title={r.parsedData.summary}>
           {r.parsedData.summary}
         </TableCell>
-        {isV3 ? (
+        {isRowTargeted ? (
           <TableCell
             className="max-w-48 truncate"
             title={[
@@ -542,7 +549,7 @@ export function SettlementImportPreview({
         <TableHead className="w-24">完成日期</TableHead>
         <TableHead className="w-20">年度</TableHead>
         <TableHead>事项(摘要)</TableHead>
-        {isV3 ? <TableHead className="w-56">开支细项 / 科目代码</TableHead> : null}
+        {isRowTargeted ? <TableHead className="w-56">开支细项 / 科目代码</TableHead> : null}
         <TableHead className="w-24 text-right">金额</TableHead>
         <TableHead className="w-20">经办人</TableHead>
         <TableHead className="w-44">科目</TableHead>
@@ -582,9 +589,7 @@ export function SettlementImportPreview({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold tracking-[-0.3px]">
-          导入预览({isV3 ? '财务结算单' : '个人结算单'})
-        </h2>
+        <h2 className="text-base font-semibold tracking-[-0.3px]">导入预览({versionLabel})</h2>
         <Button
           variant="outline"
           onClick={() => {
@@ -596,7 +601,7 @@ export function SettlementImportPreview({
         </Button>
       </div>
 
-      {isV3 && projectMappings.length > 0 ? (
+      {isRowTargeted && projectMappings.length > 0 ? (
         <Card className="p-4">
           <div className="mb-2 flex items-center justify-between">
             <p className="caption-mono">项目映射</p>
@@ -696,8 +701,8 @@ export function SettlementImportPreview({
             <Button
               variant="outline"
               size="sm"
-              disabled={selected.size === 0 || multiTargetV3}
-              title={multiTargetV3 ? '勾选行属于不同项目,请按行指定科目' : undefined}
+              disabled={selected.size === 0 || multiTarget}
+              title={multiTarget ? '勾选行属于不同项目,请按行指定科目' : undefined}
               onClick={() => setBatchDialogOpen(true)}
             >
               批量设置科目({selected.size} 行)

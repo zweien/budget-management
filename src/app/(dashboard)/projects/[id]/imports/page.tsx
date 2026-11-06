@@ -700,7 +700,11 @@ function ImportPageInner() {
                     <TableCell>
                       {isSettlementTemplateVersion(b.templateVersion) ? (
                         <Badge>
-                          {b.templateVersion === 'settlement-2.0' ? '财务结算单' : '个人结算单'}
+                          {b.templateVersion === 'settlement-2.0'
+                            ? '财务结算单'
+                            : b.templateVersion === 'settlement-3.0'
+                              ? '单据台账'
+                              : '个人结算单'}
                         </Badge>
                       ) : (
                         <Badge variant="secondary">标准模板</Badge>

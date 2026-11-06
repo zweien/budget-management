@@ -31,6 +31,9 @@ import {
   SETTLEMENT_V2_APPLY_DATE,
   SETTLEMENT_V3_MARKERS,
   SETTLEMENT_V3_TEMPLATE_VERSION,
+  SETTLEMENT_HEADERS_V4,
+  SETTLEMENT_V4_MARKERS,
+  SETTLEMENT_V4_TEMPLATE_VERSION,
 } from '@/lib/excel/settlement';
 import {
   cellToString,
@@ -294,12 +297,25 @@ export async function parseSettlement(
 
   // v3(2025 财务导出)判定:表头同时含「科研项目名称」「开支细项名称」
   // → 明细分组合并版式(同号多行冲账重报,金额取组内代数和)。
+  // v4(单据台账)判定:表头同时含「单据ID」「报销金额(元)」「控制项」
+  // → 单据粒度一行一单(冲销金额列),须先于 v3 判定(v4 同样含 单据编号/单据状态)。
   {
     const headerCells = new Set<string>();
     headerSheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell) => {
       const s = cellToString(cell);
       if (s) headerCells.add(s);
     });
+    if (SETTLEMENT_V4_MARKERS.every((m) => headerCells.has(m))) {
+      const { batchId } = await parseSettlementV4({
+        sheet: headerSheet,
+        headerRowNo,
+        projectId,
+        user,
+        fileName,
+        fileData,
+      });
+      return batchId;
+    }
     if (SETTLEMENT_V3_MARKERS.every((m) => headerCells.has(m))) {
       const { batchId } = await parseSettlementV3({
         sheet: headerSheet,
@@ -1066,11 +1082,406 @@ async function parseSettlementV3(opts: {
   return { batchId, batchProjectId };
 }
 
+/** v4(单据台账)原始行(单据粒度,一行一单)。 */
+interface V4RawRow {
+  rowNo: number;
+  docNo: string;
+  statusLabel: string;
+  yearRaw: string;
+  claimRaw: string;
+  offsetRaw: string;
+  handler: string;
+  summary: string;
+  explain: string;
+  fillDate: string;
+  completeDate: string;
+  projectFileName: string;
+  controlPath: string;
+  finCode: string;
+}
+
 /**
- * 统一导入入口(v3 财务结算单):不依赖项目上下文解析文件。
+ * v4(单据台账,财务系统台账导出)解析:单据粒度一行一单,无需 v3 的同号分组——
+ * 冲销以「冲销金额(元)」列表达,金额 = 报销金额 − 冲销金额(净额 ≤ 0 视为纯冲销,
+ * 整行跳过留痕)。年度取「年度」列(不从日期推导);业务日期 = 填报日期;完成日期
+ * 可为 ISO 时间戳(截取日期部分)。「项目」「控制项」与 v3 的 科研项目名称/
+ * 开支细项名称 同语义:去口径前缀自动预映射项目 + 控制项末段预选叶科目;查重/
+ * 补全更新/确认管线与 v3 完全一致(ADR 0002,docNo 硬重复)。
+ */
+async function parseSettlementV4(opts: {
+  sheet: ExcelJS.Worksheet;
+  headerRowNo: number;
+  projectId: string;
+  user: Pick<User, 'id' | 'role'> & {
+    viaApiKey?: boolean;
+    keyProjectScope?: string;
+    keyProjectIds?: string[];
+  };
+  fileName: string;
+  /** 统一入口:强制批次承载项目(缺省回退上传项目上下文)。 */
+  batchProjectId?: string;
+  /** 上传原件字节(批次留存,供「下载原件」);缺省不留存。 */
+  fileData?: Buffer;
+}): Promise<{ batchId: string; batchProjectId: string }> {
+  const { sheet, headerRowNo, projectId, user, fileName, fileData } = opts;
+
+  // 列索引:入账关键列出现重复表头 → 422(Map.set 会静默取最后一列,可能选错金额/
+  // 目标项目;无关列重复如「合同编号」不影响,不拦)。codex 评审 P2。
+  const headerCount = new Map<string, number>();
+  const colIndex = new Map<string, number>();
+  sheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell, colNumber) => {
+    const s = cellToString(cell);
+    if (!s) return;
+    headerCount.set(s, (headerCount.get(s) ?? 0) + 1);
+    colIndex.set(s, colNumber);
+  });
+  const required = [
+    SETTLEMENT_HEADERS.docNo,
+    SETTLEMENT_HEADERS.docStatus,
+    SETTLEMENT_HEADERS_V4.year,
+    SETTLEMENT_HEADERS_V4.claim,
+    // 冲销列必须存在(codex 评审 P1):缺失会静默按报销全额入账、金额高估;
+    // 单元格为空才是合法的「无冲销 = 0」。
+    SETTLEMENT_HEADERS_V4.offset,
+    SETTLEMENT_HEADERS.handler,
+    SETTLEMENT_HEADERS_V4.fillDate,
+    SETTLEMENT_HEADERS_V4.project,
+    SETTLEMENT_HEADERS_V4.controlPath,
+    ...SETTLEMENT_V4_MARKERS,
+  ];
+  const missing = required.filter((k) => !colIndex.has(k));
+  if (missing.length > 0) {
+    throw new HTTPError(422, `单据台账缺少必要列:${missing.join('、')},请核对导出文件`);
+  }
+  const duplicated = required.filter((k) => (headerCount.get(k) ?? 0) > 1);
+  if (duplicated.length > 0) {
+    throw new HTTPError(422, `单据台账关键列存在重复表头:${duplicated.join('、')},请核对导出文件`);
+  }
+  const get = (row: ExcelJS.Row, key: string): string => {
+    const idx = colIndex.get(key);
+    return idx === undefined ? '' : (cellToString(row.getCell(idx)) ?? '').trim();
+  };
+
+  // 收集原始行(空行跳过;容量闸与 v1/v2/v3 同规则)。
+  const rawRows: V4RawRow[] = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber <= headerRowNo) return;
+    const docNo = get(row, SETTLEMENT_HEADERS.docNo);
+    const statusLabel = get(row, SETTLEMENT_HEADERS.docStatus);
+    const fillDate = get(row, SETTLEMENT_HEADERS_V4.fillDate);
+    const claimRaw = get(row, SETTLEMENT_HEADERS_V4.claim);
+    const handler = get(row, SETTLEMENT_HEADERS.handler);
+    if (!docNo && !statusLabel && !fillDate && !claimRaw && !handler) return;
+    if (rawRows.length >= env.MAX_IMPORT_ROWS) {
+      throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
+    }
+    rawRows.push({
+      rowNo: rowNumber,
+      docNo,
+      statusLabel,
+      yearRaw: get(row, SETTLEMENT_HEADERS_V4.year),
+      claimRaw,
+      offsetRaw: get(row, SETTLEMENT_HEADERS_V4.offset),
+      handler,
+      summary: get(row, SETTLEMENT_HEADERS_V3.summary),
+      explain: get(row, SETTLEMENT_HEADERS_V4.explain),
+      fillDate,
+      completeDate: get(row, SETTLEMENT_HEADERS.completeDate),
+      projectFileName: get(row, SETTLEMENT_HEADERS_V4.project),
+      controlPath: get(row, SETTLEMENT_HEADERS_V4.controlPath),
+      finCode: get(row, SETTLEMENT_HEADERS_V4.finSubject),
+    });
+  });
+
+  // 项目映射:与 v3 同规则(去口径前缀后唯一包含可导入项目名 → 自动落;否则人工)。
+  const candidates = await importableProjectsFor(user);
+  const mappingByName = new Map<string, string | null>();
+  for (const name of new Set(rawRows.map((r) => r.projectFileName).filter(Boolean))) {
+    const stripped = stripProjectPrefix(name);
+    const hits = candidates.filter((c) => stripped.includes(c.name));
+    mappingByName.set(name, hits.length === 1 ? hits[0].id : null);
+  }
+  const targetIds = [...new Set([...mappingByName.values()].filter((v): v is string => !!v))];
+  const leafNameByTarget = new Map<string, Map<string, string>>();
+  for (const tid of targetIds) {
+    leafNameByTarget.set(tid, await leafNameMapByProject(tid));
+  }
+  // 门禁(业务规则):目标项目初始预算审批生效前不可导入(确认侧另有复核)。
+  const approvedTargets = await approvedInitialBudgetIds(targetIds);
+
+  const parsedRows: Array<{
+    rowNo: number;
+    data: SettlementParsedRow;
+    errors: SettlementRowError[];
+    validationStatus: 'valid' | 'error' | 'skipped';
+    duplicate: boolean;
+    duplicateLevel: DuplicateLevel;
+  }> = [];
+
+  // ISO 时间戳(如 2024-11-28T01:46:52.872+00:00)→ 日期部分;纯日期原样返回。
+  const dateOnly = (raw: string): string => {
+    const m = /^(\d{4}-\d{2}-\d{2})[T\s]/.exec(raw);
+    return m ? m[1] : raw;
+  };
+
+  for (const r of rawRows) {
+    const errors: SettlementRowError[] = [];
+
+    // 业务退单:整行跳过留痕。
+    if (r.statusLabel === SETTLEMENT_SKIPPED_STATUS) {
+      parsedRows.push({
+        rowNo: r.rowNo,
+        data: {
+          kind: 'settlement',
+          docNo: r.docNo || null,
+          statusLabel: r.statusLabel,
+          status: 'PAID',
+          businessDate: r.fillDate,
+          completedDate: null,
+          budgetYear: 0,
+          summary: r.summary || r.explain,
+          amount: r.claimRaw,
+          handler: r.handler,
+          subjectId: null,
+          subjectName: null,
+          fileProjectName: r.projectFileName || null,
+          detailPath: r.controlPath || null,
+        },
+        errors: [{ field: 'docStatus', message: '业务退单,不导入' }],
+        validationStatus: 'skipped',
+        duplicate: false,
+        duplicateLevel: 'none',
+      });
+      continue;
+    }
+
+    // 状态:无法映射 → error。
+    const statusLabel = r.statusLabel;
+    const mapped = statusLabel ? SETTLEMENT_STATUS_TO_ENUM[statusLabel] : undefined;
+    if (!mapped) {
+      errors.push({
+        field: 'docStatus',
+        message: statusLabel
+          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单,业务退单不导入)`
+          : '单据状态不能为空',
+      });
+    }
+
+    if (!r.handler) errors.push({ field: 'handler', message: '经办人不能为空' });
+
+    // 金额:净额 = 报销金额 − 冲销金额(冲销空 = 0);任一无法解析 → error。
+    const claim = parseAmountAllowNegative(r.claimRaw);
+    if (claim === null) {
+      errors.push({ field: 'amount', message: `报销金额无法解析:${r.claimRaw || '(空)'}` });
+    }
+    const offset =
+      r.offsetRaw === '' ? new Prisma.Decimal(0) : parseAmountAllowNegative(r.offsetRaw);
+    if (offset === null) {
+      errors.push({ field: 'amount', message: `冲销金额无法解析:${r.offsetRaw}` });
+    }
+    const net = claim !== null && offset !== null ? claim.minus(offset) : null;
+    const netStr = net === null ? null : net.toFixed(2);
+    if (net !== null && netStr !== null && net.lessThanOrEqualTo(0)) {
+      // 纯冲销/净额非正:整行跳过留痕(不阻断其它行)。
+      parsedRows.push({
+        rowNo: r.rowNo,
+        data: {
+          kind: 'settlement',
+          docNo: r.docNo || null,
+          statusLabel: statusLabel ?? '',
+          status: (mapped ?? 'PAID') as BusinessStatus,
+          businessDate: r.fillDate,
+          completedDate: null,
+          budgetYear: 0,
+          summary: r.summary || r.explain,
+          amount: netStr,
+          handler: r.handler,
+          subjectId: null,
+          subjectName: null,
+          fileProjectName: r.projectFileName || null,
+          detailPath: r.controlPath || null,
+          sourceRows: [r.rowNo],
+        },
+        errors: [{ field: 'amount', message: `单据净额 ${netStr} ≤ 0(冲销单据),不导入` }],
+        validationStatus: 'skipped',
+        duplicate: false,
+        duplicateLevel: 'none',
+      });
+      continue;
+    }
+
+    // 业务日期 = 填报日期(必填);完成日期可空,ISO 时间戳截日期部分;完成不得早于填报。
+    let businessDate = '';
+    if (!r.fillDate) {
+      errors.push({ field: 'fillDate', message: '填报日期不能为空' });
+    } else {
+      const d = normalizeDate(dateOnly(r.fillDate));
+      if (d === null) {
+        errors.push({ field: 'fillDate', message: `填报日期格式无效:${r.fillDate}` });
+      } else {
+        businessDate = d;
+      }
+    }
+    let completedDate: string | null = null;
+    if (r.completeDate) {
+      const d = normalizeDate(dateOnly(r.completeDate));
+      if (d === null) {
+        errors.push({ field: 'completedDate', message: `完成日期格式无效:${r.completeDate}` });
+      } else {
+        completedDate = d;
+        if (businessDate && completedDate < businessDate) {
+          errors.push({
+            field: 'completedDate',
+            message: `完成日期(${completedDate})不能早于填报日期(${businessDate})`,
+          });
+        }
+      }
+    }
+
+    // 预算年度 = 「年度」列(不从日期推导)。
+    const budgetYear = Number(r.yearRaw);
+    if (!Number.isInteger(budgetYear) || budgetYear < 1900 || budgetYear > 9999) {
+      errors.push({
+        field: 'budgetYear',
+        message: `年度必须是 1900~9999 的正整数(当前 ${r.yearRaw || '(空)'})`,
+      });
+    }
+
+    // 摘要:摘要列优先,报销说明兜底;两者皆空允许(按单据编号查重兜底)。
+    const summary = r.summary || r.explain || '';
+
+    // 项目映射:自动预映射结果;未映射 → error(预览页映射后恢复)。
+    const targetProjectId = mappingByName.get(r.projectFileName) ?? null;
+    if (!targetProjectId) {
+      errors.push({ field: 'project', message: '未映射项目;请在「项目映射」区选择目标项目' });
+    } else if (!approvedTargets.has(targetProjectId)) {
+      errors.push({ field: 'project', message: INITIAL_BUDGET_NOT_APPROVED_MSG });
+    }
+    // 科目自动预选:控制项末段 == 目标项目唯一叶科目名(与 v3 开支细项同规则)。
+    const controlLeaf = r.controlPath ? (r.controlPath.split('/').pop() ?? '').trim() : '';
+    const preselected =
+      targetProjectId && controlLeaf
+        ? (leafNameByTarget.get(targetProjectId)?.get(controlLeaf) ?? null)
+        : null;
+
+    const data: SettlementParsedRow = {
+      kind: 'settlement',
+      docNo: r.docNo || null,
+      statusLabel: statusLabel ?? '',
+      status: (mapped ?? 'PAID') as BusinessStatus,
+      businessDate,
+      completedDate,
+      budgetYear: Number.isInteger(budgetYear) ? budgetYear : 0,
+      summary,
+      amount: netStr ?? r.claimRaw,
+      handler: r.handler,
+      subjectId: preselected,
+      subjectName: preselected ? controlLeaf : null,
+      targetProjectId,
+      detailPath: r.controlPath || null,
+      finCode: r.finCode || null,
+      fileProjectName: r.projectFileName || null,
+      sourceRows: [r.rowNo],
+    };
+    parsedRows.push({
+      rowNo: r.rowNo,
+      data,
+      errors,
+      validationStatus: errors.length === 0 ? 'valid' : 'error',
+      duplicate: false,
+      duplicateLevel: 'none',
+    });
+  }
+
+  if (parsedRows.length === 0) {
+    throw new HTTPError(422, 'Excel 文件不含任何有效数据行');
+  }
+
+  const validRows = parsedRows.filter((r) => r.validationStatus === 'valid');
+
+  // ---- 重复检测:按行目标项目分组跑统一判定器(与 v3 同款,金额为净额)----
+  const applyVerdict = (r: (typeof validRows)[number], v: DuplicateRowVerdict): void => {
+    if (v.hard) {
+      r.duplicate = true;
+      r.duplicateLevel = 'hard';
+      r.data.dupReason = hardDupReason(v);
+    } else if (v.refresh) {
+      r.duplicate = true;
+      r.duplicateLevel = 'refresh';
+    } else if (v.suspected) {
+      r.duplicate = true;
+      r.duplicateLevel = 'suspected';
+    }
+  };
+  const rowsByTarget = new Map<string, typeof validRows>();
+  for (const r of validRows) {
+    const t = r.data.targetProjectId!;
+    const g = rowsByTarget.get(t);
+    if (g) g.push(r);
+    else rowsByTarget.set(t, [r]);
+  }
+  for (const [target, rows] of rowsByTarget) {
+    const verdicts = await checkDuplicates(
+      target,
+      rows.map((r) => ({
+        rowKey: String(r.rowNo),
+        docNo: r.data.docNo,
+        budgetYear: r.data.budgetYear > 0 ? r.data.budgetYear : null,
+        amount: normalizeAmount(r.data.amount),
+        businessDate: normalizeDate(r.data.businessDate),
+        summary: r.data.summary || null,
+        status: r.data.status,
+        completedDate: r.data.completedDate ?? null,
+      })),
+      { allowRefresh: true },
+    );
+    const verdictByRowNo = new Map(verdicts.map((v) => [v.rowKey, v]));
+    for (const r of rows) {
+      const v = verdictByRowNo.get(String(r.rowNo));
+      if (v) applyVerdict(r, v);
+    }
+  }
+
+  // ---- 落库 ----
+  // 批次承载项目:统一入口的强制承载 > 上传项目上下文(容器语义,行入账按行级映射)。
+  const batchProjectId = opts.batchProjectId ?? projectId;
+  const batchId = uuidv7();
+  await prisma.$transaction(async (tx) => {
+    await tx.importBatch.create({
+      data: {
+        id: batchId,
+        projectId: batchProjectId,
+        fileName,
+        templateVersion: SETTLEMENT_V4_TEMPLATE_VERSION,
+        status: 'pending',
+        creatorId: user.id,
+        fileData: fileData ?? undefined,
+        fileSizeBytes: fileData?.length ?? undefined,
+      },
+    });
+    await tx.importRow.createMany({
+      data: parsedRows.map((r) => ({
+        id: uuidv7(),
+        batchId,
+        rowNo: r.rowNo,
+        parsedData: r.data as unknown as Prisma.InputJsonValue,
+        validationStatus: r.validationStatus,
+        errors: (r.errors.length > 0 ? r.errors : null) as unknown as Prisma.InputJsonValue,
+        duplicateFlag: r.duplicate,
+        duplicateLevel: r.duplicateLevel,
+        forcedImport: false,
+      })),
+    });
+  }, BULK_TX_OPTIONS);
+
+  return { batchId, batchProjectId };
+}
+
+/**
+ * 统一导入入口(财务结算单 v3 / 单据台账 v4):不依赖项目上下文解析文件。
  * - 批次承载项目 = hostProjectId(显式指定) > 自动预映射的第一个目标项目;
  *   两者皆无 → 422 needsHost(调用方让用户选择承载项目后携 hostProjectId 重传)。
- * - 仅接受 v3 版式;v1/v2/标准模板请在项目内导入。
+ * - 仅接受 v3/v4 版式;v1/v2/标准模板请在项目内导入。
  * - 承载项目显式指定时要求 record:import(自动命中目标项目不在此校验,
  *   映射暂存与确认会逐目标项目复核)。
  */
@@ -1121,9 +1532,13 @@ export async function parseSettlementUnified(
   if (headerRowNo === 0 || !headerSheet) {
     throw new HTTPError(422, '未找到结算单表头(需包含 单据编号/单据状态)');
   }
+  const isV4 = SETTLEMENT_V4_MARKERS.every((m) => headerCells.has(m));
   const isV3 = SETTLEMENT_V3_MARKERS.every((m) => headerCells.has(m));
-  if (!isV3) {
-    throw new HTTPError(422, '仅支持财务结算单(2025 导出)格式;个人结算单查询请在项目内导入');
+  if (!isV3 && !isV4) {
+    throw new HTTPError(
+      422,
+      '仅支持财务结算单(2025 导出)/单据台账格式;个人结算单查询请在项目内导入',
+    );
   }
 
   // 显式承载项目:须存在、未归档、可导入。
@@ -1138,9 +1553,10 @@ export async function parseSettlementUnified(
   }
 
   // 先探测自动预映射(轻量:解析前只读科研列 + 候选匹配)——无命中且未显式指定 → needsHost。
-  // 实现为「解析后落库前判定」:解析本身只读,无副作用,直接复用 v3 解析并捕获无主结果。
+  // 实现为「解析后落库前判定」:解析本身只读,无副作用,直接复用解析器并捕获无主结果。
   if (!hostProjectId) {
-    const probe = await probeV3FirstTarget(headerSheet, headerRowNo, user);
+    const projectCol = isV4 ? SETTLEMENT_HEADERS_V4.project : SETTLEMENT_HEADERS_V3.projectName;
+    const probe = await probeV3FirstTarget(headerSheet, headerRowNo, user, projectCol);
     if (!probe) {
       // 显式空批次结果 + needsHost 标记:调用方让用户选择承载项目后携 hostProjectId 重传。
       return {
@@ -1155,7 +1571,7 @@ export async function parseSettlementUnified(
     hostProjectId = probe;
   }
 
-  const { batchId, batchProjectId } = await parseSettlementV3({
+  const parseArgs = {
     sheet: headerSheet,
     headerRowNo,
     projectId: hostProjectId,
@@ -1163,11 +1579,15 @@ export async function parseSettlementUnified(
     fileName,
     batchProjectId: hostProjectId,
     fileData: Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer),
-  });
+  };
+  const { batchId, batchProjectId } = isV4
+    ? await parseSettlementV4(parseArgs)
+    : await parseSettlementV3(parseArgs);
   return { batchId, batchProjectId, needsHost: false, mappableProjects: undefined };
 }
 
-/** 探测 v3 文件的自动预映射第一个目标项目;无命中返回 null(不落任何数据)。 */
+/** 探测文件的自动预映射第一个目标项目;无命中返回 null(不落任何数据)。
+ *  projectCol:v3=科研项目名称,v4=项目(列名随版式传入)。 */
 async function probeV3FirstTarget(
   sheet: ExcelJS.Worksheet,
   headerRowNo: number,
@@ -1176,18 +1596,19 @@ async function probeV3FirstTarget(
     keyProjectScope?: string;
     keyProjectIds?: string[];
   },
+  projectCol: string,
 ): Promise<string | null> {
   const colIndex = new Map<string, number>();
   sheet.getRow(headerRowNo).eachCell({ includeEmpty: false }, (cell, colNumber) => {
     const s = cellToString(cell);
     if (s) colIndex.set(s, colNumber);
   });
-  const nameCol = colIndex.get(SETTLEMENT_HEADERS_V3.projectName);
+  const nameCol = colIndex.get(projectCol);
   if (!nameCol) return null;
   const names = new Set<string>();
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber <= headerRowNo) return;
-    const idx = colIndex.get(SETTLEMENT_HEADERS_V3.projectName);
+    const idx = colIndex.get(projectCol);
     const v = idx ? cellToString(row.getCell(idx)) : null;
     if (v && v.trim()) names.add(v.trim());
   });
@@ -1229,7 +1650,13 @@ export async function listMySettlementBatches(
   const batches = await prisma.importBatch.findMany({
     where: {
       creatorId: user.id,
-      templateVersion: { in: [SETTLEMENT_TEMPLATE_VERSION, SETTLEMENT_V3_TEMPLATE_VERSION] },
+      templateVersion: {
+        in: [
+          SETTLEMENT_TEMPLATE_VERSION,
+          SETTLEMENT_V3_TEMPLATE_VERSION,
+          SETTLEMENT_V4_TEMPLATE_VERSION,
+        ],
+      },
     },
     orderBy: { createdAt: 'desc' },
     take: 20,
@@ -1409,12 +1836,15 @@ export async function getSettlementBatch(
     }
     if (d.targetProjectId) rowTargets.add(d.targetProjectId);
   }
-  // v3:各目标项目的叶科目(行级下拉按行目标取用;v1/v2 仅批次项目)。
+  // v3/v4:各目标项目的叶科目(行级下拉按行目标取用;v1/v2 仅批次项目)。
   const leafSubjectsByProject: Record<
     string,
     Array<{ id: string; code: string; name: string }>
   > = {};
-  if (batch.templateVersion === SETTLEMENT_V3_TEMPLATE_VERSION) {
+  if (
+    batch.templateVersion === SETTLEMENT_V3_TEMPLATE_VERSION ||
+    batch.templateVersion === SETTLEMENT_V4_TEMPLATE_VERSION
+  ) {
     await Promise.all(
       [...rowTargets].map(async (pid) => {
         leafSubjectsByProject[pid] = await prisma.budgetSubject.findMany({
@@ -1477,10 +1907,12 @@ export async function updateSettlementRows(
   if (batch.status !== 'pending') {
     throw new HTTPError(409, '该批次已确认,不可再修改');
   }
-  const isV3 = batch.templateVersion === SETTLEMENT_V3_TEMPLATE_VERSION;
+  const supportsRowTargets =
+    batch.templateVersion === SETTLEMENT_V3_TEMPLATE_VERSION ||
+    batch.templateVersion === SETTLEMENT_V4_TEMPLATE_VERSION;
   for (const u of updates) {
-    if (u.targetProjectId !== undefined && !isV3) {
-      throw new HTTPError(422, '仅财务结算单(2025 导出)支持项目映射');
+    if (u.targetProjectId !== undefined && !supportsRowTargets) {
+      throw new HTTPError(422, '仅财务结算单(2025 导出)/单据台账支持项目映射');
     }
   }
 

@@ -26,7 +26,7 @@ import {
 } from '@/components/records/settlement-import-preview';
 
 /**
- * 统一导入入口(业务录入):财务结算单(2025 导出,v3,可含多个项目)。
+ * 统一导入入口(业务录入):财务结算单(2025 导出,v3)/单据台账(v4),均可含多个项目。
  * 上传 → 项目映射 → 预览确认;批次承载项目 = 自动预映射的第一个目标项目
  * (未命中时选择承载项目后重传)。系统模板/个人结算单(v1/v2)请在项目内导入页上传。
  */
@@ -185,8 +185,8 @@ export default function UnifiedImportPage() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Records"
-        title="导入财务结算单"
-        description="财务结算单(2025 导出)统一入口:文件可含多个项目,上传后自动按「科研项目名称」映射并拆分入账。"
+        title="导入财务结算单 / 单据台账"
+        description="多项目财务文件统一入口(财务结算单 2025 导出 / 单据台账):上传后自动按科研项目名称/项目列映射并拆分入账。"
       />
 
       <Card className="p-4">
@@ -213,16 +213,17 @@ export default function UnifiedImportPage() {
             }}
           >
             <Inbox className="size-8 text-mute" />
-            <p className="text-sm">点击或拖拽财务结算单 .xlsx 文件到此处上传</p>
+            <p className="text-sm">点击或拖拽财务结算单 / 单据台账 .xlsx 文件到此处上传</p>
             <p className="text-xs text-mute">
-              仅支持 2025 导出格式(可含多个项目);系统模板/个人结算单请在项目内导入页上传
+              支持 财务结算单(2025 导出)/单据台账
+              格式(可含多个项目);系统模板/个人结算单请在项目内导入页上传
             </p>
             <input
               type="file"
               accept=".xlsx"
               disabled={uploading}
               className="hidden"
-              aria-label="选择财务结算单 xlsx 文件"
+              aria-label="选择财务结算单或单据台账 xlsx 文件"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) void uploadFile(f);
