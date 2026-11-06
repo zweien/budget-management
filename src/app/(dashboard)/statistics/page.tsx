@@ -553,8 +553,9 @@ function CustomStatisticsTab() {
       ) : null}
 
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-        <Table>
-          <TableHeader>
+        {/* 滚动区限高 + 表头冻结(与业务录入页同款):长列表下表头常驻。 */}
+        <Table wrapperClassName="max-h-[calc(100vh-420px)]">
+          <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
             <TableRow className="hover:bg-transparent">
               {colVisible('project') ? <TableHead>项目</TableHead> : null}
               {colVisible('budgetYear') ? <TableHead className="w-20">年度</TableHead> : null}
@@ -608,8 +609,16 @@ function CustomStatisticsTab() {
                     <TableCell className="tabular-nums">{r.budgetYear}</TableCell>
                   ) : null}
                   {colVisible('subject') ? (
-                    <TableCell className="max-w-48 truncate" title={r.subject?.name}>
-                      {r.subject?.name ?? '—'}
+                    <TableCell>
+                      {/* 科目直达:跳该项目的业务记录页(深链带入科目 + 年度筛选,与台账页跳转同款)。 */}
+                      <Link
+                        href={`/projects/${r.projectId}/records?subjectId=${r.subject?.id}&year=${r.budgetYear}`}
+                        className="text-link underline-offset-4 hover:underline"
+                      >
+                        <span className="block max-w-48 truncate" title={r.subject?.name}>
+                          {r.subject?.name ?? '—'}
+                        </span>
+                      </Link>
                     </TableCell>
                   ) : null}
                   {colVisible('amount') ? (
@@ -835,8 +844,9 @@ function MonthlyHistoryTab() {
       </Alert>
 
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-        <Table>
-          <TableHeader>
+        {/* 滚动区限高 + 表头冻结(与业务录入页同款;12 行内通常不触发滚动)。 */}
+        <Table wrapperClassName="max-h-[calc(100vh-320px)]">
+          <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-24">月份</TableHead>
               <TableHead className="text-right">已支出</TableHead>
@@ -957,8 +967,9 @@ function CrossProjectTab() {
       </Alert>
 
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-        <Table>
-          <TableHeader>
+        {/* 滚动区限高 + 表头冻结(与业务录入页同款):长列表下表头常驻。 */}
+        <Table wrapperClassName="max-h-[calc(100vh-320px)]">
+          <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
             <TableRow className="hover:bg-transparent">
               <TableHead>项目</TableHead>
               <TableHead className="text-right">当前预算</TableHead>
@@ -982,7 +993,16 @@ function CrossProjectTab() {
             ) : (
               result?.projects.map((r) => (
                 <TableRow key={r.projectId}>
-                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="font-medium">
+                    <Link
+                      href={`/projects/${r.projectId}/records`}
+                      className="text-link underline-offset-4 hover:underline"
+                    >
+                      <span className="block max-w-44 truncate" title={r.name}>
+                        {r.name}
+                      </span>
+                    </Link>
+                  </TableCell>
                   <TableCell>
                     <MoneyText value={r.currentBudget} riskOnNegative={false} />
                   </TableCell>
@@ -1317,8 +1337,9 @@ function BalanceTab() {
       </Card>
 
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
-        <Table>
-          <TableHeader>
+        {/* 滚动区限高 + 表头冻结(与业务录入页同款):长列表下表头常驻。 */}
+        <Table wrapperClassName="max-h-[calc(100vh-360px)]">
+          <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--border)]">
             <TableRow className="hover:bg-transparent">
               <SortHead
                 sort={sort}
@@ -1383,10 +1404,34 @@ function BalanceTab() {
             ) : (
               sortedRows.map((row) => (
                 <TableRow key={`${row.projectId}|${row.subjectId}`}>
-                  <TableCell className="max-w-40 truncate">{row.projectName}</TableCell>
-                  <TableCell className="max-w-48 truncate">
-                    {row.subjectName}
-                    {!row.isLeaf ? <span className="ml-1 text-xs text-mute">(含下级)</span> : null}
+                  <TableCell>
+                    <Link
+                      href={`/projects/${row.projectId}/records`}
+                      className="text-link underline-offset-4 hover:underline"
+                    >
+                      <span className="block max-w-40 truncate" title={row.projectName}>
+                        {row.projectName}
+                      </span>
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    {row.isLeaf ? (
+                      /* 叶科目直达:跳该项目的业务记录页(深链带入科目;应用了年度筛选时连同年度)。 */
+                      <Link
+                        href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}${hasYear ? `&year=${appliedYear}` : ''}`}
+                        className="text-link underline-offset-4 hover:underline"
+                      >
+                        <span className="block max-w-48 truncate" title={row.subjectName}>
+                          {row.subjectName}
+                        </span>
+                      </Link>
+                    ) : (
+                      /* 非叶(含下级):记录接口按叶精确过滤,深链无意义,保持纯文本。 */
+                      <span className="block max-w-48 truncate" title={row.subjectName}>
+                        {row.subjectName}
+                        <span className="ml-1 text-xs text-mute">(含下级)</span>
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{row.totalBudget}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.paid}</TableCell>
