@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-11-07
+
+### 变更
+
+- **附件预览白名单收敛为单一事实源（内部重构，行为不变）**：`ALLOWED_ATTACHMENT_SPEC`（`src/lib/attachments/config.ts`）条目新增 `previewable` 标记并导出派生列表 `PREVIEWABLE_ATTACHMENT_EXTENSIONS`，附件预览弹窗不再自维护格式副本——将来放开 ppt/pptx 在线预览只需改标记 + 恢复 `scripts/copy-file-viewer-assets.mjs` 裁剪的渲染资产。补派生列表守卫测试
+
 ## [0.34.0] - 2026-11-06
 
 ### 新增
