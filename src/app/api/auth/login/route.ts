@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as client from 'openid-client';
 
 import { env } from '@/lib/env';
+import { authentikEnabled } from '@/lib/auth/dingtalk';
 import {
   getOidcConfig,
   oidcRedirectUri,
@@ -20,6 +21,13 @@ export async function GET(req: NextRequest) {
   // mock 模式不需要 SSO 登录,直接回首页(开发便利)。
   if (env.MOCK_AUTH) {
     return NextResponse.redirect(new URL('/', env.APP_BASE_URL));
+  }
+  // 仅配置钉钉(SSO 模式下至少一组提供方,Authentik 可缺):守卫后再进 discovery,
+  // 避免 AUTHENTIK_ISSUER 未配置时 new URL(undefined) 抛裸 500。
+  if (!authentikEnabled()) {
+    const url = new URL('/login', env.APP_BASE_URL);
+    url.searchParams.set('error', 'Authentik 登录未配置,请联系管理员');
+    return NextResponse.redirect(url);
   }
 
   const returnTo = sanitizeReturnTo(req.nextUrl.searchParams.get('returnTo'));

@@ -1,17 +1,18 @@
 import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, QrCode } from 'lucide-react';
 
 import { env } from '@/lib/env';
 import { getCurrentUser } from '@/lib/auth/session';
-import { sanitizeReturnTo } from '@/lib/auth/oidc';
+import { authentikEnabled, dingtalkEnabled, sanitizeReturnTo } from '@/lib/auth/dingtalk';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * 登录页(SSO 模式)。
+ * 登录页(SSO 模式)。按已配置提供方渲染登录入口(Authentik / 钉钉可并存;
+ * env 校验保证 SSO 模式下至少一组完整)。
  * 已登录用户访问直接跳回 returnTo;mock 模式不需要本页(重定向首页)。
  */
 export default async function LoginPage({
@@ -28,6 +29,10 @@ export default async function LoginPage({
   if (await getCurrentUser()) {
     redirect(safeReturnTo);
   }
+
+  const showAuthentik = authentikEnabled();
+  const showDingtalk = dingtalkEnabled();
+  const subtitle = showDingtalk && !showAuthentik ? '使用钉钉扫码登录' : '使用单位统一身份认证登录';
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -51,7 +56,7 @@ export default async function LoginPage({
           </span>
           <div className="space-y-1">
             <h1 className="text-display-sm">预算管理系统</h1>
-            <p className="text-sm text-muted-foreground">使用单位统一身份认证(Authentik)登录</p>
+            <p className="text-sm text-muted-foreground">{subtitle}</p>
           </div>
         </div>
 
@@ -63,12 +68,29 @@ export default async function LoginPage({
         ) : null}
 
         <Suspense fallback={null}>
-          <Button asChild className="w-full" size="lg">
-            <a href={`/api/auth/login?returnTo=${encodeURIComponent(safeReturnTo)}`}>
-              <KeyRound />
-              使用 Authentik 登录
-            </a>
-          </Button>
+          <div className="space-y-3">
+            {showDingtalk ? (
+              <Button asChild className="w-full" size="lg">
+                <a href={`/api/auth/dingtalk/login?returnTo=${encodeURIComponent(safeReturnTo)}`}>
+                  <QrCode />
+                  使用钉钉登录
+                </a>
+              </Button>
+            ) : null}
+            {showAuthentik ? (
+              <Button
+                asChild
+                className="w-full"
+                size="lg"
+                variant={showDingtalk ? 'outline' : 'default'}
+              >
+                <a href={`/api/auth/login?returnTo=${encodeURIComponent(safeReturnTo)}`}>
+                  <KeyRound />
+                  使用 Authentik 登录
+                </a>
+              </Button>
+            ) : null}
+          </div>
         </Suspense>
 
         <p className="text-center text-xs text-mute">

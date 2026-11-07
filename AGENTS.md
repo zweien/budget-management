@@ -11,7 +11,10 @@
 ### 两种模式(`MOCK_AUTH` 切换)
 
 - **`MOCK_AUTH=true`(本地开发/测试默认)**:无登录页;顶栏「模拟用户选择器」切换身份,经 `x-mock-user-id` header 注入,`getCurrentUser()` 读 header。
-- **`MOCK_AUTH=false`(SSO)**:Authentik OIDC 授权码流程(`/api/auth/login|callback|logout`),会话为 HttpOnly JWT cookie(`bm_session`,8h,jose HS256);`getCurrentUser()` 验签后**实时查库**(改角色/停用即时生效)。
+- **`MOCK_AUTH=false`(SSO)**:登录页按已配置提供方渲染入口,两组提供方可并存、**至少配一组**(env 启动校验,半配置报错):
+  - **Authentik OIDC**:`/api/auth/login|callback|logout`,授权码 + PKCE;登出走 Authentik end-session(id_token_hint)。
+  - **钉钉扫码**(v0.35.0 起,`src/lib/auth/dingtalk.ts`):`/api/auth/dingtalk/login|callback`,OAuth2 授权码换 `userAccessToken` 取 `unionId`;无 id_token,登出仅清本地会话。身份键 `dingtalk:<unionId>` 与 Authentik sub 共用 `users.auth_subject` 唯一列——**同一人经两提供方登录为两个独立账号,不做自动关联**。
+  - 会话均为 HttpOnly JWT cookie(`bm_session`,8h,jose HS256);`getCurrentUser()` 验签后**实时查库**(改角色/停用即时生效)。
 
 ### 角色模型
 
@@ -20,10 +23,12 @@
 - 管理入口:项目概览页「成员管理」卡片(仅 ADMIN 可见);API 层由 `requirePermission(user, action, projectId)` 统一拦截(编辑类动作查成员表,其余查全局矩阵)。
 - **首次启用 SSO 的管理员引导**:先用 Authentik 账号登录一次(JIT 自动建档为 USER),再 `npm run make-admin -- <姓名/显示名 或 SSO sub(UUID)>` 提升 ADMIN(回调显示名优先建档时登录名不入库,脚本对 UUID 输入同时匹配本地 id / authSubject / name)。
 
-### SSO 环境变量(`MOCK_AUTH=false` 时必填,env.ts 启动校验)
+### SSO 环境变量(`MOCK_AUTH=false` 时,env.ts 启动校验)
 
-`AUTHENTIK_ISSUER` / `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` / `AUTH_SECRET`(`openssl rand -base64 32`)/ `APP_BASE_URL`。
-Authentik 侧:建 OAuth2 Provider(Confidential,Redirect URI `<APP_BASE_URL>/api/auth/callback`,Subject mode=User ID)+ Application(slug 与 ISSUER 路径一致)。
+`AUTH_SECRET`(`openssl rand -base64 32`)与 `APP_BASE_URL` 必填;提供方至少配一组(按组整体配置,不允许半配置):
+
+- **Authentik 三件套**:`AUTHENTIK_ISSUER` / `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET`。Authentik 侧:建 OAuth2 Provider(Confidential,Redirect URI `<APP_BASE_URL>/api/auth/callback`,Subject mode=User ID)+ Application(slug 与 ISSUER 路径一致)。
+- **钉钉两件套**:`DINGTALK_CLIENT_ID`(AppKey)/ `DINGTALK_CLIENT_SECRET`(AppSecret)。钉钉开放平台侧:应用的登录回调域名须包含部署域名,重定向 URL = `<APP_BASE_URL>/api/auth/dingtalk/callback`。
 
 ## Coding Agent 自动化(个人凭证 / 服务账号 + API Key)
 

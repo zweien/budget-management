@@ -12,10 +12,13 @@ const envSchema = z
       .string()
       .transform((v) => v === 'true')
       .default('true'),
-    /** SSO 配置:MOCK_AUTH=false 时必填(见下方 superRefine)。 */
+    /** SSO 配置:MOCK_AUTH=false 时至少一组提供方配置完整(见下方 superRefine)。 */
     AUTHENTIK_ISSUER: z.string().url().optional(),
     AUTHENTIK_CLIENT_ID: z.string().min(1).optional(),
     AUTHENTIK_CLIENT_SECRET: z.string().min(1).optional(),
+    /** 钉钉扫码登录(第二提供方):AppKey/AppSecret,与 Authentik 三件套至少配一组。 */
+    DINGTALK_CLIENT_ID: z.string().min(1).optional(),
+    DINGTALK_CLIENT_SECRET: z.string().min(1).optional(),
     /** 会话 JWT(HS256)签名密钥:openssl rand -base64 32。 */
     AUTH_SECRET: z.string().min(32).optional(),
     /** 对外基础 URL,用于拼 OIDC redirect_uri / 登出回跳。 */
@@ -51,17 +54,48 @@ const envSchema = z
   })
   .superRefine((data, ctx) => {
     if (data.MOCK_AUTH) return;
-    // SSO 模式下四个变量缺一不可,否则启动即失败(fail fast,避免运行期才暴露)。
-    const required = [
+    // SSO 模式 fail fast:会话密钥必填;提供方按组整体配置(Authentik 三件套 /
+    // 钉钉两件套),不允许半配置,且至少一组完整,否则启动即失败。
+    if (!data.AUTH_SECRET) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTH_SECRET'],
+        message: 'MOCK_AUTH=false 时必填 AUTH_SECRET',
+      });
+    }
+    const authentikKeys = [
       'AUTHENTIK_ISSUER',
       'AUTHENTIK_CLIENT_ID',
       'AUTHENTIK_CLIENT_SECRET',
-      'AUTH_SECRET',
     ] as const;
-    for (const key of required) {
-      if (!data[key]) {
-        ctx.addIssue({ code: 'custom', path: [key], message: `MOCK_AUTH=false 时必填 ${key}` });
+    const dingtalkKeys = ['DINGTALK_CLIENT_ID', 'DINGTALK_CLIENT_SECRET'] as const;
+    const authentikConfigured = authentikKeys.every((key) => data[key]);
+    const dingtalkConfigured = dingtalkKeys.every((key) => data[key]);
+    // 半配置(配了一部分)按缺失项报错,提示成组约束。
+    if (!authentikConfigured && authentikKeys.some((key) => data[key])) {
+      for (const key of authentikKeys.filter((k) => !data[k])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'MOCK_AUTH=false 时 AUTHENTIK_* 需同时配置(要么全有,要么全无)',
+        });
       }
+    }
+    if (!dingtalkConfigured && dingtalkKeys.some((key) => data[key])) {
+      for (const key of dingtalkKeys.filter((k) => !data[k])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'MOCK_AUTH=false 时 DINGTALK_* 需成对配置(AppKey 与 AppSecret)',
+        });
+      }
+    }
+    if (!authentikConfigured && !dingtalkConfigured) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTHENTIK_ISSUER'],
+        message: 'MOCK_AUTH=false 时至少配置一组登录提供方(AUTHENTIK_* 或 DINGTALK_*)',
+      });
     }
   });
 

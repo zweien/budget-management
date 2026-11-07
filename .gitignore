@@ -23,6 +23,8 @@ next-env.d.ts
 !.env.production.example
 *.pem
 *.key
+# 本机 postgres 口令覆盖(docker compose 自动合并,含密钥不入库)
+docker-compose.override.yml
 
 # Logs
 *.log
