@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-07
+
+### 新增
+
+- **钉钉扫码登录（第二登录提供方）**：`MOCK_AUTH=false` 下登录提供方由 Authentik 单一扩展为**两组可并存、至少配一组**（env 启动校验：按组整体配置，半配置报错）。新增钉钉 OAuth2 授权码流程 `/api/auth/dingtalk/login|callback`（授权页 → `userAccessToken` → 取 `unionId`，state 防 CSRF），凭证为 `DINGTALK_CLIENT_ID`/`DINGTALK_CLIENT_SECRET`；钉钉开放平台应用的登录回调域名须包含部署域名，重定向 URL = `<APP_BASE_URL>/api/auth/dingtalk/callback`。身份键 `dingtalk:<unionId>` 与 Authentik sub 共用 `users.auth_subject` 唯一列——**同一人经两提供方登录为两个独立账号，不做自动关联**；钉钉无 id_token，登出仅清本地会话。登录页按已配置提供方条件渲染入口（仅钉钉 / 仅 Authentik / 双按钮并存）；JIT 建档沿用钉钉昵称，首次登录后 `make-admin` 提升管理员。补钉钉模块单测与 callback 路由测试（本仓库首个 auth 路由测试：state 校验 / 停用拒绝 / JIT / 会话 cookie 下发）
+
 ## [0.34.1] - 2026-11-07
 
 ### 变更
