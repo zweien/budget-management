@@ -22,8 +22,14 @@
  * 用法:
  *   npx tsx scripts/recalc-summary-budgets.ts [--apply] [--from-subjects] [projectId ...]
  *   缺省 dry-run 只打印;--apply 写库;projectId 缺省 = 全部未归档项目。
+ *
+ * --from-subjects 模式委托 summaryRecalc.service 共享引擎(与迁移包导入同一口径);
+ * 该引擎按预算类型分流,包干制项目层只做恒等式报告——修正了旧实现对包干制
+ * 项目 project_budgets 按(空的)科目总预算层清零的问题。
  */
 import { PrismaClient } from '@prisma/client';
+
+import { verifyAndFixProjectSummaries } from '@/server/services/summaryRecalc.service';
 
 const prisma = new PrismaClient();
 
@@ -80,6 +86,14 @@ async function recalcProject(projectId: string) {
   console.log(
     `\n== ${project.code} ${project.name} (${projectId})${fromSubjects ? ' [from-subjects]' : ''}`,
   );
+
+  if (fromSubjects) {
+    // 委托共享引擎(下文其余逻辑只服务 fix-identity 模式)。
+    const result = await verifyAndFixProjectSummaries(projectId, { apply });
+    for (const line of result.lines) console.log(`  ${line}`);
+    if (!apply && result.lines.some((l) => l.includes('修复'))) console.log('    (dry-run,未写库)');
+    return;
+  }
 
   let conflicts = 0;
 

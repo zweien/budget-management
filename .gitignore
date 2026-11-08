@@ -12,6 +12,9 @@ next/
 .nuxt/
 .svelte-kit/
 
+# 备份产物(快照 dump 含敏感数据;迁移包可移植,均不入库,见 docs/backup-restore.md)
+backups/
+
 # Next.js build output & generated type files
 .next/
 next-env.d.ts

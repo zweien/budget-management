@@ -22,6 +22,10 @@
     "prepare": "husky",
     "make-admin": "tsx scripts/make-admin.ts",
     "make-agent": "tsx scripts/make-agent.ts",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts",
+    "export-package": "tsx scripts/export-package.ts",
+    "import-package": "tsx scripts/import-package.ts",
     "mcp": "tsx mcp/server.ts",
     "postinstall": "node scripts/copy-file-viewer-assets.mjs"
   },
