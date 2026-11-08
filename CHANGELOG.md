@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-08
+
+### 新增
+
+- **备份与迁移：两档产物（ADR 0003）**。**快照备份** `npm run backup`：pg_dump 全库导出（同环境灾难恢复用，含用户/凭证哈希/审计，敏感不可外传；.env 不入包），执行载体自动探测 docker compose / docker / 本机客户端（compose 仅在 DATABASE_URL 与 compose 发布端口一致时启用，防「URL 指外部库而本机 compose 在跑」时静默备份错库）；`npm run restore` 恢复带**版本守卫**（appVersion+Prisma 迁移头，`--allow-skew` 放行）与**非空守卫**（全表口径计数，`--force` 先打印丢弃概要再清库，`pg_restore --clean` 兼容零数据但建过 schema 的目标库）。**迁移包** `npm run export-package` / `import-package`：单项目「项目+预算骨架」JSON（不含用户/成员/业务记录/到账/附件/审计），跨环境导入、项目编号为幂等键、保留原 ID；四重守卫——导出遇 PENDING 单默认拒绝（`--force`）、同编号冲突默认拒绝（`--overwrite` 仅限目标项目**骨架态**：已有业务记录/到账/导入批次时硬拒绝且无绕过通道）、版本偏差默认拒绝、`--owner` 严格查找（歧义拒绝）；User 引用按可空性重映射（同 ID 保留 / 必填映射到导入操作者或最早 ADMIN 占位并警告 / 可空置空），原名快照入包内来源附注；导入单事务全或无，事后按科目层校验汇总、漂移自动修复（口径由 summaryRecalc 引擎统一承载，recalc-summary-budgets 的 `--from-subjects` 同源共用，顺带修正旧实现对包干制项目层清零的问题）。**红线：仅限管理员服务器本机 CLI 执行，不设任何 API/UI/MCP 入口、拒绝一切 Bearer 凭证调用**。词汇表新增「快照备份/迁移包」词条；运维手册见 docs/backup-restore.md（cron 定时示例、恢复演练步骤、跨环境迁移流程）
+
 ## [0.35.0] - 2026-11-07
 
 ### 新增
