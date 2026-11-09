@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApprovalStatus, BusinessStatus, Prisma, UserRole } from '@prisma/client';
+import JSZip from 'jszip';
+import { ApprovalStatus, BusinessStatus, MemberRole, Prisma, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
@@ -101,6 +102,7 @@ async function expectHTTP(fn: () => Promise<unknown>, status: number): Promise<H
 
 describe('adjustment.service (integration, real PG) — 双维度调整', () => {
   const createdProjectIds: string[] = [];
+  const createdUserIds: string[] = [];
   let adminId: string;
   const adminUser = () => ({ id: adminId, role: UserRole.ADMIN });
 
@@ -117,6 +119,9 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
       await cleanupProject(id);
     }
     await prisma.user.deleteMany({ where: { id: adminId } }).catch(() => {});
+    await prisma.user
+      .deleteMany({ where: { id: { in: createdUserIds.splice(0) } } })
+      .catch(() => {});
     await prisma.$disconnect();
   });
 
@@ -771,6 +776,41 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     });
     const buf3 = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
     expect(buf3.length).toBeGreaterThan(0);
+  });
+
+  it('导出项目负责人:取最新授权的当前 OWNER 成员,而非建档 ownerId 快照', async () => {
+    const { project, leafA } = await seedApprovedProject('OWNR');
+    // 模拟换负责人:建档 owner(admin-adj)仍留成员表,新负责人以更晚授权时间成为 OWNER。
+    const newLeaderId = uuidv7();
+    createdUserIds.push(newLeaderId);
+    await prisma.user.create({
+      data: { id: newLeaderId, name: '新第一负责人-OWNR', role: UserRole.USER },
+    });
+    await prisma.projectMember.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        userId: newLeaderId,
+        memberRole: MemberRole.OWNER,
+        authorizedAt: new Date(Date.now() + 60_000), // 晚于建档授权,成为「最新」
+      },
+    });
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0.00', annualAdjustment: '0.00' }],
+      },
+      adminUser(),
+    );
+    const buf = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
+
+    // 解包 docx:项目负责人格应填新负责人,不再打印 ownerId 快照里的旧负责人。
+    const zip = await JSZip.loadAsync(buf);
+    const xml = await zip.file('word/document.xml')!.async('string');
+    expect(xml).toContain('新第一负责人-OWNR');
+    expect(xml).not.toContain('admin-adj');
   });
 
   it('恒等式防线:追加审批后各层满足 current = initial + adjustment', async () => {

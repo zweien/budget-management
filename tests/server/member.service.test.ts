@@ -105,6 +105,30 @@ describe('member.service(集成,真实 PG)', () => {
     expect(audit).not.toBeNull();
   });
 
+  it('updateMemberRole:角色变更刷新授权时间(同角色重复更新不动)', async () => {
+    const project = await seedProject('TS');
+    await addMember(project.id, { userId: userA, memberRole: MemberRole.HANDLER }, admin());
+    const before = await prisma.projectMember.findUniqueOrThrow({
+      where: { projectId_userId: { projectId: project.id, userId: userA } },
+    });
+
+    // 同角色更新:授权时间不变。
+    await updateMemberRole(project.id, userA, MemberRole.HANDLER, admin());
+    const same = await prisma.projectMember.findUniqueOrThrow({
+      where: { projectId_userId: { projectId: project.id, userId: userA } },
+    });
+    expect(same.authorizedAt.getTime()).toBe(before.authorizedAt.getTime());
+
+    // 晋升 OWNER:授权时间刷新为最近一次授权——预算调整文书据此识别
+    // 「最新授权的第一负责人」(从成员晋升的新负责人不应被旧时间戳埋没)。
+    await new Promise((r) => setTimeout(r, 5));
+    await updateMemberRole(project.id, userA, MemberRole.OWNER, admin());
+    const after = await prisma.projectMember.findUniqueOrThrow({
+      where: { projectId_userId: { projectId: project.id, userId: userA } },
+    });
+    expect(after.authorizedAt.getTime()).toBeGreaterThan(before.authorizedAt.getTime());
+  });
+
   it('removeMember:移除后编辑权消失;移除不存在成员 404', async () => {
     const project = await seedProject('DEL');
     await addMember(project.id, { userId: userA, memberRole: MemberRole.OWNER }, admin());

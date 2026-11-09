@@ -64,7 +64,7 @@ export async function exportAdjustmentDocx(
   const projectId = adj.projectId;
   const year = adj.year;
 
-  const [project, subjects, annualBudgetRow, projectBudget] = await Promise.all([
+  const [project, subjects, annualBudgetRow, projectBudget, ownerMembers] = await Promise.all([
     prisma.project.findUnique({
       where: { id: projectId },
       include: { owner: { select: { name: true } } },
@@ -75,6 +75,13 @@ export async function exportAdjustmentDocx(
     }),
     prisma.annualBudget.findUnique({ where: { projectId_year: { projectId, year } } }),
     prisma.projectBudget.findUnique({ where: { projectId } }),
+    // 项目负责人实时取当前 OWNER 成员(§codex P2 与列表/详情页同口径):成员管理
+    // 换负责人后 Project.ownerId 不回写,按静态快照打印会打出已卸任负责人。
+    prisma.projectMember.findMany({
+      where: { projectId, memberRole: 'OWNER' },
+      include: { user: { select: { name: true } } },
+      orderBy: { authorizedAt: 'desc' },
+    }),
   ]);
 
   if (!project) {
@@ -337,6 +344,10 @@ export async function exportAdjustmentDocx(
       ? `${project.startDate.getFullYear()}.${String(project.startDate.getMonth() + 1).padStart(2, '0')}-${project.endDate.getFullYear()}.${String(project.endDate.getMonth() + 1).padStart(2, '0')}`
       : '';
 
+  // 项目负责人 = 最新授权的当前 OWNER 成员(第一负责人;多人共管时取最近授权者)。
+  // 无 OWNER 成员的存量数据兜底回 Project.owner 快照,不至打出空名。
+  const ownerName = ownerMembers[0]?.user.name ?? project.owner?.name ?? '';
+
   // 调用纯 Node 模板填充(无子进程)。
   try {
     return await fillAdjustmentTemplate({
@@ -346,7 +357,7 @@ export async function exportAdjustmentDocx(
         name: project.name,
         projectType: project.projectType ?? '',
         undertakingUnit: project.undertakingUnit ?? '',
-        ownerName: project.owner?.name ?? '',
+        ownerName,
         researchPeriod,
         totalFundWan: projectBudget ? yuanStrToWan(projectBudget.currentAmount.toString()) : '0.00',
         annualFundWan: annualBudgetRow

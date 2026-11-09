@@ -109,7 +109,13 @@ export async function updateMemberRole(
   return prisma.$transaction(async (tx) => {
     const updated = await tx.projectMember.update({
       where: { projectId_userId: { projectId, userId: targetUserId } },
-      data: { memberRole },
+      // 角色变更 = 重新授权,刷新授权时间:预算调整文书等项目负责人取
+      // 「最新授权的 OWNER」,从成员晋升的新负责人需以此被识别为最新
+      // (authorizedAt 不在 UI 展示,仅影响成员列表排序与取数口径)。
+      data: {
+        memberRole,
+        ...(existing.memberRole !== memberRole ? { authorizedAt: new Date() } : {}),
+      },
     });
     await recordAudit(tx, {
       projectId,
