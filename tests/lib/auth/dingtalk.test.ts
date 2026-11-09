@@ -3,11 +3,14 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 // dingtalk.ts 导入链上的 env.ts 在模块加载时强校验(同 oidc.test.ts 说明):
 // 先注入占位值与钉钉凭证再动态导入被测模块,单测自足、不依赖外部环境。
 // singleFork 下 process.env 为全进程共享,afterAll 恢复原值防泄漏到其他测试文件。
-const MUTATED_KEYS = ['DINGTALK_CLIENT_ID', 'DINGTALK_CLIENT_SECRET'] as const;
+const MUTATED_KEYS = ['DINGTALK_CLIENT_ID', 'DINGTALK_CLIENT_SECRET', 'APP_BASE_URL'] as const;
 const saved = Object.fromEntries(MUTATED_KEYS.map((key) => [key, process.env[key]]));
 process.env.DATABASE_URL ??= 'postgresql://vitest:vitest@localhost:5432/vitest';
 process.env.DINGTALK_CLIENT_ID = 'ding-unit-key';
 process.env.DINGTALK_CLIENT_SECRET = 'ding-unit-secret';
+// APP_BASE_URL 显式钉住:先跑的测试可能经 Prisma 把 .env 的值注入 process.env,
+// ??=/缺省兜底会随 .env 内容漂移(顺序敏感);本测试断言 localhost:3000。
+process.env.APP_BASE_URL = 'http://localhost:3000';
 afterAll(() => {
   for (const key of MUTATED_KEYS) {
     if (saved[key] === undefined) delete process.env[key];
@@ -71,13 +74,20 @@ describe('dingtalkEnabled(凭证门控)', () => {
 
   it('缺任一凭证即停用(重新加载模块)', async () => {
     const savedSecret = process.env.DINGTALK_CLIENT_SECRET;
+    const savedMockAuth = process.env.MOCK_AUTH;
     delete process.env.DINGTALK_CLIENT_SECRET;
+    // MOCK_AUTH 钉为 true:本用例只测「凭证缺一即停用」,不测 SSO 组校验——
+    // ambient MOCK_AUTH=false(全量运行时经 .env 注入)会让钉钉半配置在 env.ts
+    // 校验层直接抛错,偏离用例意图(单跑时 MOCK_AUTH 缺省即 true)。
+    process.env.MOCK_AUTH = 'true';
     try {
       vi.resetModules();
       const fresh = await import('@/lib/auth/dingtalk');
       expect(fresh.dingtalkEnabled()).toBe(false);
     } finally {
       process.env.DINGTALK_CLIENT_SECRET = savedSecret;
+      if (savedMockAuth === undefined) delete process.env.MOCK_AUTH;
+      else process.env.MOCK_AUTH = savedMockAuth;
       vi.resetModules();
     }
   });

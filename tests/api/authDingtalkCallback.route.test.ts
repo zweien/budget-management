@@ -4,12 +4,20 @@ import { NextRequest } from 'next/server';
 // 本仓库首个 auth 路由测试:SSO 模式 + 钉钉提供方下走通回调主链路。
 // 环境自足(同 dingtalk.test.ts 说明):先种 env 再动态导入被测模块;
 // singleFork 共享 process.env,afterAll 恢复防泄漏。
-const MUTATED_KEYS = ['MOCK_AUTH', 'DINGTALK_CLIENT_ID', 'DINGTALK_CLIENT_SECRET'] as const;
+const MUTATED_KEYS = [
+  'MOCK_AUTH',
+  'DINGTALK_CLIENT_ID',
+  'DINGTALK_CLIENT_SECRET',
+  'APP_BASE_URL',
+] as const;
 const saved = Object.fromEntries(MUTATED_KEYS.map((key) => [key, process.env[key]]));
 process.env.DATABASE_URL ??= 'postgresql://vitest:vitest@localhost:5432/vitest';
 process.env.MOCK_AUTH = 'false';
 process.env.DINGTALK_CLIENT_ID = 'ding-route-key';
 process.env.DINGTALK_CLIENT_SECRET = 'ding-route-secret';
+// APP_BASE_URL 显式钉住(断言 localhost:3000 的 302 目标):
+// 先跑的测试可能经 Prisma 注入 .env 的值,??=/缺省兜底会随 .env 内容漂移。
+process.env.APP_BASE_URL = 'http://localhost:3000';
 afterAll(() => {
   for (const key of MUTATED_KEYS) {
     if (saved[key] === undefined) delete process.env[key];
