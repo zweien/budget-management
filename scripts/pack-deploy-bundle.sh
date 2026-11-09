@@ -25,6 +25,7 @@ IMAGE_NAME="${IMAGE_NAME:-budget-management}"
 build_args=""
 [ -n "${NODE_IMAGE:-}" ] && build_args="${build_args} --build-arg NODE_IMAGE=${NODE_IMAGE}"
 [ -n "${NPM_REGISTRY:-}" ] && build_args="${build_args} --build-arg NPM_REGISTRY=${NPM_REGISTRY}"
+[ -n "${APK_MIRROR:-}" ] && build_args="${build_args} --build-arg APK_MIRROR=${APK_MIRROR}"
 # shellcheck disable=SC2086 # build_args 需按空格分词
 docker build ${build_args} -t "${IMAGE_NAME}:${version}" -t "${IMAGE_NAME}:latest" .
 
