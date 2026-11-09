@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-09
+
+### 新增
+
+- **迁移包导出双入口（UI/API，ADR 0003 红线唯一例外）**：迁移包为脱敏可分享产物（不含用户/成员/台账/附件/审计），数据面与既有台账导出同级，故为其「导出」开放 UI/API；**快照备份/恢复/导入包仍仅限管理员本机 CLI**。**单项目**：项目概览页「导出迁移包」按钮（所有登录用户可见）→ `GET /api/projects/:id/export/migration-package`，产物与 CLI 字节同构（`migration-<编号>-<日期>.json`，已实测 diff 仅 exportedAt）；PENDING 守卫与 CLI 同源——存在待审批单时 409 返回在途单清单，UI 弹确认框、`?pendingAcknowledged=1` 知情放行（等价 `--force`）。**批量**：项目列表页「导出迁移包」弹窗（复选清单默认全选当前筛选结果 + 「包含待审批单」开关）→ `GET /api/export/migration-packages?codes=`，产出 zip（每项目一个 `migration-<编号>.json` + `manifest.json` 记录 exported/skippedPending/failed，逐项容错同 CLI `--all`；PENDING 项目默认跳过进 manifest），前端 JSZip 读 manifest 出成功/跳过/失败统计。权限：`project:view` 与台账导出同权；批量属跨项目端点，指定项目范围的 API 凭证 403（`denyApiKeyCrossProject`，与统计/审计全量同惯例），单项目端点按凭证范围行级收窄。基建：`exportProjectPackage` 拆分供 CLI/HTTP 共用，文件名与 Content-Disposition（RFC 5987）助手单一来源；`fetchFile` 失败抛 `HttpFileError`（含 status 与 JSON body，供 409 清单消费）并支持解析 `filename*`。补路由测试 9 例（权限矩阵/PENDING 链路/zip+manifest/凭证范围）与 Playwright 四链路走查
+- 服务头注释与 AGENTS/ADR 0003/运维手册同步红线修订：仅迁移包导出开例外，导入/恢复/快照不开放
+
+### 修复
+
+- **钉钉测试对 .env 与运行顺序敏感**：全量运行时先跑的测试经 Prisma 实例化把 `.env` 注入 `process.env`，测试的 `??=`/缺省兜底随 `.env` 内容漂移（`APP_BASE_URL` 改为局域网地址后 4 例失败、单跑全过）。显式钉住 `APP_BASE_URL`/`MOCK_AUTH` 并在 afterAll 恢复，单跑行为不变
+
 ## [0.36.0] - 2026-11-08
 
 ### 新增
