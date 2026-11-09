@@ -1853,7 +1853,22 @@ export async function approveAdjustment(
         },
       });
       if (!sb) {
-        throw new HTTPError(422, `科目年度预算不存在(年度 ${adj.year})`);
+        // 编制时整行未填该科目年度金额(树中存在但无 SubjectBudget 行,迁移包
+        // 忠实还原此形态):以 0 为基准建行后应用 delta——与 ALLOCATE 现有科目
+        // (§追加下达)及总维度缺行 upsert 同款;净调减缺行已被上方 §7.5 复核
+        // 按 0 额度拒绝,能到这里的 delta 必为正(建行 current≥0,§7.4 再兜底)。
+        await tx.subjectBudget.create({
+          data: {
+            id: uuidv7(),
+            projectId: adj.projectId,
+            year: adj.year,
+            subjectId,
+            initialAmount: toStored(ZERO),
+            adjustmentAmount: toStored(delta),
+            currentAmount: toStored(delta),
+          },
+        });
+        continue;
       }
       const next = fromStored(sb.currentAmount).plus(delta);
       const nextAdj = fromStored(sb.adjustmentAmount).plus(delta);

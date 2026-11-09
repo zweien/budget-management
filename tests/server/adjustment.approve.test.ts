@@ -409,6 +409,74 @@ describe('adjustment.approve (integration, real PG) — 双维度生效', () => 
     expect(fromStored(stb!.currentAmount).toFixed(2)).toBe('100.00');
   });
 
+  it('现有科目缺年度预算行(编制整行未填):年度调增审批以 0 基准建行,不再 422', async () => {
+    // 复刻迁移包还原的形态:叶 C 在科目树中、有总预算,但编制时未填 2026 年度金额
+    // → 无 SubjectBudget 行(校验允许"整行未填"的叶科目)。调剂给 C 下第一笔年度
+    // 额度,仅动年度维度(总维度全 0)——修复前审批 422「科目年度预算不存在」卡死。
+    const code = `APV-NOROW-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: 'apv norow' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    const payload = validBudgetPayload();
+    payload.projectTotal = '1300.00';
+    payload.subjects.push({ code: 'C', name: '叶C', parentCode: 'ROOT', isLeaf: true });
+    payload.subjectTotalBudgets.push({ subjectCode: 'C', amount: '300.00' });
+    const { appId } = await createDraft(project.id, payload, adminUser());
+    await submitDraft(appId, adminUser());
+    await approveApplication(appId, adminUser());
+    const subjects = await prisma.budgetSubject.findMany({ where: { projectId: project.id } });
+    const leafA = subjects.find((s) => s.code === 'A')!;
+    const leafC = subjects.find((s) => s.code === 'C')!;
+
+    // 前置:C 确无 2026 年度预算行。
+    expect(
+      await prisma.subjectBudget.findUnique({
+        where: {
+          projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: leafC.id },
+        },
+      }),
+    ).toBeNull();
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [
+          { subjectId: leafA.id, totalAdjustment: '0.00', annualAdjustment: '-100.00' },
+          { subjectId: leafC.id, totalAdjustment: '0.00', annualAdjustment: '100.00' },
+        ],
+      },
+      adminUser(),
+    );
+    await submitAdjustment(adj.id, adminUser());
+    const approved = await approveAdjustment(adj.id, adminUser(), '同意');
+    expect(approved.status).toBe(ApprovalStatus.APPROVED);
+
+    // C:以 0 基准建行(initial=0, adjustment=+100, current=100)。
+    const sbC = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: leafC.id },
+      },
+    });
+    expect(fromStored(sbC!.initialAmount).toFixed(2)).toBe('0.00');
+    expect(fromStored(sbC!.adjustmentAmount).toFixed(2)).toBe('100.00');
+    expect(fromStored(sbC!.currentAmount).toFixed(2)).toBe('100.00');
+    // A:有行科目正常累加(600→500)。
+    const sbA = await prisma.subjectBudget.findUnique({
+      where: {
+        projectId_year_subjectId: { projectId: project.id, year: 2026, subjectId: leafA.id },
+      },
+    });
+    expect(fromStored(sbA!.currentAmount).toFixed(2)).toBe('500.00');
+    // 总维度全 0:C 的 SubjectTotalBudget 不动(仍 300)。
+    const stbC = await prisma.subjectTotalBudget.findUnique({
+      where: { projectId_subjectId: { projectId: project.id, subjectId: leafC.id } },
+    });
+    expect(fromStored(stbC!.currentAmount).toFixed(2)).toBe('300.00');
+  });
+
   it('新增科目:父节点为叶 → 422', async () => {
     const { project, leafA, leafB } = await seedApprovedProject('NEWBADPARENT');
     await expectHTTP(
