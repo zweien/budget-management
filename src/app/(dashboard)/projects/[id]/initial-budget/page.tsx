@@ -390,6 +390,9 @@ export default function InitialBudgetPage() {
   const [dirty, setDirty] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
+  // 撤回待审批编制单(PENDING→DRAFT)。
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
   // 已生效态复用台账数据(树形展示,与 ledger 页一致)。
   const [ledgerNodes, setLedgerNodes] = useState<LedgerNode[]>([]);
   // 台账视图:某一年度(执行列年度口径)或总预算(跨年度口径,与执行台账页切换一致)。
@@ -1003,6 +1006,29 @@ export default function InitialBudgetPage() {
     }
   };
 
+  /** 撤回待审批编制单(§6.2):负责人(或管理员)PENDING→DRAFT,回到可编辑态。 */
+  const handleWithdraw = async () => {
+    if (!draft) return;
+    setWithdrawing(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/initial-budget/${draft.id}/withdraw`, {
+        method: 'POST',
+      });
+      toast.success('已撤回,编制单回到草稿,可修改后重新提交');
+      setWithdrawOpen(false);
+      // 重拉编制单并回填表单:状态回 DRAFT 后页面自动切到可编辑态(与仅保存同款刷新)。
+      const fresh = await apiFetch<InitialBudgetDraftView>(
+        `/api/projects/${projectId}/initial-budget`,
+      );
+      setDraft(fresh);
+      hydrateForm(fresh);
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
   /** 仅保存草稿(无草稿场景下先创建,不提交)。 */
   const handleSaveDraft = async () => {
     setSubmitting(true);
@@ -1327,6 +1353,36 @@ export default function InitialBudgetPage() {
           <AlertTitle>已提交,等待审批</AlertTitle>
           <AlertDescription>该编制单已提交,正在等待审批。审批通过后将自动生效。</AlertDescription>
         </Alert>
+        {/* 撤回提交:负责人(或管理员)可撤回待审批单回草稿;查看者不展示(服务端权限兜底)。 */}
+        {project?.canEdit !== false && (
+          <>
+            <Button variant="outline" onClick={() => setWithdrawOpen(true)}>
+              撤回提交
+            </Button>
+            <AlertDialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>撤回提交</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    确认撤回该编制单?撤回后回到草稿状态,可修改后重新提交;审批人将不再看到该待审单。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={withdrawing}>取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    disabled={withdrawing}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void handleWithdraw();
+                    }}
+                  >
+                    {withdrawing ? '撤回中…' : '撤回'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
+        )}
         <ReadOnlyView
           projectTotal={draft?.projectTotal ?? ''}
           annualBudgets={draft?.annualBudgets ?? []}

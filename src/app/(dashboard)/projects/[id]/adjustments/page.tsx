@@ -117,6 +117,8 @@ interface AdjustmentRow {
   annualReason: string | null;
   applicantId: string;
   createdAt: string;
+  /** 提交代(ISO):撤回/审批时绑定,防止操作页面加载后被他人重新提交的另一代单据。 */
+  submittedAt?: string | null;
   lines: AdjustmentLine[];
 }
 
@@ -232,6 +234,9 @@ export default function AdjustmentsPage() {
   // 删除确认。
   const [deleteTarget, setDeleteTarget] = useState<AdjustmentRow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // 撤回确认(待审批单回草稿)。
+  const [withdrawTarget, setWithdrawTarget] = useState<AdjustmentRow | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   /** 初始预算是否已生效(发起调整的前提)。 */
   const isEffective = budgetStatus === 'APPROVED';
@@ -675,6 +680,26 @@ export default function AdjustmentsPage() {
       if (e instanceof Error) toast.error(e.message);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // 撤回待审批单(PENDING→DRAFT,服务端释放在途额度锁);携带提交代做版本绑定,
+  // 页面加载后被驳回/重新提交的另一代单据不会被误撤。
+  const confirmWithdraw = async () => {
+    if (!withdrawTarget) return;
+    setWithdrawing(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/adjustments/${withdrawTarget.id}/withdraw`, {
+        method: 'POST',
+        body: JSON.stringify({ submittedAt: withdrawTarget.submittedAt ?? undefined }),
+      });
+      toast.success('已撤回,调整单回到草稿,可修改后重新提交');
+      setWithdrawTarget(null);
+      await reload();
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -1412,7 +1437,13 @@ export default function AdjustmentsPage() {
                         </>
                       )}
                       {row.status === 'PENDING' && (
-                        <span className="px-2 text-sm text-mute">审批中</span>
+                        <>
+                          <span className="px-2 text-sm text-mute">审批中</span>
+                          {/* 撤回提交:负责人(或管理员)可撤回待审批单回草稿,确认弹窗防误触 */}
+                          <Button variant="ghost" size="sm" onClick={() => setWithdrawTarget(row)}>
+                            撤回
+                          </Button>
+                        </>
                       )}
                       <Button variant="ghost" size="sm" onClick={() => setDetailTarget(row)}>
                         明细
@@ -1479,6 +1510,33 @@ export default function AdjustmentsPage() {
               }}
             >
               {deleting ? '删除中…' : '删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 撤回确认:待审批单回草稿,在途额度锁释放 */}
+      <AlertDialog
+        open={!!withdrawTarget}
+        onOpenChange={(open) => !open && setWithdrawTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>撤回提交</AlertDialogTitle>
+            <AlertDialogDescription>
+              确认撤回该调整单?撤回后回到草稿状态,可修改后重新提交;该单在途预订的调减额度将即时释放,审批人将不再看到该待审单。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={withdrawing}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={withdrawing}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmWithdraw();
+              }}
+            >
+              {withdrawing ? '撤回中…' : '撤回'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
