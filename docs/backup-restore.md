@@ -67,7 +67,9 @@ npm run export-package -- --all      # 全部项目 → backups/migration/<日�
 
 - 项目存在 PENDING(待审批)单时默认拒绝;确认带出加 `--force`,目标环境管理员可继续审批。
 
-目标环境:
+目标环境(**UI 入口**,0.38.0 起,仅 ADMIN):项目列表页「导入项目」→ 上传 .json 单包或 .zip 批量 → 只读预检(版本偏差/同编号冲突/骨架态/包内待审批单逐项标注)→ 勾选确认(负责人认领下拉、`--allow-skew`/`--overwrite` 对应勾选)→ 执行(逐包独立事务,执行端全量重跑守卫);UI/API 导入写审计(`action=import`)。
+
+目标环境(CLI,仍可用):
 
 ```bash
 npm run import-package -- backups/migration-617-20261108.json --owner 张三
@@ -83,4 +85,4 @@ npm run import-package -- backups/migration-617-20261108.json --owner 张三
 
 ## 红线
 
-**快照备份 / 恢复 / 导入包仅限管理员在服务器本机 CLI 执行**:不设 API/UI/MCP 入口,拒绝一切 Bearer 凭证调用——防止 coding agent 自我备份外传凭证哈希(与「凭证管理拒绝 Bearer」同款红线,见 AGENTS.md)。唯一例外:迁移包**导出**开放 UI/API(脱敏产物,数据面与台账导出同级;批量跨项目端点对指定项目范围凭证 403)。
+**快照备份 / 恢复仅限管理员在服务器本机 CLI 执行**:不设 API/UI/MCP 入口,拒绝一切 Bearer 凭证调用——防止 coding agent 自我备份外传凭证哈希(与「凭证管理拒绝 Bearer」同款红线,见 AGENTS.md)。例外:迁移包**导出**开放 UI/API(脱敏产物,数据面与台账导出同级;批量跨项目端点对指定项目范围凭证 403);迁移包**导入**开放 UI/API(0.38.0 起,仅 ADMIN、对齐 `project:create`,写审计;CLI 仍可用)。

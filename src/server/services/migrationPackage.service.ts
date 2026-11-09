@@ -13,8 +13,9 @@
  * 包干制只校验年度层、不盲改项目层)。
  *
  * 调用入口:迁移包**导出**经 HTTP 暴露(单项目/批量端点,project:view,与台账导出
- * 同权;批量跨项目端点对指定项目范围凭证 403)并由 CLI 复用同一实现;**导入仍仅
- * 管理员本机 CLI**,不设任何 HTTP/MCP 入口(红线见 AGENTS.md)。
+ * 同权);**导入**经 HTTP 暴露(预检+执行两端点,仅 ADMIN、对齐 project:create、
+ * 范围凭证 403、写审计)并由 CLI 复用同一实现(CLI 不带 actor、不写审计);
+ * 快照备份/恢复仍仅管理员本机 CLI(红线见 AGENTS.md)。
  */
 import { readFile } from 'node:fs/promises';
 
@@ -23,6 +24,7 @@ import { Prisma, type ApprovalStatus, type BudgetMode } from '@prisma/client';
 import { uuidv7 } from '@/lib/id';
 import { getAppVersion, getMigrationHead } from '@/lib/build-info';
 import { BULK_TX_OPTIONS, prisma } from '@/lib/prisma';
+import { recordAudit } from '@/server/audit/interceptor';
 import { findUsersByKey } from './userLookup.service';
 import { verifyAndFixProjectSummaries, type SummaryVerifyResult } from './summaryRecalc.service';
 
@@ -564,10 +566,14 @@ export async function readPackageFile(file: string): Promise<MigrationPackage> {
 export interface ImportPackageOptions {
   /** 同编号冲突时整体替换(仅限目标项目骨架态)。 */
   overwrite?: boolean;
-  /** 按姓名或 SSO sub(UUID)认领 OWNER;缺省以最早 ADMIN 占位负责人并警告。 */
+  /** 按姓名或 SSO sub(UUID)认领 OWNER(CLI);缺省以最早 ADMIN 占位负责人并警告。 */
   ownerKey?: string;
+  /** UI 直传用户 id 认领 OWNER(与 ownerKey 互斥)。 */
+  ownerUserId?: string;
   /** 版本偏差放行。 */
   allowSkew?: boolean;
+  /** 操作者(UI/API 路径传入;有 actor 才写审计,CLI 不传→带外运维不写审计)。 */
+  actor?: { id: string };
 }
 
 export interface UserRefAction {
@@ -619,8 +625,18 @@ export async function deleteProjectCascade(
   await tx.project.deleteMany({ where: { id: projectId } });
 }
 
-/** make-admin 同款严格查找:UUID→id/authSubject/name,非 UUID→name;多命中列候选拒绝。 */
-async function resolveActingUser(ownerKey?: string) {
+/** make-admin 同款严格查找:UUID→id/authSubject/name,非 UUID→name;多命中列候选拒绝。UI 的 ownerUserId 直查。 */
+async function resolveActingUser(ownerKey?: string, ownerUserId?: string) {
+  if (ownerUserId) {
+    const user = await prisma.user.findUnique({ where: { id: ownerUserId } });
+    if (!user) {
+      throw new MigrationError(`ownerUserId 未找到用户: ${ownerUserId}`);
+    }
+    if (user.status !== 'active') {
+      throw new MigrationError(`ownerUserId 用户已停用: ${user.name} (${user.id})`);
+    }
+    return { user, mode: 'claimed' as const };
+  }
   if (ownerKey) {
     const users = await findUsersByKey(prisma, ownerKey);
     if (users.length === 0) {
@@ -654,6 +670,9 @@ export async function importPackage(
   pkg: MigrationPackage,
   opts: ImportPackageOptions = {},
 ): Promise<ImportReport> {
+  if (opts.ownerUserId && opts.ownerKey) {
+    throw new MigrationError('ownerUserId 与 ownerKey 互斥,只能以一种方式指定认领用户。');
+  }
   validatePackage(pkg);
 
   // 版本守卫:包的 app/迁移头与当前环境不一致默认拒绝。
@@ -667,7 +686,7 @@ export async function importPackage(
   }
 
   // 先解析操作者:参数错(找不到/歧义/停用)应最先暴露,不与冲突检查纠缠。
-  const acting = await resolveActingUser(opts.ownerKey);
+  const acting = await resolveActingUser(opts.ownerKey, opts.ownerUserId);
   const warnings: string[] = [];
   if (acting.mode === 'placeholder') {
     warnings.push(
@@ -791,6 +810,7 @@ export async function importPackage(
     }
 
     const p = pkg.project;
+    const ownerTarget = remap(p.ownerId, 'project.ownerId', true)!;
     await tx.project.create({
       data: {
         id: pid,
@@ -801,7 +821,7 @@ export async function importPackage(
         undertakingUnit: p.undertakingUnit,
         startDate: dt(p.startDate),
         endDate: dt(p.endDate),
-        ownerId: remap(p.ownerId, 'project.ownerId', true)!,
+        ownerId: ownerTarget,
         budgetMode: p.budgetMode,
         remark: p.remark,
         archivedAt: dt(p.archivedAt),
@@ -961,6 +981,33 @@ export async function importPackage(
         data: { id: uuidv7(), projectId: pid, userId: acting.user.id, memberRole: 'OWNER' },
       });
     }
+
+    // UI/API 路径留审计(与业务同事务);CLI 不传 actor,维持带外运维不写审计的惯例。
+    if (opts.actor) {
+      await recordAudit(tx, {
+        projectId: pid,
+        objectType: 'project',
+        objectId: pid,
+        action: 'import',
+        operatorId: opts.actor.id,
+        before: existing
+          ? {
+              id: existing.id,
+              code: existing.code,
+              name: existing.name,
+              archivedAt: existing.archivedAt,
+            }
+          : undefined,
+        after: {
+          code: p.code,
+          name: p.name,
+          ownerId: ownerTarget,
+          source: 'migration-package',
+          replacedExisting: !!existing,
+          inserted,
+        },
+      });
+    }
   }, BULK_TX_OPTIONS);
 
   const summaryCheck = await verifyAndFixProjectSummaries(pid, { apply: true });
@@ -974,5 +1021,105 @@ export async function importPackage(
     inserted,
     summaryCheck,
     warnings,
+  };
+}
+
+// ---------- 导入预检(只读,UI/API 两阶段的第一步) ----------
+
+export interface PackageInspection {
+  code: string;
+  name: string;
+  budgetMode: BudgetMode;
+  exportedAt: string;
+  stats: {
+    subjects: number;
+    annualBudgets: number;
+    subjectBudgets: number;
+    subjectTotalBudgets: number;
+    adjustments: number;
+    adjustmentLines: number;
+    subjectChanges: number;
+  };
+  versionSkew: {
+    pkgAppVersion: string;
+    pkgMigrationHead: string;
+    pkgExportedAt: string;
+    currentAppVersion: string;
+    currentMigrationHead: string;
+  } | null;
+  conflict: {
+    existing: { id: string; code: string; name: string; archived: boolean };
+    /** 骨架态 = 无业务记录/到账/导入批次(--overwrite 的可用前提)。 */
+    skeleton: boolean;
+    memberCount: number;
+    recordCount: number;
+    receiptCount: number;
+    importBatchCount: number;
+  } | null;
+  pendingInPackage: boolean;
+}
+
+/**
+ * 包预检:校验 envelope + 只读跑全部守卫检查(版本偏差/同编号冲突/骨架态/包内 PENDING),
+ * 不写库。供预览端点;执行端点仍走 importPackage 全量重跑守卫(不信任前端)。
+ */
+export async function inspectPackage(pkg: MigrationPackage): Promise<PackageInspection> {
+  validatePackage(pkg);
+  const [appVersion, migrationHead] = await Promise.all([getAppVersion(), getMigrationHead()]);
+
+  const existing = await prisma.project.findUnique({ where: { code: pkg.project.code } });
+  let conflict: PackageInspection['conflict'] = null;
+  if (existing) {
+    const [records, receipts, batches, members] = await Promise.all([
+      prisma.businessRecord.count({ where: { projectId: existing.id } }),
+      prisma.receiptRecord.count({ where: { projectId: existing.id } }),
+      prisma.importBatch.count({ where: { projectId: existing.id } }),
+      prisma.projectMember.count({ where: { projectId: existing.id } }),
+    ]);
+    conflict = {
+      existing: {
+        id: existing.id,
+        code: existing.code,
+        name: existing.name,
+        archived: !!existing.archivedAt,
+      },
+      skeleton: records + receipts + batches === 0,
+      memberCount: members,
+      recordCount: records,
+      receiptCount: receipts,
+      importBatchCount: batches,
+    };
+  }
+
+  return {
+    code: pkg.project.code,
+    name: pkg.project.name,
+    budgetMode: pkg.project.budgetMode,
+    exportedAt: pkg.exportedAt,
+    stats: {
+      subjects: pkg.subjects.length,
+      annualBudgets: pkg.annualBudgets.length,
+      subjectBudgets: pkg.subjectBudgets.length,
+      subjectTotalBudgets: pkg.subjectTotalBudgets.length,
+      adjustments: pkg.adjustments.length,
+      adjustmentLines: pkg.adjustments.reduce((n, a) => n + a.lines.length, 0),
+      subjectChanges: pkg.subjectChanges.length,
+    },
+    versionSkew:
+      pkg.appVersion !== appVersion || pkg.migrationHead !== migrationHead
+        ? {
+            pkgAppVersion: pkg.appVersion,
+            pkgMigrationHead: pkg.migrationHead,
+            pkgExportedAt: pkg.exportedAt,
+            currentAppVersion: appVersion,
+            currentMigrationHead: migrationHead,
+          }
+        : null,
+    conflict,
+    pendingInPackage:
+      !!pkg.provenance?.pending &&
+      (pkg.provenance.pending.initialApplication ||
+        pkg.provenance.pending.adjustments.length > 0 ||
+        pkg.provenance.pending.subjectChanges.length > 0),
   };
 }

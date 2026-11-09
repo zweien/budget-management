@@ -9,7 +9,7 @@
  */
 import JSZip from 'jszip';
 
-import { fetchFile, HttpFileError, saveBlob } from './client';
+import { bootstrapMockUser, fetchFile, HttpFileError, saveBlob } from './client';
 
 export type SingleExportResult = { ok: true } | { pending: string[] };
 
@@ -55,4 +55,77 @@ export async function exportMigrationPackages(
     : { exported: [], skippedPending: [], failed: [] };
   await saveBlob(blob, filename ?? 'migration-packages.zip');
   return manifest;
+}
+
+// ---------- 导入(两阶段无状态:预览与执行重传同一 File;仅 ADMIN) ----------
+
+/** 与包内 PackageInspection 对应的预检结果(服务端只读检查)。 */
+export interface MigrationPackageInspection {
+  code: string;
+  name: string;
+  budgetMode: string;
+  exportedAt: string;
+  stats: Record<string, number>;
+  versionSkew: { pkgAppVersion: string; currentAppVersion: string } | null;
+  conflict: {
+    existing: { id: string; code: string; name: string; archived: boolean };
+    skeleton: boolean;
+    memberCount: number;
+    recordCount: number;
+    receiptCount: number;
+    importBatchCount: number;
+  } | null;
+  pendingInPackage: boolean;
+}
+
+export interface MigrationImportPreview {
+  kind: 'single' | 'archive';
+  files: { name: string; ok: boolean; error?: string; inspection?: MigrationPackageInspection }[];
+}
+
+export interface MigrationImportResult {
+  code: string | null;
+  name: string | null;
+  status: 'imported' | 'failed';
+  reason?: string;
+  report?: {
+    projectCode: string;
+    owner: { mode: string; userName: string };
+    replacedExisting: boolean;
+    warnings: string[];
+    summaryCheck: { lines: string[]; fixed: boolean };
+  };
+}
+
+/** multipart 上传共用封装(仿 imports 页 uploadExcel:原生 fetch + mock header)。 */
+async function postFormData<T>(path: string, form: FormData): Promise<T> {
+  const mockUserId = await bootstrapMockUser();
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: mockUserId ? { 'x-mock-user-id': mockUserId } : {},
+    body: form,
+  });
+  const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? `请求失败 (${res.status})`);
+  }
+  return body as T;
+}
+
+export function previewMigrationImport(file: File): Promise<MigrationImportPreview> {
+  const form = new FormData();
+  form.append('file', file);
+  return postFormData('/api/import/migration-package/preview', form);
+}
+
+export function executeMigrationImport(
+  file: File,
+  opts: { ownerUserId?: string; overwrite: boolean; allowSkew: boolean },
+): Promise<{ imported: number; results: MigrationImportResult[] }> {
+  const form = new FormData();
+  form.append('file', file);
+  if (opts.ownerUserId) form.append('ownerUserId', opts.ownerUserId);
+  if (opts.overwrite) form.append('overwrite', '1');
+  if (opts.allowSkew) form.append('allowSkew', '1');
+  return postFormData('/api/import/migration-package', form);
 }

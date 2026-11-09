@@ -88,7 +88,7 @@ export function ExportMigrationPackagesDialog({
           <DialogTitle>批量导出迁移包</DialogTitle>
           <DialogDescription>
             产出 zip(每项目一个 migration-&lt;编号&gt;.json + manifest.json),仅含项目与预算骨架,
-            不含台账/成员/附件;目标环境经 CLI 导入。
+            不含台账/成员/附件;目标环境经 UI「导入项目」或 CLI 导入。
           </DialogDescription>
         </DialogHeader>
 

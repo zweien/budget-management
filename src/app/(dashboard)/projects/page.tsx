@@ -4,7 +4,17 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Archive, FolderKanban, Package, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
+import {
+  Archive,
+  FolderKanban,
+  Package,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Search,
+  Upload,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   flexRender,
@@ -21,6 +31,7 @@ import {
 
 import { apiFetch } from '@/lib/api/client';
 import { ExportMigrationPackagesDialog } from '@/components/projects/export-migration-packages-dialog';
+import { ImportMigrationPackageDialog } from '@/components/projects/import-migration-package-dialog';
 import {
   ProjectFormDialog,
   type DialogCurrentUser,
@@ -160,6 +171,8 @@ export default function ProjectsPage() {
   const [archiving, setArchiving] = useState(false);
   // 批量导出迁移包弹窗(条件渲染:挂载即按当前筛选结果默认全选)。
   const [exportOpen, setExportOpen] = useState(false);
+  // 导入迁移包弹窗(仅 ADMIN;两阶段,导入成功后 bump 列表)。
+  const [importOpen, setImportOpen] = useState(false);
 
   // 当前用户(角色决定新建入口可见性)+ 负责人候选(仅管理员可拉取用户列表)。
   const [me, setMe] = useState<DialogCurrentUser | null>(null);
@@ -553,10 +566,16 @@ export default function ProjectsPage() {
           <h1 className="text-display-md">项目管理</h1>
         </div>
         {me?.role === 'ADMIN' ? (
-          <Button onClick={openCreateDialog}>
-            <Plus />
-            新建项目
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload />
+              导入项目
+            </Button>
+            <Button onClick={openCreateDialog}>
+              <Plus />
+              新建项目
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -732,6 +751,15 @@ export default function ProjectsPage() {
             archivedAt: p.archivedAt,
           }))}
           onClose={() => setExportOpen(false)}
+        />
+      ) : null}
+
+      {/* 导入迁移包(仅 ADMIN):两阶段,成功后 bump listVersion 重拉列表。 */}
+      {importOpen ? (
+        <ImportMigrationPackageDialog
+          userOptions={userOptions}
+          onClose={() => setImportOpen(false)}
+          onImported={() => setListVersion((v) => v + 1)}
         />
       ) : null}
     </div>
