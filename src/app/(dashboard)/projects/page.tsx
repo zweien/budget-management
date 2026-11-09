@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Archive, FolderKanban, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { Archive, FolderKanban, Package, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   flexRender,
@@ -20,6 +20,7 @@ import {
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { ExportMigrationPackagesDialog } from '@/components/projects/export-migration-packages-dialog';
 import {
   ProjectFormDialog,
   type DialogCurrentUser,
@@ -157,6 +158,8 @@ export default function ProjectsPage() {
   // 归档确认目标。
   const [archiveTarget, setArchiveTarget] = useState<ProjectRow | null>(null);
   const [archiving, setArchiving] = useState(false);
+  // 批量导出迁移包弹窗(条件渲染:挂载即按当前筛选结果默认全选)。
+  const [exportOpen, setExportOpen] = useState(false);
 
   // 当前用户(角色决定新建入口可见性)+ 负责人候选(仅管理员可拉取用户列表)。
   const [me, setMe] = useState<DialogCurrentUser | null>(null);
@@ -601,6 +604,16 @@ export default function ProjectsPage() {
             columnVisibility={columnVisibility}
             onToggle={toggleColumnVisibility}
           />
+          {/* 批量导出迁移包(§备份与迁移):与台账导出同权,所有登录用户可用。 */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setExportOpen(true)}
+            disabled={keywordFiltered.length === 0}
+          >
+            <Package className="size-4" />
+            导出迁移包
+          </Button>
         </div>
       </div>
 
@@ -709,6 +722,18 @@ export default function ProjectsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 批量导出迁移包:条件渲染,projects 为当前筛选结果(含归档开关语境)。 */}
+      {exportOpen ? (
+        <ExportMigrationPackagesDialog
+          projects={keywordFiltered.map((p) => ({
+            code: p.code,
+            name: p.name,
+            archivedAt: p.archivedAt,
+          }))}
+          onClose={() => setExportOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

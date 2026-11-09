@@ -4,10 +4,21 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { AlertTriangle, FolderSearch, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, FolderSearch, Package, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
+import { exportMigrationPackage } from '@/lib/api/migrationPackage';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -275,6 +286,27 @@ export default function ProjectDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [detailVersion, setDetailVersion] = useState(0);
 
+  // 导出迁移包(§备份与迁移):409 = 存在待审批单,弹确认后带参重发(等价 CLI --force)。
+  const [exporting, setExporting] = useState(false);
+  const [pendingItems, setPendingItems] = useState<string[] | null>(null);
+
+  const handleExportMigration = async (acknowledged: boolean) => {
+    setExporting(true);
+    try {
+      const result = await exportMigrationPackage(projectId, acknowledged);
+      if ('pending' in result) {
+        setPendingItems(result.pending);
+      } else {
+        setPendingItems(null);
+        toast.success('迁移包已开始下载');
+      }
+    } catch (e) {
+      if (e instanceof Error) toast.error(e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -339,14 +371,23 @@ export default function ProjectDetailPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold tracking-[-0.3px]">项目信息</h2>
         {project.archivedAt ? <Badge variant="secondary">已归档</Badge> : null}
-        {project.canEdit && !project.archivedAt ? (
-          <div className="flex gap-2">
+        <div className="flex gap-2">
+          {/* 迁移包导出与台账导出同权(project:view),所有登录用户可见。 */}
+          <Button
+            variant="outline"
+            onClick={() => void handleExportMigration(false)}
+            disabled={exporting}
+          >
+            <Package className="size-4" />
+            {exporting ? '导出中…' : '导出迁移包'}
+          </Button>
+          {project.canEdit && !project.archivedAt ? (
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil className="size-4" />
               编辑项目信息
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       {/* 描述网格:hairline 网格线,替代 antd Descriptions bordered */}
@@ -424,6 +465,39 @@ export default function ProjectDetailPage() {
           onSaved={() => setDetailVersion((v) => v + 1)}
         />
       ) : null}
+
+      {/* 导出迁移包:存在待审批单时的知情确认(与 CLI --force 同一守卫,仿归档确认弹窗) */}
+      <AlertDialog open={pendingItems !== null}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>项目存在待审批单据</AlertDialogTitle>
+            <AlertDialogDescription>
+              以下单据已提交待审批。确认导出将随迁移包一并带出,目标环境管理员可继续审批:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-sm">
+            {(pendingItems ?? []).map((item) => (
+              <li key={item} className="font-mono text-[13px]">
+                {item}
+              </li>
+            ))}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingItems(null)} disabled={exporting}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleExportMigration(true);
+              }}
+              disabled={exporting}
+            >
+              {exporting ? '导出中…' : '确认带出待审批单'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

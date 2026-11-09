@@ -13,7 +13,12 @@ import path from 'node:path';
 import { loadEnvConfig } from '@next/env';
 
 import { prisma } from '@/lib/prisma';
-import { exportPackage, MigrationError } from '@/server/services/migrationPackage.service';
+import {
+  exportPackage,
+  exportPackageFileName,
+  migrationPackageArchiveEntryName,
+  MigrationError,
+} from '@/server/services/migrationPackage.service';
 
 function usage(): never {
   console.error(
@@ -40,8 +45,6 @@ function parseArgs() {
   return { ref, all, force, outDir };
 }
 
-const dateTag = () => new Date().toISOString().slice(0, 10).replaceAll('-', '');
-
 async function exportOne(
   code: string,
   outDir: string,
@@ -52,8 +55,8 @@ async function exportOne(
   const file = path.join(
     outDir,
     dated
-      ? `migration-${pkg.project.code}-${dateTag()}.json`
-      : `migration-${pkg.project.code}.json`,
+      ? exportPackageFileName(pkg.project.code)
+      : migrationPackageArchiveEntryName(pkg.project.code),
   );
   await writeFile(file, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
   console.log(`✅ 已导出: ${file}`);
@@ -69,7 +72,9 @@ async function main() {
 
   if (args.all) {
     // 迁移包可分享、快照敏感,分目录存放(backups/migration/ vs backups/ 根)。
-    const outDir = args.outDir ?? path.join('backups', 'migration', dateTag());
+    const outDir =
+      args.outDir ??
+      path.join('backups', 'migration', new Date().toISOString().slice(0, 10).replaceAll('-', ''));
     await mkdir(outDir, { recursive: true });
     const projects = await prisma.project.findMany({
       select: { code: true },

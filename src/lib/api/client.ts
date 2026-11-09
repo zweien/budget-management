@@ -135,16 +135,18 @@ export async function fetchFile(path: string): Promise<FetchedFile> {
     }
     // 服务端错误仍以 JSON 返回(如 { error: '...' }),尽量解析出可读信息。
     let message = `请求失败 (${res.status})`;
+    let body: unknown = null;
     try {
       const ct = res.headers.get('Content-Type') ?? '';
       if (ct.includes('application/json')) {
-        const body = (await res.json()) as { error?: unknown };
-        if (body && typeof body.error === 'string') message = body.error;
+        body = await res.json();
+        const err = (body as { error?: unknown } | null)?.error;
+        if (typeof err === 'string') message = err;
       }
     } catch {
       // ignore parse error
     }
-    throw new Error(message);
+    throw new HttpFileError(message, res.status, body);
   }
 
   const blob = await res.blob();
@@ -152,6 +154,18 @@ export async function fetchFile(path: string): Promise<FetchedFile> {
     blob,
     filename: parseFilenameFromDisposition(res.headers.get('Content-Disposition')),
   };
+}
+
+/** fetchFile 的失败:带 HTTP 状态与解析后的 JSON 错误体(如迁移包导出 409 的 details 清单)。 */
+export class HttpFileError extends Error {
+  status: number;
+  body: unknown;
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = 'HttpFileError';
+    this.status = status;
+    this.body = body;
+  }
 }
 
 /** fetchFile 的返回:原始 blob + 服务端建议文件名(Content-Disposition 解析)。 */
@@ -173,12 +187,16 @@ export interface FetchedFile {
 export async function downloadFile(path: string, filename: string): Promise<void> {
   const { blob, filename: serverName } = await fetchFile(path);
   // 优先用响应头 Content-Disposition 里的文件名,回退到调用方传入的 filename。
-  const finalName = serverName ?? filename;
+  await saveBlob(blob, serverName ?? filename);
+}
+
+/** 把已取得的 blob 触发为浏览器下载(objectURL + 临时 <a>;downloadFile 与迁移包导出共用)。 */
+export async function saveBlob(blob: Blob, filename: string): Promise<void> {
   const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement('a');
     a.href = url;
-    a.download = finalName;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -188,9 +206,17 @@ export async function downloadFile(path: string, filename: string): Promise<void
   }
 }
 
-/** 解析 Content-Disposition: attachment; filename="xxx.xlsx" 中的文件名。 */
+/** 解析 Content-Disposition 中的文件名:优先 RFC 5987 filename*(支持中文),回退 filename="..."。 */
 function parseFilenameFromDisposition(header: string | null): string | null {
   if (!header) return null;
+  const star = /filename\*=(?:UTF-8|utf-8)''([^;]+)/i.exec(header);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // fallthrough 到 filename=
+    }
+  }
   const m = /filename="?([^";]+)"?/i.exec(header);
   return m ? m[1].trim() : null;
 }

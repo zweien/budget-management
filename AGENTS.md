@@ -87,7 +87,7 @@ npm run import-package -- <包文件> [--overwrite] [--owner <姓名|SSO sub>] [
 
 守卫:恢复遇非空库默认拒绝(`--force` 清库);导入同编号冲突默认拒绝,`--overwrite` 仅限目标项目**骨架态**(无业务记录/到账/导入批次),已有业务数据时**硬拒绝、无绕过**;导出遇 PENDING 单默认拒绝(`--force`);包/环境版本偏差默认拒绝(`--allow-skew`)。
 
-**红线:备份/恢复/导包不设任何 API/UI/MCP 入口,拒绝一切 Bearer 凭证调用——仅限管理员在服务器本机执行**(防 agent 自我备份外传凭证哈希,与凭证管理红线同款)。运维手册见 [docs/backup-restore.md](./docs/backup-restore.md)。
+**红线:快照备份/恢复/导入包不设任何 API/UI/MCP 入口,拒绝一切 Bearer 凭证调用——仅限管理员在服务器本机执行**(防 agent 自我备份外传凭证哈希,与凭证管理红线同款)。**唯一例外:迁移包「导出」开放 UI/API**(项目概览页单项目按钮 + 项目列表页批量弹窗;`project:view` 与台账导出同权,PENDING 守卫 409+确认放行;批量跨项目端点 `GET /api/export/migration-packages` 对指定项目范围凭证 403)——脱敏产物,数据面与台账导出同级。运维手册见 [docs/backup-restore.md](./docs/backup-restore.md)。
 
 ## 版本发布流程(确保版本号唯一)
 

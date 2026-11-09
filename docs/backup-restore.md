@@ -51,7 +51,12 @@ docker compose exec postgres psql -U budget -d budget -c 'DROP DATABASE budget_r
 
 ## 跨环境迁移项目
 
-源环境:
+导出有两类入口,产物同构:
+
+- **CLI**:服务器本机执行,适合脚本化/全量;
+- **UI**(0.37.0 起):项目概览页「导出迁移包」按钮(单项目);项目列表页「导出迁移包」弹窗(批量勾选,默认全选当前筛选结果,产出 zip:每项目一个 `migration-<编号>.json` + `manifest.json` 成功/跳过/失败清单)。存在待审批单时先弹确认(等价 CLI `--force`);权限与台账导出同权(`project:view`)。
+
+源环境(CLI):
 
 ```bash
 npm run export-package -- 617        # 按编号(或名称关键字)→ backups/migration/migration-617-<日期>.json
@@ -78,4 +83,4 @@ npm run import-package -- backups/migration-617-20261108.json --owner 张三
 
 ## 红线
 
-备份/恢复/导包**仅限管理员在服务器本机 CLI 执行**:不设 API/UI/MCP 入口,拒绝一切 Bearer 凭证调用——防止 coding agent 自我备份外传凭证哈希(与「凭证管理拒绝 Bearer」同款红线,见 AGENTS.md)。
+**快照备份 / 恢复 / 导入包仅限管理员在服务器本机 CLI 执行**:不设 API/UI/MCP 入口,拒绝一切 Bearer 凭证调用——防止 coding agent 自我备份外传凭证哈希(与「凭证管理拒绝 Bearer」同款红线,见 AGENTS.md)。唯一例外:迁移包**导出**开放 UI/API(脱敏产物,数据面与台账导出同级;批量跨项目端点对指定项目范围凭证 403)。

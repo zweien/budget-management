@@ -12,8 +12,9 @@
  * recalc-summary-budgets 的科目层口径与 0.01 阈值:一般项目漂移自动修复,
  * 包干制只校验年度层、不盲改项目层)。
  *
- * 本服务仅由管理员本机 CLI(export-package / import-package)与测试调用,
- * 不暴露任何 HTTP/MCP 入口(红线见 AGENTS.md)。
+ * 调用入口:迁移包**导出**经 HTTP 暴露(单项目/批量端点,project:view,与台账导出
+ * 同权;批量跨项目端点对指定项目范围凭证 403)并由 CLI 复用同一实现;**导入仍仅
+ * 管理员本机 CLI**,不设任何 HTTP/MCP 入口(红线见 AGENTS.md)。
  */
 import { readFile } from 'node:fs/promises';
 
@@ -193,6 +194,32 @@ export interface ExportPackageOptions {
   force?: boolean;
 }
 
+/** 导出核心接受的项目行(含负责人名字快照来源)。 */
+export type MigrationExportProjectRow = Prisma.ProjectGetPayload<{ include: { owner: true } }>;
+
+/** CLI 单项目产物名: migration-<编号>-<UTC日期>.json(两端点与 CLI 同名同构)。 */
+export function exportPackageFileName(code: string): string {
+  const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+  return `migration-${code}-${date}.json`;
+}
+
+/** 批量 zip 内的单项目条目名(无日期,与 CLI --all 目录内命名一致)。 */
+export function migrationPackageArchiveEntryName(code: string): string {
+  return `migration-${code}.json`;
+}
+
+/** 批量产物名: migration-packages-<UTC日期>.zip。 */
+export function migrationPackagesArchiveFileName(): string {
+  const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+  return `migration-packages-${date}.zip`;
+}
+
+/** Content-Disposition attachment 头:ASCII 兜底 + RFC 5987(与附件 zip 导出同款写法)。 */
+export function contentDispositionAttachment(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]+/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
 /** 按编号精确匹配或名称包含匹配解析项目;0/多命中均报错(同 export-project-budget 惯例)。 */
 export async function resolveProjectRef(projectRef: string) {
   const matches = await prisma.project.findMany({
@@ -217,6 +244,14 @@ export async function exportPackage(
   opts: ExportPackageOptions = {},
 ): Promise<MigrationPackage> {
   const project = await resolveProjectRef(projectRef);
+  return exportProjectPackage(project, opts);
+}
+
+/** 导出核心:接受已加载的项目行(含 owner),CLI 与 HTTP 端点共用;PENDING 守卫在内。 */
+export async function exportProjectPackage(
+  project: MigrationExportProjectRow,
+  opts: ExportPackageOptions = {},
+): Promise<MigrationPackage> {
   const projectId = project.id;
 
   const [
