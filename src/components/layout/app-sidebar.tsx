@@ -7,6 +7,7 @@ import {
   ChartColumn,
   ClipboardCheck,
   ClipboardPlus,
+  FileText,
   FolderKanban,
   Info,
   KeyRound,
@@ -31,6 +32,7 @@ const WORKSPACE_GROUP = {
     { href: '/records', label: '业务录入', icon: ClipboardPlus },
     { href: '/approvals', label: '审批中心', icon: ClipboardCheck },
     { href: '/statistics', label: '统计分析', icon: ChartColumn },
+    { href: '/reports', label: '经费报告', icon: FileText },
   ],
 } as const;
 

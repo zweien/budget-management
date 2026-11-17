@@ -65,6 +65,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.4.0",
     "decimal.js": "^10.6.0",
+    "docx": "^9.15.4",
     "exceljs": "^4.4.0",
     "file-viewer-copy-assets": "^2.4.0",
     "jose": "^6.2.8",
