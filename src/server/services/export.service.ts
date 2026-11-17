@@ -71,6 +71,7 @@ const exportRecordSelect = {
   status: true,
   isVoid: true,
   docNo: true,
+  voucherNo: true,
   handler: true,
   summary: true,
   remark: true,
@@ -388,6 +389,7 @@ export async function exportStatistics(
         '是否作废',
         '完成日期',
         '单据编号',
+        '凭证编号',
         '备注',
         '录入时间',
         '录入人',
@@ -451,13 +453,14 @@ async function exportRecordList(
       '金额',
       '状态',
       '单据编号',
+      '凭证编号',
       '经办人',
       '摘要',
       '备注',
       '录入人',
       '录入时间',
     ];
-    const widths = [24, 8, 22, 12, 12, 14, 10, 20, 10, 32, 28, 10, 17];
+    const widths = [24, 8, 22, 12, 12, 14, 10, 20, 16, 10, 32, 28, 10, 17];
     if (project) {
       sheet.mergeCells(1, 1, 1, headers.length - 1);
       sheet.getCell('A1').value = `${project.name} 业务记录(筛选结果)`;
@@ -480,6 +483,7 @@ async function exportRecordList(
         fromStored(rec.amount).toNumber(),
         rec.isVoid ? '已作废' : (STATUS_ENUM_TO_CN[rec.status] ?? rec.status),
         rec.docNo ?? '',
+        rec.voucherNo ?? '',
         rec.handler,
         rec.summary,
         rec.remark ?? '',
@@ -516,6 +520,7 @@ function statisticsRecordRow(
     rec.isVoid ? '是' : '否',
     rec.completedDate ? toIsoDate(rec.completedDate) : '',
     rec.docNo ?? '',
+    rec.voucherNo ?? '',
     rec.remark ?? '',
     toIsoDateTime(rec.enteredAt, tz?.enteredAtOffsetMinutes),
     rec.creatorName ?? '',

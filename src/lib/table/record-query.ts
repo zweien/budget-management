@@ -44,7 +44,7 @@ export function buildRecordQuery(
       const values = value as Array<string | number>;
       for (const item of values.length ? values : [VALUES_FILTER_NONE])
         params.append(key, String(item));
-    } else if (['summary', 'remark', 'docNo'].includes(id)) {
+    } else if (['summary', 'remark', 'docNo', 'voucherNo'].includes(id)) {
       params.set(id, String(value));
     } else if (id === 'amount') {
       const range = value as { min?: string; max?: string };

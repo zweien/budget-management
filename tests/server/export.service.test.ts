@@ -301,6 +301,7 @@ describe('export.service (integration, real PG)', () => {
     const listSheet = listWorkbook.worksheets[0];
     expect(listSheet.getRow(2).values).toContain('年度');
     expect(listSheet.getRow(2).values).toContain('单据编号');
+    expect(listSheet.getRow(2).values).toContain('凭证编号');
     expect(listSheet.getRow(3).values).toContain(200);
     expect(listSheet.getCell('A1').value).toContain(project.name);
     expect(listSheet.getCell('E3').numFmt).toBe('#,##0.00');
@@ -340,7 +341,9 @@ describe('export.service (integration, real PG)', () => {
     expect(sheet.rowCount).toBe(503);
     expect(sheet.getCell('E3').value).toBe(501);
     expect(sheet.getCell('E503').value).toBe(1);
-    expect(sheet.getCell('L3').value).toBe('2026-10-01 08:00');
+    // 凭证编号列插在单据编号(G)之后 → 录入时间由 L 顺移至 M;空值读回为 null。
+    expect(sheet.getCell('H3').value).toBeNull();
+    expect(sheet.getCell('M3').value).toBe('2026-10-01 08:00');
     const limit = env.MAX_EXPORT_ROWS;
     try {
       env.MAX_EXPORT_ROWS = 500;

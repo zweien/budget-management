@@ -82,6 +82,8 @@ export function parseRecordFilters(sp: URLSearchParams): CustomStatisticsFilters
   if (summary) filters.summary = summary;
   const docNo = sp.get('docNo');
   if (docNo) filters.docNo = docNo;
+  const voucherNo = sp.get('voucherNo');
+  if (voucherNo) filters.voucherNo = voucherNo;
 
   const enteredAtFrom = sp.get('enteredAtFrom');
   const entryTimeField = sp.get('entryTimeField');

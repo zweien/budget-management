@@ -72,6 +72,8 @@ export interface CustomStatisticsFilters {
   summary?: string;
   /** 单据编号(contains)。 */
   docNo?: string;
+  /** 记账凭证号(contains)。 */
+  voucherNo?: string;
   /** 仅看无完成日期。 */
   completedDateEmpty?: boolean;
   /** 页面展示的录入时间字段；缺省保留全局页的 createdAt 口径。 */
@@ -111,6 +113,7 @@ export const CUSTOM_SORT_FIELDS = {
   /** 录入时间(enteredAt 展示列)→ createdAt。 */
   enteredAt: 'createdAt',
   docNo: 'docNo',
+  voucherNo: 'voucherNo',
 } as const;
 export type CustomSortField = keyof typeof CUSTOM_SORT_FIELDS;
 
@@ -304,6 +307,7 @@ export async function prepareRecordSelection(
   if (filters.remark) where.remark = { contains: filters.remark, mode: 'insensitive' };
   if (filters.summary) where.summary = { contains: filters.summary, mode: 'insensitive' };
   if (filters.docNo) where.docNo = { contains: filters.docNo };
+  if (filters.voucherNo) where.voucherNo = { contains: filters.voucherNo };
   if (filters.businessDateFrom || filters.businessDateTo) {
     where.businessDate = {};
     if (filters.businessDateFrom) {
@@ -374,7 +378,7 @@ export async function prepareRecordSelection(
             ? { [filters.entryTimeField ?? 'createdAt']: sort.dir }
             : { [sort.field]: sort.dir };
     orderBy = [
-      ...(['remark', 'docNo', 'completedDate'].includes(sort.field)
+      ...(['remark', 'docNo', 'voucherNo', 'completedDate'].includes(sort.field)
         ? [
             {
               [sort.field]: { sort: sort.dir, nulls: 'last' },

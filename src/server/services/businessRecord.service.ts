@@ -35,6 +35,8 @@ export interface CreateRecordInput {
   status: BusinessStatus;
   /** 财务系统单据编号(非必填;个人结算单导入来源)。 */
   docNo?: string | null;
+  /** 记账凭证号(非必填;财务记账后补录,对账参考;导入不写)。 */
+  voucherNo?: string | null;
   remark?: string | null;
 }
 
@@ -50,6 +52,8 @@ export interface UpdateRecordInput {
   summary?: string;
   status?: BusinessStatus;
   docNo?: string | null;
+  /** 记账凭证号(传 null 清空;不唯一、不查重)。 */
+  voucherNo?: string | null;
   remark?: string | null;
 }
 
@@ -94,7 +98,6 @@ export interface RecordWithWarning {
   duplicateHints?: DuplicateConflict[];
 }
 
-/** 把 BusinessRecord 行序列化为快照对象(用于 history before/after 与审计)。 */
 /** 单据编号规范化:trim + 长度上限;空串归一为 null。 */
 function normalizeDocNo(v: string | null | undefined): string | null {
   const s = v?.trim() ?? '';
@@ -105,6 +108,17 @@ function normalizeDocNo(v: string | null | undefined): string | null {
   return s;
 }
 
+/** 记账凭证号规范化:与单据编号同规则(trim、空串归 null、64 字符上限)。 */
+function normalizeVoucherNo(v: string | null | undefined): string | null {
+  const s = v?.trim() ?? '';
+  if (!s) return null;
+  if (s.length > 64) {
+    throw new HTTPError(422, '凭证编号过长(最多 64 字符)');
+  }
+  return s;
+}
+
+/** 把 BusinessRecord 行序列化为快照对象(用于 history before/after 与审计)。 */
 function snapshotRecord(row: BusinessRecord): Record<string, unknown> {
   return snapshotRow({
     id: row.id,
@@ -118,6 +132,7 @@ function snapshotRecord(row: BusinessRecord): Record<string, unknown> {
     summary: row.summary,
     status: row.status,
     docNo: row.docNo,
+    voucherNo: row.voucherNo,
     remark: row.remark,
     isVoid: row.isVoid,
     voidReason: row.voidReason,
@@ -365,6 +380,7 @@ export async function createRecord(
           summary: input.summary.trim(),
           status: input.status,
           docNo,
+          voucherNo: normalizeVoucherNo(input.voucherNo),
           remark: input.remark ?? null,
           isVoid: false,
           createdById: user.id,
@@ -595,6 +611,8 @@ export async function updateRecord(
   if (input.handler !== undefined) data.handler = input.handler.trim();
   if (input.summary !== undefined) data.summary = input.summary.trim();
   if (input.docNo !== undefined) data.docNo = newDocNo;
+  // 凭证号不参与查重:直接归一写入,可清空(null)。
+  if (input.voucherNo !== undefined) data.voucherNo = normalizeVoucherNo(input.voucherNo);
   if (input.remark !== undefined) data.remark = input.remark;
 
   const after = await prisma

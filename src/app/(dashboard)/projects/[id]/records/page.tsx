@@ -154,6 +154,8 @@ interface BusinessRecordRow {
   summary: string;
   status: BusinessStatus;
   docNo: string | null;
+  /** 记账凭证号(财务记账后补录,对账参考;不唯一、导入不写)。 */
+  voucherNo: string | null;
   remark: string | null;
   /** 录入人姓名(服务端随记录带出;0.14 筛选扩展)。 */
   creatorName: string | null;
@@ -226,6 +228,7 @@ const recordSchema = z
     summary: z.string().trim().min(1, '请输入摘要').max(200),
     status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
     docNo: z.string().trim().max(64, '单据编号过长'),
+    voucherNo: z.string().trim().max(64, '凭证编号过长'),
     remark: z.string().trim().max(500),
   })
   .superRefine((v, ctx) => {
@@ -239,6 +242,9 @@ const recordSchema = z
   });
 
 type RecordFormValues = z.infer<typeof recordSchema>;
+
+/** 凭证编号列默认隐藏:存量与导入记录该字段为空,不占默认布局;列设置可自行打开。 */
+const DEFAULT_HIDDEN_COLUMNS: readonly string[] = ['voucherNo'];
 
 /** Select 的"全部"哨兵值(radix SelectItem 不允许空串)。 */
 
@@ -332,6 +338,7 @@ function BusinessRecordsPageInner() {
   // 列显隐偏好(localStorage 持久化,与全局录入页同款交互)。
   const [columnVisibility, toggleColumnVisibility] = useStoredColumnVisibility(
     'ui.records.project.columns',
+    DEFAULT_HIDDEN_COLUMNS,
   );
   // 按科目层级打包附件 Dialog(Task 5 集成)。
   const [packageOpen, setPackageOpen] = useState(false);
@@ -349,6 +356,7 @@ function BusinessRecordsPageInner() {
       handler: '',
       summary: '',
       docNo: '',
+      voucherNo: '',
       remark: '',
     },
   });
@@ -483,6 +491,7 @@ function BusinessRecordsPageInner() {
       summary: '',
       status: 'PLACEHOLDER',
       docNo: '',
+      voucherNo: '',
       remark: '',
     });
     setFormOpen(true);
@@ -503,6 +512,7 @@ function BusinessRecordsPageInner() {
         summary: row.summary,
         status: row.status,
         docNo: row.docNo ?? '',
+        voucherNo: row.voucherNo ?? '',
         remark: row.remark ?? '',
       });
       setFormOpen(true);
@@ -527,6 +537,7 @@ function BusinessRecordsPageInner() {
         summary: values.summary,
         status: values.status,
         docNo: values.docNo || null,
+        voucherNo: values.voucherNo || null,
         remark: values.remark || null,
       };
       setSubmitting(true);
@@ -599,6 +610,7 @@ function BusinessRecordsPageInner() {
               summary: '',
               status: values.status,
               docNo: '',
+              voucherNo: '',
               remark: '',
             });
             form.setFocus('amount');
@@ -1085,6 +1097,29 @@ function BusinessRecordsPageInner() {
         filterFn: textContains<BusinessRecordRow>(),
       },
       {
+        id: 'voucherNo',
+        // 与单据编号同款:null 归一 undefined 走 sortUndefined,空值双向恒最后。
+        accessorFn: (row) => row.voucherNo ?? undefined,
+        sortUndefined: 'last',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="凭证编号" type="text" sortable />
+        ),
+        cell: ({ row }) =>
+          row.original.voucherNo ? (
+            <span
+              className="block max-w-36 truncate font-mono text-xs"
+              title={row.original.voucherNo}
+            >
+              {row.original.voucherNo}
+            </span>
+          ) : (
+            <span className="text-mute">—</span>
+          ),
+        sortingFn: (a, b, id) =>
+          (a.getValue<string>(id) ?? '').localeCompare(b.getValue<string>(id) ?? ''),
+        filterFn: textContains<BusinessRecordRow>(),
+      },
+      {
         id: 'summary',
         accessorKey: 'summary',
         header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
@@ -1308,6 +1343,7 @@ function BusinessRecordsPageInner() {
               { id: 'status', label: '状态' },
               { id: 'handler', label: '经办人' },
               { id: 'docNo', label: '单据编号' },
+              { id: 'voucherNo', label: '凭证编号' },
               { id: 'summary', label: '摘要' },
               { id: 'remark', label: '备注' },
               { id: 'enteredAt', label: '录入时间' },
@@ -1332,6 +1368,7 @@ function BusinessRecordsPageInner() {
           status: '状态',
           handler: '经办人',
           docNo: '单据编号',
+          voucherNo: '凭证编号',
           summary: '摘要',
           remark: '备注',
           creatorName: '录入人',
@@ -1621,6 +1658,19 @@ function BusinessRecordsPageInner() {
                     <FormLabel>单据编号(可选)</FormLabel>
                     <FormControl>
                       <Input maxLength={64} placeholder="财务系统单据编号" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="voucherNo"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>凭证编号(可选)</FormLabel>
+                    <FormControl>
+                      <Input maxLength={64} placeholder="财务记账凭证号" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

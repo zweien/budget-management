@@ -365,6 +365,8 @@ model BusinessRecord {
   status        BusinessStatus
   // 财务系统单据编号(个人结算单导入来源;手动补录可填)。非必填、不唯一。
   docNo         String?
+  // 记账凭证号(财务记账后补录,对账参考)。可空、不唯一、不参与查重;导入不写。
+  voucherNo     String?
   remark        String?
   isVoid        Boolean         @default(false) @map("is_void")
   voidReason    String?         @map("void_reason")

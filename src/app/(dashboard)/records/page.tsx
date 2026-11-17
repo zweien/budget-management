@@ -109,6 +109,8 @@ interface UnifiedRecordRow {
   summary: string;
   remark: string | null;
   docNo: string | null;
+  /** 记账凭证号(财务记账后补录,对账参考;不唯一、导入不写)。 */
+  voucherNo: string | null;
   creatorName: string | null;
   isVoid: boolean;
   createdAt: string;
@@ -180,6 +182,7 @@ const HEAD_WIDTH: Record<string, string> = {
   status: 'w-28',
   handler: 'w-20',
   docNo: 'w-52',
+  voucherNo: 'w-52',
   summary: 'w-[15%]',
   remark: 'w-[11%]',
   enteredAt: 'w-32',
@@ -201,6 +204,7 @@ const recordSchema = z
     /** 完成日期(选填);与申请日期都填时不得早于申请日期。 */
     completedDate: z.date().optional(),
     docNo: z.string().trim().max(64, '单据编号过长'),
+    voucherNo: z.string().trim().max(64, '凭证编号过长'),
     status: z.enum(BUSINESS_STATUSES, { message: '请选择状态' }),
     handler: z.string().trim().min(1, '请输入经办人'),
     summary: z.string().trim().min(1, '请输入摘要'),
@@ -216,6 +220,9 @@ const recordSchema = z
     }
   });
 type RecordFormValues = z.infer<typeof recordSchema>;
+
+/** 凭证编号列默认隐藏:存量与导入记录该字段为空,不占默认布局;列设置可自行打开。 */
+const DEFAULT_HIDDEN_COLUMNS: readonly string[] = ['voucherNo'];
 
 // ============================================================
 // 页面
@@ -239,6 +246,7 @@ function UnifiedRecordsPageInner() {
   // 列显隐偏好(localStorage 持久化,与项目记录页同款交互)。
   const [columnVisibility, toggleColumnVisibility] = useStoredColumnVisibility(
     'ui.records.global.columns',
+    DEFAULT_HIDDEN_COLUMNS,
   );
   // 批量作废(勾选行按项目分组调用;仅「我可录入」范围渲染勾选列)。
   // 选择时记录 id → projectId:跨页/改筛选后仍可成组提交(codex P2)。
@@ -336,9 +344,10 @@ function UnifiedRecordsPageInner() {
       subjectId: '',
       amount: '',
       businessDate: undefined, // 申请日期默认留空,需要时再填;提交留空由服务端默认当天
-      // docNo 录入表单不采集(编辑弹窗才有该字段),但 schema 为必填 string:
+      // docNo/voucherNo 录入表单不采集(编辑弹窗才有该字段),但 schema 为必填 string:
       // 缺省时 undefined 过不了校验,且字段未挂载错误无处显示,提交被静默拦截。
       docNo: '',
+      voucherNo: '',
       status: 'PLACEHOLDER',
       handler: '',
       summary: '',
@@ -683,6 +692,21 @@ function UnifiedRecordsPageInner() {
         ),
       },
       {
+        id: 'voucherNo',
+        accessorKey: 'voucherNo',
+        header: ({ column }) => (
+          <HeaderFilter column={column} title="凭证编号" type="text" sortable />
+        ),
+        cell: ({ row }) => (
+          <span
+            className="block whitespace-nowrap font-mono text-xs"
+            title={row.original.voucherNo ?? undefined}
+          >
+            {row.original.voucherNo || '—'}
+          </span>
+        ),
+      },
+      {
         id: 'summary',
         accessorKey: 'summary',
         header: ({ column }) => <HeaderFilter column={column} title="摘要" type="text" sortable />,
@@ -945,6 +969,7 @@ function UnifiedRecordsPageInner() {
           businessDate: values.businessDate ? format(values.businessDate, 'yyyy-MM-dd') : '',
           completedDate: values.completedDate ? format(values.completedDate, 'yyyy-MM-dd') : null,
           docNo: values.docNo || null,
+          voucherNo: values.voucherNo || null,
           remark: values.remark || null,
         }),
       });
@@ -977,6 +1002,7 @@ function UnifiedRecordsPageInner() {
       businessDate: new Date(row.businessDate),
       completedDate: row.completedDate ? new Date(row.completedDate) : undefined,
       docNo: row.docNo ?? '',
+      voucherNo: row.voucherNo ?? '',
       status: row.status,
       handler: row.handler,
       summary: row.summary,
@@ -997,6 +1023,7 @@ function UnifiedRecordsPageInner() {
           businessDate: values.businessDate ? format(values.businessDate, 'yyyy-MM-dd') : '',
           completedDate: values.completedDate ? format(values.completedDate, 'yyyy-MM-dd') : null,
           docNo: values.docNo || null,
+          voucherNo: values.voucherNo || null,
           remark: values.remark || null,
         }),
       });
@@ -1306,6 +1333,7 @@ function UnifiedRecordsPageInner() {
                 { id: 'status', label: '状态' },
                 { id: 'handler', label: '经办人' },
                 { id: 'docNo', label: '单据编号' },
+                { id: 'voucherNo', label: '凭证编号' },
                 { id: 'summary', label: '摘要' },
                 { id: 'remark', label: '备注' },
                 { id: 'enteredAt', label: '录入时间' },
@@ -1332,6 +1360,7 @@ function UnifiedRecordsPageInner() {
             summary: '摘要',
             remark: '备注',
             docNo: '单据编号',
+            voucherNo: '凭证编号',
             enteredAt: '录入时间',
             completedDate: '完成日期',
             creatorName: '录入人',
@@ -1521,6 +1550,19 @@ function UnifiedRecordsPageInner() {
                         <FormLabel>单据编号(可选)</FormLabel>
                         <FormControl>
                           <Input maxLength={64} placeholder="财务系统单据编号" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={editForm.control}
+                    name="voucherNo"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>凭证编号(可选)</FormLabel>
+                        <FormControl>
+                          <Input maxLength={64} placeholder="财务记账凭证号" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>

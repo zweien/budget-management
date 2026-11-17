@@ -188,6 +188,8 @@ interface CustomRecord {
   status: BusinessStatus;
   isVoid: boolean;
   docNo: string | null;
+  /** 记账凭证号(财务记账后补录,对账参考;不唯一、导入不写)。 */
+  voucherNo: string | null;
   remark: string | null;
   subject: { id: string; code: string; name: string };
   project: { id: string; code: string; name: string };
@@ -219,12 +221,16 @@ const RECORD_COLUMNS: ColumnSettingItem[] = [
   { id: 'status', label: '状态' },
   { id: 'handler', label: '经办人' },
   { id: 'docNo', label: '单据编号' },
+  { id: 'voucherNo', label: '凭证编号' },
   { id: 'summary', label: '摘要' },
   { id: 'remark', label: '备注' },
   { id: 'enteredAt', label: '录入时间' },
   { id: 'creatorName', label: '录入人' },
   { id: 'attachments', label: '附件' },
 ];
+
+/** 凭证编号列默认隐藏:存量与导入记录该字段为空,不占默认布局;列设置可自行打开。 */
+const DEFAULT_HIDDEN_COLUMNS: readonly string[] = ['voucherNo'];
 
 /** 分页条可选项(与业务录入页一致)。 */
 const PAGE_SIZES = [50, 100, 200];
@@ -274,7 +280,11 @@ function CustomStatisticsTab() {
   const reqSeqRef = useRef(0);
 
   // 列显隐偏好(localStorage 持久化,与录入页/项目列表页同款交互)。
-  const [columnVisibility, toggleColumn] = useStoredColumnVisibility('ui.statistics.columns');
+  // 凭证编号列默认隐藏(存量与导入记录为空),列设置可开。
+  const [columnVisibility, toggleColumn] = useStoredColumnVisibility(
+    'ui.statistics.columns',
+    DEFAULT_HIDDEN_COLUMNS,
+  );
   const colVisible = (id: string) => columnVisibility[id] !== false;
   const visibleColumnCount = RECORD_COLUMNS.filter((c) => colVisible(c.id)).length;
 
@@ -570,6 +580,7 @@ function CustomStatisticsTab() {
               {colVisible('status') ? <TableHead className="w-32">状态</TableHead> : null}
               {colVisible('handler') ? <TableHead className="w-24">经办人</TableHead> : null}
               {colVisible('docNo') ? <TableHead className="w-32">单据编号</TableHead> : null}
+              {colVisible('voucherNo') ? <TableHead className="w-32">凭证编号</TableHead> : null}
               {colVisible('summary') ? <TableHead className="max-w-40">摘要</TableHead> : null}
               {colVisible('remark') ? <TableHead className="max-w-32">备注</TableHead> : null}
               {colVisible('enteredAt') ? <TableHead className="w-36">录入时间</TableHead> : null}
@@ -651,6 +662,16 @@ function CustomStatisticsTab() {
                         title={r.docNo ?? undefined}
                       >
                         {r.docNo || '—'}
+                      </span>
+                    </TableCell>
+                  ) : null}
+                  {colVisible('voucherNo') ? (
+                    <TableCell>
+                      <span
+                        className="block max-w-32 truncate font-mono text-xs"
+                        title={r.voucherNo ?? undefined}
+                      >
+                        {r.voucherNo || '—'}
                       </span>
                     </TableCell>
                   ) : null}

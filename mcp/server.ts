@@ -355,6 +355,11 @@ server.tool(
     summary: z.string(),
     status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID']),
     docNo: z.string().nullable().optional().describe('财务系统单据编号,可空'),
+    voucherNo: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('记账凭证号(财务记账后补录,对账参考),可空、不查重'),
     remark: z.string().nullable().optional(),
   },
   async ({ projectId, ...body }) =>
@@ -383,6 +388,7 @@ server.tool(
     summary: z.string().optional(),
     status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID']).optional(),
     docNo: z.string().nullable().optional(),
+    voucherNo: z.string().nullable().optional().describe('记账凭证号,可空、不查重'),
     remark: z.string().nullable().optional(),
   },
   async ({ projectId, recordId, ...body }) =>

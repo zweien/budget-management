@@ -538,6 +538,84 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(kept.record.handler).toBe('新经办人');
   });
 
+  it('createRecord/updateRecord: voucherNo 记账凭证号——可空、trim、超长 422、同号不查重、可改可清空、history 留痕', async () => {
+    const { project, leafA } = await seedApprovedProject('VOUCHER');
+    const base = {
+      budgetYear: 2026,
+      subjectId: leafA.id,
+      handler: '经办人A',
+      status: BusinessStatus.PLACEHOLDER,
+    };
+
+    // 1) 创建带凭证号:trim 生效;空串归一为 null。
+    const r1 = await createRecord(
+      project.id,
+      {
+        ...base,
+        amount: '10.00',
+        businessDate: '2026-06-01',
+        summary: '凭证号记录',
+        voucherNo: '  记-0001  ',
+      },
+      adminUser(),
+    );
+    expect(r1.record.voucherNo).toBe('记-0001');
+    const r2 = await createRecord(
+      project.id,
+      {
+        ...base,
+        amount: '20.00',
+        businessDate: '2026-06-02',
+        summary: '无凭证号记录',
+        voucherNo: '   ',
+      },
+      adminUser(),
+    );
+    expect(r2.record.voucherNo).toBeNull();
+
+    // 2) 同凭证号再建一张 → 不查重、正常保存(一张凭证可含多笔)。
+    const r3 = await createRecord(
+      project.id,
+      {
+        ...base,
+        amount: '30.00',
+        businessDate: '2026-06-03',
+        summary: '同凭证号另一笔',
+        voucherNo: '记-0001',
+      },
+      adminUser(),
+    );
+    expect(r3.record.voucherNo).toBe('记-0001');
+
+    // 3) 超长(>64)→ 422。
+    await expect(
+      createRecord(
+        project.id,
+        {
+          ...base,
+          amount: '40.00',
+          businessDate: '2026-06-04',
+          summary: '超长凭证号',
+          voucherNo: 'V'.repeat(65),
+        },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({ status: 422 });
+
+    // 4) 更新:补录/改号/清空(null);history before/after 快照含 voucherNo。
+    const upd = await updateRecord(r2.record.id, { voucherNo: '记-0002' }, adminUser());
+    expect(upd.record.voucherNo).toBe('记-0002');
+    const cleared = await updateRecord(r2.record.id, { voucherNo: null }, adminUser());
+    expect(cleared.record.voucherNo).toBeNull();
+
+    const history = await prisma.businessRecordHistory.findFirstOrThrow({
+      where: { businessRecordId: r2.record.id, action: 'update' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect((history.beforeData as Record<string, unknown>).voucherNo).toBe('记-0002');
+    expect((history.afterData as Record<string, unknown>).voucherNo).toBeNull();
+  });
+
   it('createRecord: 非叶科目 → HTTPError 422', async () => {
     const { project, root } = await seedApprovedProject('NONLEAF');
 
