@@ -526,6 +526,8 @@ model RecordAttachment {
   fileName      String   @map("file_name")
   contentType   String   @map("content_type")
   sizeBytes     Int      @map("size_bytes")
+  // 内容指纹(SHA-256 hex):同记录下内容相同即视为重复跳过(CONTEXT.md「附件内容去重」)。
+  contentHash   String   @map("content_hash")
   data          Bytes
   uploadedById  String   @map("uploaded_by") @db.Uuid
   createdAt     DateTime @default(now()) @map("created_at")

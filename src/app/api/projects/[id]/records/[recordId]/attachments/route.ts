@@ -7,8 +7,8 @@ import { createAttachment, listAttachments } from '@/server/services/recordAttac
 
 /**
  * POST /api/projects/:id/records/:recordId/attachments — 上传单个报销凭证附件。
- * 接受 multipart/form-data(file 字段)。
- * 权限/校验/审计在服务层。
+ * 接受 multipart/form-data(file 字段;可选 via 字段=上传来源标记,仅入审计)。
+ * 权限/校验/审计在服务层。内容重复(同记录同内容)→ 200 { duplicate: true, existing }。
  */
 export const POST = withRoute(
   async (req: NextRequest, { params }: { params: Promise<{ id: string; recordId: string }> }) => {
@@ -24,13 +24,19 @@ export const POST = withRoute(
     if (!(file instanceof File)) {
       return NextResponse.json({ error: '缺少上传文件(file 字段)' }, { status: 400 });
     }
+    const viaRaw = form.get('via');
+    const via = typeof viaRaw === 'string' && viaRaw.length > 0 ? viaRaw.slice(0, 32) : undefined;
     const buffer = Buffer.from(await file.arrayBuffer());
-    const meta = await createAttachment(
+    const outcome = await createAttachment(
       recordId,
       { name: file.name, type: file.type || 'application/octet-stream', size: file.size, buffer },
       user,
+      via ? { via } : undefined,
     );
-    return NextResponse.json(meta, { status: 201 });
+    if (outcome.result === 'duplicate') {
+      return NextResponse.json({ duplicate: true, existing: outcome.duplicateOf }, { status: 200 });
+    }
+    return NextResponse.json(outcome.meta, { status: 201 });
   },
 );
 

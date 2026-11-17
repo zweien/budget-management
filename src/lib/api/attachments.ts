@@ -39,16 +39,25 @@ export async function listAttachments(
   return data.attachments;
 }
 
-/** 上传单个附件(multipart)。失败抛 Error(message 为服务端 error 文案)。 */
+/** 上传结果:created=新入库;duplicate=同记录已有同内容附件,服务端跳过(附件内容去重)。 */
+export type AttachmentUploadOutcome =
+  { status: 'created'; meta: AttachmentMeta } | { status: 'duplicate'; existing: AttachmentMeta };
+
+/**
+ * 上传单个附件(multipart)。失败抛 Error(message 为服务端 error 文案)。
+ * @param opts.via 上传来源标记(批量附件导入传 'docno-batch'),仅写入审计溯源。
+ */
 export async function uploadAttachment(
   projectId: string,
   ownerId: string,
   file: File,
   kind: AttachmentOwnerKind = 'record',
-): Promise<AttachmentMeta> {
+  opts?: { via?: string },
+): Promise<AttachmentUploadOutcome> {
   const mockUserId = await bootstrapMockUser();
   const form = new FormData();
   form.append('file', file);
+  if (opts?.via) form.append('via', opts.via);
   const res = await fetch(ownerBase(projectId, ownerId, kind), {
     method: 'POST',
     headers: mockUserId ? { 'x-mock-user-id': mockUserId } : {},
@@ -63,7 +72,49 @@ export async function uploadAttachment(
         : `上传失败 (${res.status})`;
     throw new Error(msg);
   }
-  return body as AttachmentMeta;
+  // 201 = 新入库(meta);200 = 内容重复跳过({ duplicate, existing })。
+  return res.status === 200 && body && typeof body === 'object' && 'duplicate' in body
+    ? { status: 'duplicate', existing: (body as { existing: AttachmentMeta }).existing }
+    : { status: 'created', meta: body as AttachmentMeta };
+}
+
+/** 批量附件导入·匹配预览(单文件结果;与 attachmentMatch.service 的返回同构)。 */
+export interface AttachmentMatchCandidate {
+  recordId: string;
+  projectId: string;
+  projectName: string;
+  docNo: string;
+  summary: string;
+  amount: string;
+  businessDate: string;
+  attachmentCount: number;
+  duplicate: boolean;
+  duplicateOfFileName?: string;
+}
+
+export type AttachmentMatchFileResult =
+  | {
+      name: string;
+      status: 'matched';
+      record: AttachmentMatchCandidate;
+      duplicate: boolean;
+      duplicateOfFileName?: string;
+    }
+  | { name: string; status: 'ambiguous'; candidates: AttachmentMatchCandidate[] }
+  | { name: string; status: 'unmatched'; reason: 'no-record' | 'void-only' | 'no-permission' };
+
+/**
+ * 批量附件导入的匹配预览:只提交文件名(+可选 SHA-256 hex),不提交文件字节。
+ * @param projectId 项目内入口传项目上下文;统一入口(跨项目)不传。
+ */
+export async function matchAttachmentPreview(
+  files: Array<{ name: string; contentHash?: string }>,
+  projectId?: string,
+): Promise<{ files: AttachmentMatchFileResult[] }> {
+  const path = projectId
+    ? `/api/projects/${projectId}/attachments/match-preview`
+    : '/api/attachments/match-preview';
+  return apiFetch(path, { method: 'POST', body: JSON.stringify({ files }) });
 }
 
 /** 删除单个附件。 */

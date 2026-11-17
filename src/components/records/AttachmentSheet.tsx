@@ -126,14 +126,20 @@ export function AttachmentSheet({
     let fallbackCount = countRef.current;
     for (const file of arr) {
       try {
-        const meta = await uploadAttachment(projectId, owner.id, file, owner.kind);
+        const outcome = await uploadAttachment(projectId, owner.id, file, owner.kind);
+        // 同记录已有同内容附件(附件内容去重):服务端跳过,提示后不进列表。
+        if (outcome.status === 'duplicate') {
+          setPending((prev) => prev.map((p) => (p.file === file ? { ...p, status: 'done' } : p)));
+          toast.info(`「${file.name}」与已有附件「${outcome.existing.fileName}」内容相同,已跳过`);
+          continue;
+        }
         setPending((prev) => prev.map((p) => (p.file === file ? { ...p, status: 'done' } : p)));
         if (activeRecordIdRef.current !== owner.id) {
           fallbackCount += 1;
           onChanged?.(owner.id, fallbackCount);
           continue;
         }
-        setItems((prev) => [...prev, meta]);
+        setItems((prev) => [...prev, outcome.meta]);
         countRef.current += 1;
         onChanged?.(owner.id, countRef.current);
       } catch (e) {

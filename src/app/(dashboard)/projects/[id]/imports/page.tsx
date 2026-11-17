@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Download, FileSpreadsheet, Inbox } from 'lucide-react';
+import { Download, FileSpreadsheet, FileStack, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
@@ -39,6 +39,7 @@ import {
   SettlementImportPreview,
   type SettlementBatchData,
 } from '@/components/records/settlement-import-preview';
+import { BatchAttachmentImportDialog } from '@/components/records/BatchAttachmentImportDialog';
 
 /** §10 预览页一行(对应 GET /imports/:batchId 返回的三分组项)。 */
 interface PreviewRow {
@@ -329,6 +330,8 @@ function ImportPageInner() {
   const [batches, setBatches] = useState<BatchListItem[] | null>(null);
   // 待删除批次(pending;已确认批次不可删)。
   const [deleteTarget, setDeleteTarget] = useState<BatchListItem | null>(null);
+  // 批量附件导入(项目内,按单据编号匹配)
+  const [batchAttachOpen, setBatchAttachOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   // 编辑权门控:undefined=未加载;false=只读(隐藏上传/确认入口)。
   const [canEdit, setCanEdit] = useState<boolean | undefined>(undefined);
@@ -813,6 +816,30 @@ function ImportPageInner() {
           }}
         />
       </label>
+
+      {/* 批量上传附件:按单据编号前缀匹配挂到本项目既有记录(独立于 xlsx 导入)。 */}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">批量上传附件(按单据编号匹配)</p>
+            <p className="mt-1 text-xs text-mute">
+              文件名以单据编号开头(如 TYBX…_01_说明.pdf)即可挂到本项目对应业务记录;
+              同号多文件全挂同一条记录;与已有附件内容相同的自动跳过。跨项目的附件请用统一导入页入口。
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => setBatchAttachOpen(true)}>
+            <FileStack className="mr-1.5 size-4" />
+            批量上传附件
+          </Button>
+        </div>
+      </Card>
+
+      <BatchAttachmentImportDialog
+        open={batchAttachOpen}
+        onOpenChange={setBatchAttachOpen}
+        projectId={projectId}
+      />
+
       {/* 删除未导入批次确认 */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

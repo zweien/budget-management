@@ -111,7 +111,7 @@ describe('recordAttachment.service (integration, real PG)', () => {
   });
 
   /** helper:建项目 + 编制 + 提交 + 审批生效 → 建业务记录 → 返回 { project, record }。 */
-  async function seedRecord(suffix: string) {
+  async function seedRecord(suffix: string, docNo?: string) {
     const code = `ATT-${suffix}-${uuidv7().slice(0, 8)}`;
     const project = await createProject({ code, name: `att ${suffix}` }, adminUser());
     createdProjectIds.push(project.id);
@@ -135,6 +135,7 @@ describe('recordAttachment.service (integration, real PG)', () => {
         handler: '张三',
         summary: `附件测试-${suffix}`,
         status: 'PLACEHOLDER',
+        ...(docNo ? { docNo } : {}),
       },
       adminUser(),
     );
@@ -143,12 +144,20 @@ describe('recordAttachment.service (integration, real PG)', () => {
 
   const samplePdf = (size = 100): Buffer => Buffer.alloc(size, 0x25); // %
 
+  /** 窄化 CreateAttachmentResult:断言 created 并取出 meta。 */
+  function asCreated(outcome: Awaited<ReturnType<typeof createAttachment>>) {
+    if (outcome.result !== 'created') throw new Error(`期望 created,实际 ${outcome.result}`);
+    return outcome.meta;
+  }
+
   it('createAttachment: 成功;listAttachments 不含 data;审计同事务', async () => {
     const { record } = await seedRecord('CREATE');
-    const meta = await createAttachment(
-      record.id,
-      { name: '发票.pdf', type: 'application/pdf', size: 100, buffer: samplePdf() },
-      adminUser(),
+    const meta = asCreated(
+      await createAttachment(
+        record.id,
+        { name: '发票.pdf', type: 'application/pdf', size: 100, buffer: samplePdf() },
+        adminUser(),
+      ),
     );
     expect(meta.fileName).toBe('发票.pdf');
     expect(meta.sizeBytes).toBe(100);
@@ -219,14 +228,115 @@ describe('recordAttachment.service (integration, real PG)', () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it('内容去重:同记录同内容再传 → duplicate,不新增行、不写第二条上传审计', async () => {
+    const { record } = await seedRecord('DEDUP');
+    const buf = Buffer.from('DEDUP-CONTENT');
+    const first = asCreated(
+      await createAttachment(
+        record.id,
+        { name: 'a.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+        adminUser(),
+      ),
+    );
+    // 同内容、不同文件名(如浏览器重复下载的 " (1)" 副本)→ 仍视为重复。
+    const second = await createAttachment(
+      record.id,
+      { name: 'a (1).pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+      adminUser(),
+    );
+    expect(second.result).toBe('duplicate');
+    if (second.result === 'duplicate') {
+      expect(second.duplicateOf.id).toBe(first.id);
+    }
+    // 删除后同内容可重传(重传场景)。
+    await deleteAttachment(first.id, record.id, adminUser());
+    const again = await createAttachment(
+      record.id,
+      { name: 'a.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+      adminUser(),
+    );
+    expect(again.result).toBe('created');
+
+    const rows = await prisma.recordAttachment.findMany({
+      where: { recordId: record.id },
+      select: { fileName: true, contentHash: true },
+    });
+    expect(rows).toHaveLength(1);
+    // 期望值来自 PG 的 encode(sha256('DEDUP-CONTENT'),'hex'),独立于服务端实现。
+    expect(rows[0].contentHash).toBe(
+      '00e7f0ab16f5d687c27c82250f65d859ad349a820f1f9c9cf6bd2399cee340b9',
+    );
+    // 全程两次 created 各留一条 upload 审计,duplicate 不留审计。
+    const uploadCount = await prisma.auditLog.findMany({
+      where: {
+        action: 'record_attachment_upload',
+        afterData: { path: ['fileName'], equals: 'a.pdf' },
+      },
+      select: { objectId: true },
+    });
+    expect(uploadCount).toHaveLength(2);
+  });
+
+  it('内容去重:同名不同内容照传(重名共存);跨记录同内容不去重', async () => {
+    const { record } = await seedRecord('DEDUP-NAME');
+    const again = await createAttachment(
+      record.id,
+      { name: 'same.pdf', type: 'application/pdf', size: 3, buffer: Buffer.from('PDF') },
+      adminUser(),
+    );
+    expect(again.result).toBe('created');
+    const sameNameDiffContent = await createAttachment(
+      record.id,
+      { name: 'same.pdf', type: 'application/pdf', size: 4, buffer: Buffer.from('PDF2') },
+      adminUser(),
+    );
+    expect(sameNameDiffContent.result).toBe('created');
+
+    // 另一条记录上传相同内容 → 合法,不跨记录去重。
+    const { record: other } = await seedRecord('DEDUP-XREC');
+    const cross = await createAttachment(
+      other.id,
+      { name: 'other.pdf', type: 'application/pdf', size: 3, buffer: Buffer.from('PDF') },
+      adminUser(),
+    );
+    expect(cross.result).toBe('created');
+    // 期望值来自 PG 的 encode(sha256('PDF'),'hex')。
+    const row = await prisma.recordAttachment.findFirst({
+      where: { recordId: other.id },
+      select: { contentHash: true },
+    });
+    expect(row?.contentHash).toBe(
+      '1d393b0081b632c54654eb08c345ff76b92ae4efe0768b4c0f64b9ebbe920492',
+    );
+  });
+
+  it('审计 after 含 docNo 与来源标记(via)', async () => {
+    const docNo = `DEDUP-${uuidv7().slice(0, 8)}`;
+    const { record } = await seedRecord('AUDIT-VIA', docNo);
+    const meta = asCreated(
+      await createAttachment(
+        record.id,
+        { name: 'v.pdf', type: 'application/pdf', size: 3, buffer: Buffer.from('VIA') },
+        adminUser(),
+        { via: 'docno-batch' },
+      ),
+    );
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { objectId: meta.id, action: 'record_attachment_upload' },
+    });
+    expect(audit.afterData).toMatchObject({ docNo, via: 'docno-batch' });
+  });
+
   it('getAttachmentData: 返回 data 与上传一致', async () => {
     const { record } = await seedRecord('GET');
     const buf = Buffer.from('HELLO-ATTACHMENT');
-    const meta = await createAttachment(
-      record.id,
-      // 扩展名与 MIME 必须同属一个白名单组:.pdf + application/pdf。
-      { name: 'r.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
-      adminUser(),
+    const meta = asCreated(
+      await createAttachment(
+        record.id,
+        // 扩展名与 MIME 必须同属一个白名单组:.pdf + application/pdf。
+        { name: 'r.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+        adminUser(),
+      ),
     );
     const { data } = await getAttachmentData(meta.id, record.id, adminUser());
     expect(Buffer.isBuffer(data)).toBe(true);
@@ -235,10 +345,12 @@ describe('recordAttachment.service (integration, real PG)', () => {
 
   it('deleteAttachment: 物理删除;留 delete 审计', async () => {
     const { record } = await seedRecord('DEL');
-    const meta = await createAttachment(
-      record.id,
-      { name: 'd.pdf', type: 'application/pdf', size: 10, buffer: samplePdf() },
-      adminUser(),
+    const meta = asCreated(
+      await createAttachment(
+        record.id,
+        { name: 'd.pdf', type: 'application/pdf', size: 10, buffer: samplePdf() },
+        adminUser(),
+      ),
     );
     await deleteAttachment(meta.id, record.id, adminUser());
     const still = await prisma.recordAttachment.findUnique({ where: { id: meta.id } });
@@ -254,10 +366,12 @@ describe('recordAttachment.service (integration, real PG)', () => {
     const { record: r1 } = await seedRecord('IDOR-R1');
     const { record: r2 } = await seedRecord('IDOR-R2');
     const buf = Buffer.from('IDOR-CONTENT');
-    const meta = await createAttachment(
-      r1.id,
-      { name: 'idor.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
-      adminUser(),
+    const meta = asCreated(
+      await createAttachment(
+        r1.id,
+        { name: 'idor.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+        adminUser(),
+      ),
     );
 
     // 1) 用错误的 recordId(R2)读取/删除,均应 404,不泄露附件存在性。
@@ -354,11 +468,21 @@ describe('recordAttachment.service (integration, real PG)', () => {
 
   it('打包二进制读取让出普通请求: 多附件每次读取最多8MiB（单个大文件除外）', async () => {
     const { project, record } = await seedRecord('CHUNKS');
-    const buffer = samplePdf(5 * 1024 * 1024);
+    // 内容去重后同记录不可再传相同内容,3 份大文件各自末字节不同。
+    const buffers = [0, 1, 2].map((i) => {
+      const b = samplePdf(5 * 1024 * 1024);
+      b[b.length - 1] = i;
+      return b;
+    });
     for (let i = 0; i < 3; i++)
       await createAttachment(
         record.id,
-        { name: `chunk-${i}.pdf`, type: 'application/pdf', size: buffer.length, buffer },
+        {
+          name: `chunk-${i}.pdf`,
+          type: 'application/pdf',
+          size: buffers[i].length,
+          buffer: buffers[i],
+        },
         adminUser(),
       );
     const selection = await selectForExport(project.id, {}, adminUser(), 500);
@@ -366,7 +490,8 @@ describe('recordAttachment.service (integration, real PG)', () => {
     try {
       const rows = await listForExport(project.id, {}, adminUser(), selection);
       expect(rows).toHaveLength(3);
-      expect(rows.every((row) => row.data.equals(buffer))).toBe(true);
+      // 创建顺序即 (businessDate, createdAt) 排序,逐行对位比较。
+      expect(rows.every((row, i) => row.data.equals(buffers[i]))).toBe(true);
       expect(exportReadSizes.length).toBeGreaterThan(1);
       expect(Math.max(...exportReadSizes)).toBeLessThanOrEqual(8 * 1024 * 1024);
     } finally {
@@ -379,15 +504,15 @@ describe('recordAttachment.service (integration, real PG)', () => {
     const upload = (name: string) =>
       createAttachment(
         record.id,
-        { name, type: 'application/pdf', size: 3, buffer: Buffer.from('PDF') },
+        { name, type: 'application/pdf', size: 4, buffer: Buffer.from(`PDF-${name}`) },
         adminUser(),
       );
-    const first = await upload('first.pdf');
+    const first = asCreated(await upload('first.pdf'));
     await upload('second.pdf');
     const sentinel = await selectForExport(project.id, {}, adminUser(), 1);
     expect(sentinel.count).toBe(2); // 上限+1哨兵，不读后续行或二进制。
     const selection = await selectForExport(project.id, {}, adminUser(), 500);
-    expect(selection.totalBytes).toBe(6);
+    expect(selection.totalBytes).toBe(8);
     await upload('late.pdf');
     const exported = await listForExport(project.id, {}, adminUser(), selection);
     expect(exported.map((row) => row.attachment.fileName)).toEqual(['first.pdf', 'second.pdf']);

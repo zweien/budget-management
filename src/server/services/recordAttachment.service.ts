@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Prisma, User } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
@@ -64,7 +66,7 @@ function toMeta(row: AttachmentMeta): AttachmentMeta {
 async function getRecordOrThrow(recordId: string) {
   const record = await prisma.businessRecord.findUnique({
     where: { id: recordId },
-    select: { id: true, projectId: true, isVoid: true },
+    select: { id: true, projectId: true, isVoid: true, docNo: true },
   });
   if (!record) throw new HTTPError(404, '业务记录不存在');
   return record;
@@ -116,17 +118,27 @@ export async function getAttachmentData(
   return { meta: toMeta(rest), data: row.data };
 }
 
+/** createAttachment 结果:created=新入库;duplicate=同记录已有内容相同附件,跳过(附件内容去重)。 */
+export type CreateAttachmentResult =
+  | { result: 'created'; meta: AttachmentMeta }
+  | { result: 'duplicate'; duplicateOf: AttachmentMeta };
+
 /**
  * 新增附件(bytea 入库 + 审计)。
  * 权限:record:edit。
  * 校验:大小 ≤ env.MAX_ATTACHMENT_BYTES(默认 50MB,可由运维调整);类型白名单(扩展名+MIME 双校验)。
  * 业务规则:作废记录(isVoid=true)不可追加附件 → 400。
+ * 内容去重(CONTEXT.md「附件内容去重」):同一记录下已有内容相同(SHA-256)附件 → 跳过
+ * 不入库、不写审计,返回 duplicate;不同记录之间不去重。查重不加 DB 唯一索引兜底:
+ * 并发同内容双写只多存一份副本,无害且概率极低(上传端逐文件串行),不值得为此引入约束。
+ * @param opts.via 上传来源标记(如批量导入传 'docno-batch'),仅写入审计 after 供溯源。
  */
 export async function createAttachment(
   recordId: string,
   file: AttachmentInput,
   user: Pick<User, 'id' | 'role'>,
-): Promise<AttachmentMeta> {
+  opts?: { via?: string },
+): Promise<CreateAttachmentResult> {
   const record = await getRecordOrThrow(recordId);
   await requirePermission(user, 'record:edit', record.projectId);
   if (record.isVoid) {
@@ -139,6 +151,15 @@ export async function createAttachment(
   );
   if (!verdict.ok) throw new HTTPError(verdict.status, verdict.message);
 
+  const contentHash = createHash('sha256').update(file.buffer).digest('hex');
+  const existing = await prisma.recordAttachment.findFirst({
+    where: { recordId, contentHash },
+    select: metaSelect,
+  });
+  if (existing) {
+    return { result: 'duplicate', duplicateOf: toMeta(existing) };
+  }
+
   const id = uuidv7();
   const created = await prisma.$transaction(async (tx) => {
     const row = await tx.recordAttachment.create({
@@ -148,6 +169,7 @@ export async function createAttachment(
         fileName: file.name,
         contentType: file.type,
         sizeBytes: file.size,
+        contentHash,
         data: file.buffer,
         uploadedById: user.id,
       },
@@ -159,11 +181,17 @@ export async function createAttachment(
       objectId: id,
       action: 'record_attachment_upload',
       operatorId: user.id,
-      after: { fileName: file.name, contentType: file.type, sizeBytes: file.size },
+      after: {
+        fileName: file.name,
+        contentType: file.type,
+        sizeBytes: file.size,
+        ...(record.docNo ? { docNo: record.docNo } : {}),
+        ...(opts?.via ? { via: opts.via } : {}),
+      },
     });
     return row;
   });
-  return toMeta(created);
+  return { result: 'created', meta: toMeta(created) };
 }
 
 /**

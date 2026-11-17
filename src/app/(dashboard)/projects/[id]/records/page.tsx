@@ -610,15 +610,23 @@ function BusinessRecordsPageInner() {
         // —— 附件:业务已保存成功后,循环上传 pendingFiles。失败不回滚业务(解耦)。 ——
         if (pendingFiles.length > 0 && savedRecordId) {
           const failed: string[] = [];
+          let duplicates = 0;
+          let created = 0;
           for (const file of pendingFiles) {
             try {
-              await uploadAttachment(projectId, savedRecordId, file);
+              const outcome = await uploadAttachment(projectId, savedRecordId, file);
+              if (outcome.status === 'duplicate') duplicates += 1;
+              else created += 1;
             } catch {
               failed.push(file.name);
             }
           }
           if (failed.length === 0) {
-            toast.success(`已上传 ${pendingFiles.length} 个附件`);
+            toast.success(
+              duplicates > 0
+                ? `已上传 ${created} 个附件,${duplicates} 个内容重复已跳过`
+                : `已上传 ${pendingFiles.length} 个附件`,
+            );
           } else {
             toast.error(
               `业务已保存,但 ${failed.length} 个附件上传失败:${failed.join(', ')}(可在附件抽屉重试)`,

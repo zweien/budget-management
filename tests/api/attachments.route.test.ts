@@ -217,6 +217,23 @@ describe('attachments API routes (integration)', () => {
     expect(res.status).toBe(400);
   });
 
+  it('同内容重复上传 → 200 { duplicate: true, existing }(文件名可不同)', async () => {
+    const payload = Buffer.from('DUP-ROUTE-CONTENT');
+    const mk = (name: string) => makeUploadReq({ name, type: 'application/pdf', bytes: payload });
+    const up1 = await uploadPost(mk('dup.pdf'), {
+      params: Promise.resolve({ id: projectId, recordId }),
+    } as never);
+    expect(up1.status).toBe(201);
+    // 浏览器重复下载的 " (1)" 副本:文件名不同、内容相同 → 跳过。
+    const up2 = await uploadPost(mk('dup (1).pdf'), {
+      params: Promise.resolve({ id: projectId, recordId }),
+    } as never);
+    expect(up2.status).toBe(200);
+    const body = await up2.json();
+    expect(body.duplicate).toBe(true);
+    expect(body.existing.fileName).toBe('dup.pdf');
+  });
+
   it('导出:有附件返回 zip;无附件返回 404', async () => {
     const { GET: exportGet } = await import('@/app/api/projects/[id]/attachments/export/route');
     // 先上传一个附件用于导出。

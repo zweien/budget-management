@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Inbox } from 'lucide-react';
+import { Inbox, FileStack } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, bootstrapMockUser } from '@/lib/api/client';
@@ -24,6 +24,7 @@ import {
   SettlementImportPreview,
   type SettlementBatchData,
 } from '@/components/records/settlement-import-preview';
+import { BatchAttachmentImportDialog } from '@/components/records/BatchAttachmentImportDialog';
 
 /**
  * 统一导入入口(业务录入):财务结算单(2025 导出,v3)/单据台账(v4),均可含多个项目。
@@ -65,6 +66,9 @@ export default function UnifiedImportPage() {
   // 我的进行中批次
   const [mine, setMine] = useState<MineBatch[]>([]);
   const [mineLoading, setMineLoading] = useState(true);
+
+  // 批量附件导入(跨项目,按单据编号匹配)
+  const [batchAttachOpen, setBatchAttachOpen] = useState(false);
 
   const loadMine = useCallback(async () => {
     // 不在此处置 loading:挂载 effect 同步调用会触发 set-state-in-effect 规则;
@@ -270,6 +274,22 @@ export default function UnifiedImportPage() {
       </Card>
 
       <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">批量上传附件(按单据编号匹配)</p>
+            <p className="mt-1 text-xs text-mute">
+              文件名以单据编号开头即可自动挂到对应业务记录(跨项目;同号跨项目需指定目标);
+              与已有附件内容相同的文件自动跳过。适合财务导出的报销凭证 PDF/扫描件成批归档。
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => setBatchAttachOpen(true)}>
+            <FileStack className="mr-1.5 size-4" />
+            批量上传附件
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="p-4">
         <p className="caption-mono mb-2">我的批次(最近 20 条)</p>
         {mineLoading ? (
           <div className="space-y-2">
@@ -314,6 +334,9 @@ export default function UnifiedImportPage() {
           返回业务录入
         </Button>
       </div>
+
+      {/* 批量附件导入(统一入口:跨项目匹配,不传 projectId) */}
+      <BatchAttachmentImportDialog open={batchAttachOpen} onOpenChange={setBatchAttachOpen} />
     </div>
   );
 }

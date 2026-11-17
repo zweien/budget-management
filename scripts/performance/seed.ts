@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { PrismaClient, BusinessStatus } from '@prisma/client';
@@ -160,15 +160,20 @@ async function main() {
     }
     // 不可压缩内容，避免全零 bytea 的压缩使附件读取基线失真。
     await prisma.recordAttachment.createMany({
-      data: Array.from({ length: 3 }, (_, i) => ({
-        id: uuid(),
-        recordId: fixture.projects[0].recordId,
-        fileName: `合成凭证${i + 1}.pdf`,
-        contentType: 'application/pdf',
-        sizeBytes: 8 * 1024 * 1024,
-        data: randomBytes(8 * 1024 * 1024),
-        uploadedById: fixture.users[0].id,
-      })),
+      data: Array.from({ length: 3 }, (_, i) => {
+        const data = randomBytes(8 * 1024 * 1024);
+        return {
+          id: uuid(),
+          recordId: fixture.projects[0].recordId,
+          fileName: `合成凭证${i + 1}.pdf`,
+          contentType: 'application/pdf',
+          sizeBytes: data.length,
+          // 内容指纹:对合成数据取真实 SHA-256,与业务上传路径一致。
+          contentHash: createHash('sha256').update(data).digest('hex'),
+          data,
+          uploadedById: fixture.users[0].id,
+        };
+      }),
     });
     await prisma.$executeRaw`ANALYZE`;
     const output = resolve(process.env.PERF_FIXTURE ?? '.scratch/performance/fixture.json');

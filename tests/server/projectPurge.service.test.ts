@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import { BusinessStatus, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
@@ -168,6 +169,7 @@ describe('project purge (integration, real PG)', () => {
         fileName: 'record.png',
         contentType: 'image/png',
         sizeBytes: 4,
+        contentHash: createHash('sha256').update('rec!').digest('hex'),
         data: Buffer.from('rec!'),
         uploadedById: adminId,
       },
