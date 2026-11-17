@@ -169,6 +169,12 @@ describe('批量附件匹配预览 API(项目内 + 跨项目)', () => {
 
   afterAll(async () => {
     for (const id of createdProjectIds.splice(0)) await cleanupProject(id);
+    // denyApiKeyCrossProject 的被拒审计 operator=测试用户且 projectId 为 NULL,
+    // 项目级清理覆盖不到,FK 会阻止删用户(且被 .catch 静默吞掉导致残留)——
+    // 先按 operator 清掉这类审计,再删用户。
+    await prisma.auditLog
+      .deleteMany({ where: { operatorId: { in: [adminId, outsiderId] } } })
+      .catch(() => {});
     await prisma.user.deleteMany({ where: { id: { in: [adminId, outsiderId] } } }).catch(() => {});
     await prisma.$disconnect();
   });
