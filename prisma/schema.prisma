@@ -535,6 +535,8 @@ model RecordAttachment {
   record       BusinessRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
   uploadedBy   User           @relation("AttachmentUploader", fields: [uploadedById], references: [id])
 
+  // 同记录同内容唯一(迁移 20261117050000 以裸 SQL 建,与服务层 P2002→duplicate 兜底配套)。
+  @@unique([recordId, contentHash], map: "record_attachments_record_hash_unique")
   @@index([recordId])
   @@map("record_attachments")
 }

@@ -234,6 +234,32 @@ describe('attachments API routes (integration)', () => {
     expect(body.existing.fileName).toBe('dup.pdf');
   });
 
+  it('via 白名单:仅 docno-batch 入审计,其余忽略(防伪造来源)', async () => {
+    const mk = (name: string, bytes: Buffer, via?: string) => {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }), name);
+      if (via) form.append('via', via);
+      return new Request(
+        `http://localhost/api/projects/${projectId}/records/${recordId}/attachments`,
+        { method: 'POST', body: form },
+      ) as never;
+    };
+    const up1 = await uploadPost(mk('via-ok.pdf', Buffer.from([1]), 'docno-batch'), {
+      params: Promise.resolve({ id: projectId, recordId }),
+    } as never);
+    expect(up1.status).toBe(201);
+    const up2 = await uploadPost(mk('via-fake.pdf', Buffer.from([2]), 'forged-source'), {
+      params: Promise.resolve({ id: projectId, recordId }),
+    } as never);
+    expect(up2.status).toBe(201);
+    const meta1 = await up1.json();
+    const meta2 = await up2.json();
+    const a1 = await prisma.auditLog.findFirstOrThrow({ where: { objectId: meta1.id } });
+    const a2 = await prisma.auditLog.findFirstOrThrow({ where: { objectId: meta2.id } });
+    expect(a1.afterData).toMatchObject({ via: 'docno-batch' });
+    expect((a2.afterData as Record<string, unknown>).via).toBeUndefined();
+  });
+
   it('导出:有附件返回 zip;无附件返回 404', async () => {
     const { GET: exportGet } = await import('@/app/api/projects/[id]/attachments/export/route');
     // 先上传一个附件用于导出。

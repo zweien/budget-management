@@ -303,4 +303,28 @@ describe('批量附件匹配预览 API(项目内 + 跨项目)', () => {
     expect((await postProject({})).status).toBe(400);
     expect((await postProject({ files: [{ name: 'a.pdf', contentHash: 'zz' }] })).status).toBe(400);
   });
+
+  it('按输入行序逐行返回;同名多行不合并、指纹独立判定(客户端按序回绑的契约)', async () => {
+    const res = await postProject({
+      files: [
+        { name: 'zzz-no-match.pdf' },
+        { name: `${docNoShared}_01.pdf` },
+        { name: `${docNoShared}_01.pdf`, contentHash: sha256('ANOTHER-CONTENT') },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const { files } = await res.json();
+    expect(files).toHaveLength(3);
+    // 行序与输入一致(前端按序 zip 配对 File 依赖此契约)。
+    expect(files[0]).toMatchObject({ name: 'zzz-no-match.pdf', status: 'unmatched' });
+    expect(files[1]).toMatchObject({ name: `${docNoShared}_01.pdf`, status: 'matched' });
+    // 同名第二行:独立成行、独立判重(不同指纹 → 不标重复)。
+    expect(files[2]).toMatchObject({
+      name: `${docNoShared}_01.pdf`,
+      status: 'matched',
+      duplicate: false,
+    });
+    expect(files[1].record.recordId).toBe(r1Id);
+    expect(files[2].record.recordId).toBe(r1Id);
+  });
 });

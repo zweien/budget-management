@@ -277,6 +277,27 @@ describe('recordAttachment.service (integration, real PG)', () => {
     expect(uploadCount).toHaveLength(2);
   });
 
+  it('内容去重:并发同内容双传 → 一存一跳(唯一索引兜底)', async () => {
+    const { record } = await seedRecord('DEDUP-RACE');
+    const buf = Buffer.from('DEDUP-RACE-CONTENT');
+    const outcomes = await Promise.all([
+      createAttachment(
+        record.id,
+        { name: 'race-a.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+        adminUser(),
+      ),
+      createAttachment(
+        record.id,
+        { name: 'race-b.pdf', type: 'application/pdf', size: buf.length, buffer: buf },
+        adminUser(),
+      ),
+    ]);
+    // 事务外查重存在竞窗,唯一索引让后写入方 P2002 → 按 duplicate 返回。
+    expect(outcomes.filter((o) => o.result === 'created')).toHaveLength(1);
+    expect(outcomes.filter((o) => o.result === 'duplicate')).toHaveLength(1);
+    expect(await prisma.recordAttachment.count({ where: { recordId: record.id } })).toBe(1);
+  });
+
   it('内容去重:同名不同内容照传(重名共存);跨记录同内容不去重', async () => {
     const { record } = await seedRecord('DEDUP-NAME');
     const again = await createAttachment(

@@ -5,9 +5,12 @@ import { env } from '@/lib/env';
 import { requireUser } from '@/lib/auth/session';
 import { createAttachment, listAttachments } from '@/server/services/recordAttachment.service';
 
+/** via 审计来源标记白名单:不采信客户端任意字符串,防审计溯源字段被伪造(codex review)。 */
+const VIA_WHITELIST = new Set(['docno-batch']);
+
 /**
  * POST /api/projects/:id/records/:recordId/attachments — 上传单个报销凭证附件。
- * 接受 multipart/form-data(file 字段;可选 via 字段=上传来源标记,仅入审计)。
+ * 接受 multipart/form-data(file 字段;可选 via 字段=上传来源标记,白名单外忽略)。
  * 权限/校验/审计在服务层。内容重复(同记录同内容)→ 200 { duplicate: true, existing }。
  */
 export const POST = withRoute(
@@ -25,7 +28,7 @@ export const POST = withRoute(
       return NextResponse.json({ error: '缺少上传文件(file 字段)' }, { status: 400 });
     }
     const viaRaw = form.get('via');
-    const via = typeof viaRaw === 'string' && viaRaw.length > 0 ? viaRaw.slice(0, 32) : undefined;
+    const via = typeof viaRaw === 'string' && VIA_WHITELIST.has(viaRaw) ? viaRaw : undefined;
     const buffer = Buffer.from(await file.arrayBuffer());
     const outcome = await createAttachment(
       recordId,

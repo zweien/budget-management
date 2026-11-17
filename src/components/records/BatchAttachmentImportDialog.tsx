@@ -59,13 +59,19 @@ interface BatchAttachmentImportDialogProps {
   onChanged?: () => void;
 }
 
-/** 预览行(客户端状态:result = 服务端匹配结果;chosen = 歧义行人工指定的候选)。 */
+/** 预览行(客户端状态:result = 服务端匹配结果;chosen = 歧义行人工指定的候选)。
+ *  行身份用 uid 而非文件名——同批同名文件(不同内容)各自成行,互不串线。 */
 interface PreviewRow {
+  uid: number;
   file: File;
   contentHash?: string;
   result: AttachmentMatchFileResult;
   chosenRecordId?: string;
 }
+
+/** 预览行自增 id(组件生命周期内单调;文件名不唯一,不能作行键)。 */
+let rowSeq = 0;
+const nextRowId = () => ++rowSeq;
 
 /** 上传后的逐文件终态(报告用)。 */
 type ReportRow = {
@@ -151,18 +157,19 @@ export function BatchAttachmentImportDialog({
       setProgress(0);
       try {
         const inputs: Array<{ name: string; contentHash?: string }> = [];
-        const hashByName = new Map<string, string | undefined>();
         for (const file of files) {
           const hash = await sha256Hex(file);
-          hashByName.set(file.name, hash);
           inputs.push({ name: file.name, ...(hash ? { contentHash: hash } : {}) });
           setProgress((p) => p + 1);
         }
         const matched = await matchAttachmentPreview(inputs, projectId);
+        // 服务端按输入行序逐行返回(同名多行也不串线,契约由路由测试钉住),
+        // 这里按下标配对 File 与指纹;行身份用 uid,同名文件各自成行。
         setRows(
-          matched.files.map((result) => ({
-            file: files.find((f) => f.name === result.name) ?? files[0],
-            contentHash: hashByName.get(result.name),
+          matched.files.map((result, i) => ({
+            uid: nextRowId(),
+            file: files[i],
+            contentHash: inputs[i].contentHash,
             result,
           })),
         );
@@ -196,45 +203,50 @@ export function BatchAttachmentImportDialog({
     let changed = false;
     try {
       for (const row of rows) {
-        const target = targetOf(row);
-        if (!target) {
-          results.push({
-            name: row.file.name,
-            outcome: row.result.status === 'unmatched' ? 'skipped-unmatched' : 'skipped-unresolved',
-            message:
-              row.result.status === 'unmatched'
-                ? UNMATCHED_REASON_LABEL[row.result.reason]
-                : '同号跨项目,未指定目标项目',
-          });
-          continue;
-        }
         try {
-          const outcome = await uploadAttachment(
-            target.projectId,
-            target.recordId,
-            row.file,
-            'record',
-            { via: 'docno-batch' },
-          );
-          if (outcome.status === 'duplicate') {
+          const target = targetOf(row);
+          if (!target) {
             results.push({
               name: row.file.name,
-              outcome: 'skipped-duplicate',
-              message: `与「${outcome.existing.fileName}」内容相同`,
+              outcome:
+                row.result.status === 'unmatched' ? 'skipped-unmatched' : 'skipped-unresolved',
+              message:
+                row.result.status === 'unmatched'
+                  ? UNMATCHED_REASON_LABEL[row.result.reason]
+                  : '同号跨项目,未指定目标项目',
             });
-          } else {
-            uploaded += 1;
-            changed = true;
-            results.push({ name: row.file.name, outcome: 'uploaded' });
+            continue;
           }
-        } catch (e) {
-          results.push({
-            name: row.file.name,
-            outcome: 'failed',
-            message: e instanceof Error ? e.message : '上传失败',
-          });
+          try {
+            const outcome = await uploadAttachment(
+              target.projectId,
+              target.recordId,
+              row.file,
+              'record',
+              { via: 'docno-batch' },
+            );
+            if (outcome.status === 'duplicate') {
+              results.push({
+                name: row.file.name,
+                outcome: 'skipped-duplicate',
+                message: `与「${outcome.existing.fileName}」内容相同`,
+              });
+            } else {
+              uploaded += 1;
+              changed = true;
+              results.push({ name: row.file.name, outcome: 'uploaded' });
+            }
+          } catch (e) {
+            results.push({
+              name: row.file.name,
+              outcome: 'failed',
+              message: e instanceof Error ? e.message : '上传失败',
+            });
+          }
+        } finally {
+          // 跳过/失败/成功都计一格,进度最终到达 rows.length。
+          setProgress((p) => p + 1);
         }
-        setProgress((p) => p + 1);
       }
     } finally {
       uploadingRef.current = false;
@@ -251,7 +263,7 @@ export function BatchAttachmentImportDialog({
     if (changed) onChanged?.();
   }, [rows, onChanged, targetOf]);
 
-  const removeRow = (name: string) => setRows((prev) => prev.filter((r) => r.file.name !== name));
+  const removeRow = (uid: number) => setRows((prev) => prev.filter((r) => r.uid !== uid));
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -325,7 +337,7 @@ export function BatchAttachmentImportDialog({
               <div className="space-y-1.5">
                 {rows.map((row) => (
                   <div
-                    key={row.file.name}
+                    key={row.uid}
                     className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
                   >
                     <div className="min-w-0 flex-1">
@@ -357,7 +369,7 @@ export function BatchAttachmentImportDialog({
                             onValueChange={(v) =>
                               setRows((prev) =>
                                 prev.map((r) =>
-                                  r.file.name === row.file.name ? { ...r, chosenRecordId: v } : r,
+                                  r.uid === row.uid ? { ...r, chosenRecordId: v } : r,
                                 ),
                               )
                             }
@@ -395,7 +407,7 @@ export function BatchAttachmentImportDialog({
                         size="icon"
                         className="size-7"
                         aria-label={`移除 ${row.file.name}`}
-                        onClick={() => removeRow(row.file.name)}
+                        onClick={() => removeRow(row.uid)}
                       >
                         <X className="size-4" />
                       </Button>

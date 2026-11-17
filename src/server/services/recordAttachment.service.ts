@@ -129,8 +129,9 @@ export type CreateAttachmentResult =
  * 校验:大小 ≤ env.MAX_ATTACHMENT_BYTES(默认 50MB,可由运维调整);类型白名单(扩展名+MIME 双校验)。
  * 业务规则:作废记录(isVoid=true)不可追加附件 → 400。
  * 内容去重(CONTEXT.md「附件内容去重」):同一记录下已有内容相同(SHA-256)附件 → 跳过
- * 不入库、不写审计,返回 duplicate;不同记录之间不去重。查重不加 DB 唯一索引兜底:
- * 并发同内容双写只多存一份副本,无害且概率极低(上传端逐文件串行),不值得为此引入约束。
+ * 不入库、不写审计,返回 duplicate;不同记录之间不去重。并发兜底:`(record_id,
+ * content_hash)` 唯一索引(迁移 20261117050000,与 docNo 查重的 ADR 0002 同款),
+ * 竞窗双写时后者 P2002 → 按duplicate 返回。
  * @param opts.via 上传来源标记(如批量导入传 'docno-batch'),仅写入审计 after 供溯源。
  */
 export async function createAttachment(
@@ -161,36 +162,49 @@ export async function createAttachment(
   }
 
   const id = uuidv7();
-  const created = await prisma.$transaction(async (tx) => {
-    const row = await tx.recordAttachment.create({
-      data: {
-        id,
-        recordId,
-        fileName: file.name,
-        contentType: file.type,
-        sizeBytes: file.size,
-        contentHash,
-        data: file.buffer,
-        uploadedById: user.id,
-      },
-      select: metaSelect,
+  let created;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      const row = await tx.recordAttachment.create({
+        data: {
+          id,
+          recordId,
+          fileName: file.name,
+          contentType: file.type,
+          sizeBytes: file.size,
+          contentHash,
+          data: file.buffer,
+          uploadedById: user.id,
+        },
+        select: metaSelect,
+      });
+      await recordAudit(tx, {
+        projectId: record.projectId,
+        objectType: 'record_attachments',
+        objectId: id,
+        action: 'record_attachment_upload',
+        operatorId: user.id,
+        after: {
+          fileName: file.name,
+          contentType: file.type,
+          sizeBytes: file.size,
+          ...(record.docNo ? { docNo: record.docNo } : {}),
+          ...(opts?.via ? { via: opts.via } : {}),
+        },
+      });
+      return row;
     });
-    await recordAudit(tx, {
-      projectId: record.projectId,
-      objectType: 'record_attachments',
-      objectId: id,
-      action: 'record_attachment_upload',
-      operatorId: user.id,
-      after: {
-        fileName: file.name,
-        contentType: file.type,
-        sizeBytes: file.size,
-        ...(record.docNo ? { docNo: record.docNo } : {}),
-        ...(opts?.via ? { via: opts.via } : {}),
-      },
-    });
-    return row;
-  });
+  } catch (e) {
+    // 并发兜底:竞窗内另一路先插入了同内容附件,唯一索引让本次 P2002 → duplicate。
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      const winner = await prisma.recordAttachment.findFirst({
+        where: { recordId, contentHash },
+        select: metaSelect,
+      });
+      if (winner) return { result: 'duplicate', duplicateOf: toMeta(winner) };
+    }
+    throw e;
+  }
   return { result: 'created', meta: toMeta(created) };
 }
 
