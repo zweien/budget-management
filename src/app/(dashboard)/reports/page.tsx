@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Combobox } from '@/components/ui/combobox';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -474,20 +475,21 @@ export default function FundingReportPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="project">项目</Label>
-              <Select value={projectId} onValueChange={onProjectChange}>
-                <SelectTrigger id="project" className="w-full">
-                  <SelectValue placeholder={projects === null ? '加载中…' : '选择项目'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {(projects ?? []).map((project) => (
-                    <SelectItem key={project.id} value={project.id}>
-                      {project.code} · {project.name}
-                      {project.archivedAt ? '（已归档）' : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>项目</Label>
+              <Combobox
+                options={(projects ?? []).map((project) => ({
+                  value: project.id,
+                  label: `${project.code} · ${project.name}${project.archivedAt ? '（已归档）' : ''}`,
+                  keywords: project.code,
+                }))}
+                value={projectId}
+                onChange={onProjectChange}
+                placeholder={projects === null ? '加载中…' : '选择项目'}
+                searchPlaceholder="输入编号或名称筛选…"
+                emptyText="无匹配项目"
+                clearable
+                className="w-full"
+              />
               {selectedProject?.archivedAt ? <Badge variant="outline">已归档项目</Badge> : null}
             </div>
             <div className="space-y-2">
