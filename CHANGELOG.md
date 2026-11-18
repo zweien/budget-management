@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-11-18
+
+### 修复
+
+- **内网 HTTP 下「生成报告」点击无反应**：进度轮询 id 原用 `crypto.randomUUID()`，该 API 只在安全上下文（HTTPS/localhost）暴露，内网经 HTTP 访问时不存在，`onGenerate` 第一行即抛 `TypeError: crypto.randomUUID is not a function`。改用本地 `randomProgressId()` 降级链：`randomUUID` → `crypto.getRandomValues`（HTTP 下仍可用）→ `Math.random`（极老浏览器兜底）；id 仅作进度注册表 key（8-64 位字母数字白名单校验），输出格式不受影响
+
 ## [0.42.0] - 2026-11-18
 
 ### 新增
