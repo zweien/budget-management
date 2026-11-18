@@ -209,6 +209,25 @@ function SelectableList<K extends string>({
   );
 }
 
+/**
+ * 生成进度轮询用的随机 id。crypto.randomUUID 只在安全上下文(HTTPS/localhost)
+ * 暴露——内网 HTTP 访问时不存在,直接调用会抛 TypeError 使「生成」按钮失灵;
+ * 降级链:randomUUID → getRandomValues(HTTP 下仍可用) → Math.random(极老浏览器)。
+ * 输出仅作注册表 key,格式只需满足路由的 8-64 位字母数字白名单。
+ */
+function randomProgressId(): string {
+  const g = globalThis.crypto;
+  if (g && typeof g.randomUUID === 'function') return g.randomUUID();
+  if (g && typeof g.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    g.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  let out = '';
+  for (let i = 0; i < 32; i += 1) out += Math.floor(Math.random() * 16).toString(16);
+  return out;
+}
+
 /** 汇总列 + 明细字段统一 label 映射(key 空间不重叠,可直接合并)。 */
 const LABELS: Record<string, string> = {
   ...Object.fromEntries(SUMMARY_COLUMN_DEFS.map((d) => [d.key, d.label])),
@@ -341,7 +360,7 @@ export default function FundingReportPage() {
     if (!selectedProject || abortRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
-    const progressId = crypto.randomUUID();
+    const progressId = randomProgressId();
     const startedAt = Date.now();
     setGeneration({ status: 'running', percent: 0, phase: '准备中', error: null });
     setElapsedMs(0);
