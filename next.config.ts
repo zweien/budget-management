@@ -26,8 +26,14 @@ const nextConfig: NextConfig = {
   },
   // 排除 Python venv(.venv,docx 导出依赖),其符号链接会让 Turbopack 文件追踪失败。
   outputFileTracingExcludes: { '/**': ['.venv/**'] },
-  // /changelog 页运行时 fs 读取 CHANGELOG.md:standalone 打包需显式追踪该文件。
-  outputFileTracingIncludes: { '/changelog': ['./CHANGELOG.md'] },
+  // 运行时按 cwd 相对路径 fs 读取的文件,standalone 打包需显式追踪:
+  // /changelog 读 CHANGELOG.md;预算调整 docx 导出读 template/ 下模板
+  // (adjustmentExport.service 按动态路径拼接,tracer 静态分析追不到;
+  // Docker runner 只拷 .next/standalone,漏追踪即「模板不存在」500)。
+  outputFileTracingIncludes: {
+    '/changelog': ['./CHANGELOG.md'],
+    '/**': ['./template/**'],
+  },
   // dev 模式的 DNS rebinding 防护:局域网 IP 访问时,HMR websocket 与资源请求
   // 默认被跨域拦截,须在此声明允许的来源。本机 IP 变更时同步改。
   allowedDevOrigins: ['192.168.5.6'],
