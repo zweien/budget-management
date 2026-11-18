@@ -571,6 +571,30 @@ describe('fundingReport.service (integration, real PG)', () => {
     const encoded = /filename\*=UTF-8''([^;]+)/.exec(header)![1]!;
     expect(decodeURIComponent(encoded)).toBe(malicious);
   });
+
+  it('onProgress:全程百分比单调不减、终值≥99,阶段文案覆盖取数/装配/Word/打包', async () => {
+    const calls: Array<{ percent: number; phase: string }> = [];
+    await exportFundingReport(
+      seeded.projectId,
+      {
+        level: 2,
+        summaryColumns: [...DEFAULT_SUMMARY_COLUMNS],
+        detailFields: [...DEFAULT_DETAIL_FIELDS],
+      },
+      admin(),
+      (percent, phase) => calls.push({ percent, phase }),
+    );
+    expect(calls.length).toBeGreaterThan(3);
+    for (let i = 1; i < calls.length; i += 1) {
+      expect(calls[i]!.percent).toBeGreaterThanOrEqual(calls[i - 1]!.percent);
+    }
+    expect(calls[calls.length - 1]!.percent).toBeGreaterThanOrEqual(99);
+    const phases = calls.map((c) => c.phase).join('|');
+    expect(phases).toContain('读取业务记录');
+    expect(phases).toContain('装配业务明细');
+    expect(phases).toContain('生成 Word 明细');
+    expect(phases).toContain('打包 Word 文档');
+  });
 });
 
 async function docxXml(buffer: Buffer): Promise<string> {

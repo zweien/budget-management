@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, FileText, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
+import { cn } from '@/lib/utils';
 import {
   DEFAULT_DETAIL_FIELDS,
   DEFAULT_SUMMARY_COLUMNS,
@@ -46,6 +47,24 @@ interface ProjectOption {
 interface SubjectNode {
   id: string;
   level: number;
+}
+
+/** /api/export/progress 返回体(值只有阶段文案与数字,无业务数据)。 */
+interface ProgressPayload {
+  progress: {
+    phase: string;
+    percent: number;
+    status: 'running' | 'done' | 'error';
+    error: string | null;
+  };
+}
+
+/** 生成进度卡片状态。 */
+interface GenerationState {
+  status: 'running' | 'done' | 'error';
+  percent: number;
+  phase: string;
+  error: string | null;
 }
 
 /** 勾选 + 顺序的可排序条目(顺序含未勾选项,生成时只取勾选项的相对顺序)。 */
@@ -203,10 +222,12 @@ export default function FundingReportPage() {
   const [projects, setProjects] = useState<ProjectOption[] | null>(null);
   const [projectId, setProjectId] = useState<string>('');
   const [subjects, setSubjects] = useState<SubjectsState>({ status: 'idle', maxLevel: null });
-  const [generating, setGenerating] = useState(false);
+  const [generation, setGeneration] = useState<GenerationState | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [config, setConfig] = useState<StoredConfig>(defaultConfig);
   const maxLevel = subjects.maxLevel;
   const loadingSubjects = subjects.status === 'loading';
+  const generating = generation?.status === 'running';
 
   // localStorage 恢复:rAF 时机应用(与列偏好回落同款,避免 effect 内同步 setState)。
   // 持久化 effect 等 restore 完成后才写:否则挂载瞬间会把默认配置写回、覆盖原偏好。
@@ -290,9 +311,44 @@ export default function FundingReportPage() {
   const checkedFields = config.fields.filter((it) => it.checked).map((it) => it.key);
   const canGenerate = Boolean(projectId) && checkedSummary.length > 0 && checkedFields.length > 0;
 
+  const abortRef = useRef<AbortController | null>(null);
+
+  /** 取消生成:中断下载请求;服务端进度条目自然过期。 */
+  const onCancelGenerate = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
   const onGenerate = useCallback(async () => {
     if (!selectedProject) return;
-    setGenerating(true);
+    const progressId = crypto.randomUUID();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const startedAt = Date.now();
+    setGeneration({ status: 'running', percent: 0, phase: '准备中', error: null });
+    setElapsedMs(0);
+
+    // 500ms 一拍:轮询服务端进度 + 刷新已耗时(进度端点 404/失败时静默,不阻塞下载)。
+    const timer = setInterval(() => {
+      setElapsedMs(Date.now() - startedAt);
+      apiFetch<ProgressPayload>(`/api/export/progress?id=${progressId}`)
+        .then(({ progress }) => {
+          setGeneration((prev) =>
+            prev?.status === 'running'
+              ? {
+                  ...prev,
+                  percent: progress.percent,
+                  phase: progress.phase,
+                  status: progress.status,
+                  error: progress.error,
+                }
+              : prev,
+          );
+        })
+        .catch(() => {
+          /* 进度查询失败不影响下载本身 */
+        });
+    }, 500);
+
     try {
       const query = serializeFundingReportOptions({
         level: effectiveLevel === 'all' ? 'all' : Number.parseInt(effectiveLevel, 10),
@@ -300,15 +356,34 @@ export default function FundingReportPage() {
         detailFields: checkedFields,
       });
       await downloadFile(
-        `/api/projects/${projectId}/export/funding-report?${query}`,
+        `/api/projects/${projectId}/export/funding-report?${query}&progress=${progressId}`,
         `经费报告-${selectedProject.code}.docx`,
+        { signal: controller.signal },
       );
+      clearInterval(timer);
+      setGeneration((prev) =>
+        prev ? { ...prev, status: 'done', percent: 100, phase: '完成' } : prev,
+      );
+      toast.success('经费报告已生成，浏览器开始下载');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '生成失败，请重试');
+      clearInterval(timer);
+      const aborted = error instanceof DOMException && error.name === 'AbortError';
+      setGeneration(null);
+      if (!aborted) {
+        toast.error(error instanceof Error ? error.message : '生成失败，请重试');
+      }
     } finally {
-      setGenerating(false);
+      clearInterval(timer);
+      abortRef.current = null;
     }
   }, [selectedProject, projectId, effectiveLevel, checkedSummary, checkedFields]);
+
+  // 生成成功后短暂展示 100% 再收起进度条。
+  useEffect(() => {
+    if (generation?.status !== 'done') return;
+    const t = setTimeout(() => setGeneration(null), 2000);
+    return () => clearTimeout(t);
+  }, [generation?.status]);
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -323,6 +398,53 @@ export default function FundingReportPage() {
           </Button>
         }
       />
+
+      {generation ? (
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              {generation.status === 'running' ? (
+                <Loader2 className="size-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="truncate text-sm">
+                    {generation.status === 'error'
+                      ? `生成失败：${generation.error ?? '未知错误'}`
+                      : generation.phase}
+                  </p>
+                  {generation.status === 'running' ? (
+                    <span className="caption-mono shrink-0">
+                      {Math.round(generation.percent)}% · {(elapsedMs / 1000).toFixed(0)}s
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn(
+                      'h-full transition-all duration-300',
+                      generation.status === 'error' ? 'bg-destructive' : 'bg-primary',
+                    )}
+                    style={{
+                      width: `${generation.status === 'running' ? generation.percent : 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              {generation.status === 'running' ? (
+                <Button variant="outline" size="sm" onClick={onCancelGenerate}>
+                  <X />
+                  取消
+                </Button>
+              ) : generation.status === 'error' ? (
+                <Button variant="outline" size="sm" onClick={() => setGeneration(null)}>
+                  知道了
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

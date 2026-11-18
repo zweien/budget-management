@@ -44,7 +44,23 @@ import {
  * 全部为展示字符串),`buildFundingReportDocx` 只做版式(1:1 复刻 docs/templates/
  * funding-report-template.docx:A4 纵向两分节、黑体/仿宋_GB2312/楷体_GB2312/
  * 方正小标宋简体、细实线表格、27pt 固定行距、无页眉页脚)。
+ *
+ * 进度:onProgress(percent 0-100, 阶段文案) 在 exportFundingReport 汇总为
+ * 全程单调递增序列,路由侧写入导出进度注册表(exports/progress)供前端轮询。
  */
+
+/** 进度回调:percent 0-100(全程单调),phase 为用户可读阶段文案。 */
+export type ReportProgressFn = (percent: number, phase: string) => void;
+
+const noopProgress: ReportProgressFn = () => {};
+
+/** 把子流程的 0-100 局部进度线性映射到全程 [from,to] 区间。 */
+function scaleProgress(fn: ReportProgressFn, from: number, to: number): ReportProgressFn {
+  return (local, phase) => {
+    const clamped = Math.min(100, Math.max(0, local));
+    fn(from + ((to - from) * clamped) / 100, phase);
+  };
+}
 
 // ---------------------------------------------------------------------------
 // 数据装配
@@ -171,6 +187,7 @@ export async function buildFundingReportData(
   projectId: string,
   options: FundingReportQueryOptions,
   user: Pick<User, 'id' | 'role'>,
+  onProgress: ReportProgressFn = noopProgress,
 ): Promise<FundingReportData> {
   if (options.summaryColumns.length === 0) {
     throw new HTTPError(400, '汇总表至少选择一个数值列');
@@ -178,6 +195,7 @@ export async function buildFundingReportData(
   if (options.detailFields.length === 0) {
     throw new HTTPError(400, '明细表至少选择一个字段');
   }
+  onProgress(5, '校验参数');
 
   // 权限校验在台账服务内;总口径节点已含全部上卷(GENERAL/LUMP_SUM 同源)。
   const ledger = await getProjectTotalLedger(projectId, user);
@@ -208,6 +226,7 @@ export async function buildFundingReportData(
   if (ledger.nodes.length === 0) {
     throw new HTTPError(422, '项目暂无预算科目，无法生成经费报告');
   }
+  onProgress(30, `读取业务记录（${records.length} 条）`);
 
   // ---- 科目树:扁平 → DFS;层级裁剪 + 逐层编号 ----
   const nodeById = new Map(ledger.nodes.map((n) => [n.subjectId, n]));
@@ -263,6 +282,7 @@ export async function buildFundingReportData(
     return toTreeNode(node, numbering, children);
   };
   const tree = (byParent.get(null) ?? []).map(buildNode);
+  onProgress(40, '装配科目树与汇总');
 
   // ---- 汇总行(展示字符串:万元/百分比;非叶行=上卷小计,加粗) ----
   const summaryRows: FundingReportData['summary']['rows'] = [];
@@ -330,6 +350,19 @@ export async function buildFundingReportData(
   const isSectionNode = (node: TreeNode) =>
     node.level === displayDepth || (node.isLeaf && node.level < displayDepth);
 
+  // 明细分节进度:按「有记录的小节」计数,逐节推进 40→98。
+  const countSectionNodes = (nodes: TreeNode[]): number =>
+    nodes.reduce(
+      (acc, node) =>
+        acc +
+        (isSectionNode(node) && (recordsBySection.get(node.id)?.length ?? 0) > 0
+          ? 1
+          : countSectionNodes(node.children)),
+      0,
+    );
+  const totalSections = countSectionNodes(tree);
+  let doneSections = 0;
+
   const buildDetailNode = (node: TreeNode): DetailNode | null => {
     if (isSectionNode(node)) {
       const sectionRecords = recordsBySection.get(node.id) ?? [];
@@ -359,6 +392,11 @@ export async function buildFundingReportData(
       const payableSum = sumAmounts(
         sectionRecords.filter((r) => r.status !== 'PAID').map((r) => r.amount),
       );
+      doneSections += 1;
+      onProgress(
+        totalSections > 0 ? 40 + (58 * doneSections) / totalSections : 98,
+        `装配业务明细（${doneSections}/${totalSections} 节）`,
+      );
       return {
         kind: 'section',
         title: node.numbering,
@@ -376,6 +414,7 @@ export async function buildFundingReportData(
     return { kind: 'heading', level: node.level, title: node.numbering, children };
   };
   const detail = tree.map(buildDetailNode).filter((n): n is DetailNode => n !== null);
+  onProgress(100, '数据装配完成');
 
   // ---- 周期括号:项目起止日期,缺则用记录申请日期的最早/最晚。 ----
   let periodText: string | null = null;
@@ -660,6 +699,7 @@ function buildDetailChildren(
   nodes: DetailNode[],
   fields: DetailFieldKey[],
   children: (Paragraph | Table)[],
+  onSection?: () => void,
 ): void {
   for (const node of nodes) {
     if (node.kind === 'heading') {
@@ -673,7 +713,7 @@ function buildDetailChildren(
           ],
         }),
       );
-      buildDetailChildren(node.children, fields, children);
+      buildDetailChildren(node.children, fields, children, onSection);
       continue;
     }
     // 小节标题/导语/（1）（2）标签 keepNext:标签不与它的表格分页分离。
@@ -687,6 +727,7 @@ function buildDetailChildren(
       children.push(detailParagraph('（2）应付未付', F_FANG, 28, true));
       children.push(buildDetailTable(fields, node.payable, node.payableSumText));
     }
+    onSection?.();
   }
 }
 
@@ -704,11 +745,21 @@ function pageNumberFooter(): Footer {
   });
 }
 
+/** 数明细树里的小节数(进度分母)。 */
+function countDetailSections(nodes: DetailNode[]): number {
+  return nodes.reduce(
+    (acc, node) => acc + (node.kind === 'section' ? 1 : countDetailSections(node.children)),
+    0,
+  );
+}
+
 /** 纯版式层:数据(展示字符串)→ docx Buffer。无 DB/权限副作用。 */
 export async function buildFundingReportDocx(
   data: FundingReportData,
   options: FundingReportQueryOptions,
+  onProgress: ReportProgressFn = noopProgress,
 ): Promise<Buffer> {
+  onProgress(5, '生成汇总表');
   const summaryChildren: (Paragraph | Table)[] = [
     new Paragraph({
       children: [run(`项目名称：${data.project.name}（编号：${data.project.code}）`, F_FANG, 24)],
@@ -749,7 +800,16 @@ export async function buildFundingReportDocx(
       children: [run(`（${periodText}）`, F_SONG, 24)],
     }),
   ];
-  buildDetailChildren(data.detail, options.detailFields, detailChildren);
+  // 明细 Word 表格逐节推进 10→90;docx 构造与 zip 打包各占一段。
+  const totalSections = countDetailSections(data.detail);
+  let doneSections = 0;
+  buildDetailChildren(data.detail, options.detailFields, detailChildren, () => {
+    doneSections += 1;
+    onProgress(
+      totalSections > 0 ? 10 + (80 * doneSections) / totalSections : 90,
+      `生成 Word 明细（${doneSections}/${totalSections} 节）`,
+    );
+  });
 
   const doc = new Document({
     styles: {
@@ -775,7 +835,9 @@ export async function buildFundingReportDocx(
       },
     ],
   });
+  onProgress(92, '打包 Word 文档');
   const buffer = await Packer.toBuffer(doc);
+  onProgress(100, '文档就绪');
   return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
 }
 
@@ -788,6 +850,7 @@ export async function exportFundingReport(
   projectId: string,
   options: FundingReportQueryOptions,
   user: Pick<User, 'id' | 'role'>,
+  onProgress: ReportProgressFn = noopProgress,
 ): Promise<{ buffer: Buffer; filename: string }> {
   await requirePermission(user, 'project:view', projectId);
   const recordCount = await prisma.businessRecord.count({
@@ -796,11 +859,18 @@ export async function exportFundingReport(
   if (recordCount > env.MAX_EXPORT_ROWS) {
     throw new HTTPError(413, `导出行数超过上限 ${env.MAX_EXPORT_ROWS},请缩小项目范围或分年度导出`);
   }
+  onProgress(10, `统计记录数（${recordCount} 条）`);
   return withExportSlot(recordCount >= 2000, async () => {
-    const data = await buildFundingReportData(projectId, options, user);
-    const buffer = await buildFundingReportDocx(data, options);
+    const data = await buildFundingReportData(
+      projectId,
+      options,
+      user,
+      scaleProgress(onProgress, 12, 55),
+    );
+    const buffer = await buildFundingReportDocx(data, options, scaleProgress(onProgress, 55, 97));
     const date = new Date();
     const stamp = `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}`;
+    onProgress(99, '准备下载');
     return { buffer, filename: `经费报告-${data.project.code}-${stamp}.docx` };
   });
 }

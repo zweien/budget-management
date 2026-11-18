@@ -116,7 +116,10 @@ export type ApiFetchOptions = RequestInit;
  * SSO 401 跳登录、JSON error 字段提取),但不触发浏览器下载,
  * 返回 blob 与服务端 Content-Disposition 文件名(可能为 null)。
  */
-export async function fetchFile(path: string): Promise<FetchedFile> {
+export async function fetchFile(
+  path: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<FetchedFile> {
   if (typeof window === 'undefined') {
     throw new Error('fetchFile 仅在浏览器环境可用');
   }
@@ -126,7 +129,7 @@ export async function fetchFile(path: string): Promise<FetchedFile> {
     headers.set('x-mock-user-id', mockUserId);
   }
 
-  const res = await fetch(path, { headers });
+  const res = await fetch(path, { headers, signal: options.signal });
   if (!res.ok) {
     // 同 apiFetch:SSO 模式 401 → 跳登录页。
     if (res.status === 401 && !mockUserId) {
@@ -184,8 +187,12 @@ export interface FetchedFile {
  *
  * 仅在浏览器环境可用(SSR 无 window 时直接抛错,调用方不应在 SSR 调用)。
  */
-export async function downloadFile(path: string, filename: string): Promise<void> {
-  const { blob, filename: serverName } = await fetchFile(path);
+export async function downloadFile(
+  path: string,
+  filename: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  const { blob, filename: serverName } = await fetchFile(path, options);
   // 优先用响应头 Content-Disposition 里的文件名,回退到调用方传入的 filename。
   await saveBlob(blob, serverName ?? filename);
 }
