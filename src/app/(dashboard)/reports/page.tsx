@@ -312,35 +312,50 @@ export default function FundingReportPage() {
   const canGenerate = Boolean(projectId) && checkedSummary.length > 0 && checkedFields.length > 0;
 
   const abortRef = useRef<AbortController | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
 
   /** 取消生成:中断下载请求;服务端进度条目自然过期。 */
   const onCancelGenerate = useCallback(() => {
     abortRef.current?.abort();
   }, []);
 
+  // 卸载:停轮询并中断进行中的下载(离开页面不残留后台轮询/传输)。
+  useEffect(
+    () => () => {
+      stopPolling();
+      abortRef.current?.abort();
+    },
+    [stopPolling],
+  );
+
   const onGenerate = useCallback(async () => {
-    if (!selectedProject) return;
-    const progressId = crypto.randomUUID();
+    // 入口互斥:上一轮未收尾不启动(state 异步,以 ref 为准)。
+    if (!selectedProject || abortRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
+    const progressId = crypto.randomUUID();
     const startedAt = Date.now();
     setGeneration({ status: 'running', percent: 0, phase: '准备中', error: null });
     setElapsedMs(0);
 
-    // 500ms 一拍:轮询服务端进度 + 刷新已耗时(进度端点 404/失败时静默,不阻塞下载)。
-    const timer = setInterval(() => {
+    // 500ms 一拍:轮询只取阶段/百分比与耗时刷新——服务端在响应体传完前即标 done,
+    // 客户端完成态一律由 downloadFile 的 settle 决定,避免提前解禁按钮造成两次生成串台。
+    pollTimerRef.current = setInterval(() => {
+      if (abortRef.current !== controller) return; // 本轮已被收尾/取代
       setElapsedMs(Date.now() - startedAt);
       apiFetch<ProgressPayload>(`/api/export/progress?id=${progressId}`)
         .then(({ progress }) => {
+          if (abortRef.current !== controller) return;
           setGeneration((prev) =>
             prev?.status === 'running'
-              ? {
-                  ...prev,
-                  percent: progress.percent,
-                  phase: progress.phase,
-                  status: progress.status,
-                  error: progress.error,
-                }
+              ? { ...prev, percent: progress.percent, phase: progress.phase }
               : prev,
           );
         })
@@ -360,23 +375,26 @@ export default function FundingReportPage() {
         `经费报告-${selectedProject.code}.docx`,
         { signal: controller.signal },
       );
-      clearInterval(timer);
+      if (abortRef.current !== controller) return; // 已被新一轮取代:本轮静默退出
       setGeneration((prev) =>
         prev ? { ...prev, status: 'done', percent: 100, phase: '完成' } : prev,
       );
       toast.success('经费报告已生成，浏览器开始下载');
     } catch (error) {
-      clearInterval(timer);
+      if (abortRef.current !== controller) return;
       const aborted = error instanceof DOMException && error.name === 'AbortError';
       setGeneration(null);
       if (!aborted) {
         toast.error(error instanceof Error ? error.message : '生成失败，请重试');
       }
     } finally {
-      clearInterval(timer);
-      abortRef.current = null;
+      // 只收尾本轮:防止被取代后的迟到 finally 清掉新一轮的控制器/轮询。
+      if (abortRef.current === controller) {
+        stopPolling();
+        abortRef.current = null;
+      }
     }
-  }, [selectedProject, projectId, effectiveLevel, checkedSummary, checkedFields]);
+  }, [selectedProject, projectId, effectiveLevel, checkedSummary, checkedFields, stopPolling]);
 
   // 生成成功后短暂展示 100% 再收起进度条。
   useEffect(() => {

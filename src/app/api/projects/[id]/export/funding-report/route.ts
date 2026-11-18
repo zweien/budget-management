@@ -6,6 +6,7 @@ import { parseFundingReportOptions } from '@/lib/fundingReport';
 import {
   createExportProgress,
   finishExportProgress,
+  publicProgressError,
   updateExportProgress,
 } from '@/server/exports/progress';
 import { contentDispositionAttachment } from '@/server/services/migrationPackage.service';
@@ -50,11 +51,9 @@ export const GET = withRoute(
       });
     } catch (error) {
       if (trackProgress) {
-        finishExportProgress(
-          trackProgress,
-          'error',
-          error instanceof Error ? error.message : '生成失败',
-        );
+        // 错误文案白名单化:业务 HTTPError 保留原文,未知异常折叠为通用文案
+        // (防 Prisma/IO 异常细节经进度端点外泄)。
+        finishExportProgress(trackProgress, 'error', publicProgressError(error));
       }
       throw error;
     }
