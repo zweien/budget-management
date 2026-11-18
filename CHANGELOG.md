@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-18
+
+### 新增
+
+- **经费报告生成进度反馈（真实阶段进度，非动画）**：报告生成期间页面显示进度卡片——百分比进度条、当前阶段文案（统计记录数 N 条 → 读取业务记录 → 装配科目树与汇总 → 逐小节装配明细（x/y 节）→ 生成 Word 明细（x/y 节）→ 打包 Word 文档）、已耗时秒数与**取消按钮**（中断下载）。实现：`exportFundingReport` 全程 `onProgress` 阶段回调（百分比单调不减、封顶 100）；进程内进度注册表 `src/server/exports/progress.ts`（随机 id 为键、值只含阶段文案与数字无业务数据、10 分钟过期、上限 200 条自动淘汰）；导出端点接 `progress=<uuid>` 参数，新增轮询端点 `GET /api/export/progress?id=`（需登录，未知/过期 id 404、前端静默降级为纯转圈）；`fetchFile`/`downloadFile` 支持 `AbortSignal`。进度查询失败不影响下载本身。补注册表单测 4 例与 onProgress 单调/阶段覆盖集成测试
+
+### 修复
+
+- **standalone/Docker 镜像缺预算调整模板**：`template/预算调整-template.docx` 运行时按 cwd 相对路径读取、静态分析可能漏追踪，Docker runner 只拷 `.next/standalone`，漏追踪即「预算调整模板不存在」500。`next.config.ts` 的 `outputFileTracingIncludes` 显式追加 `template/**`（与 CHANGELOG.md 同款机制）；完整 `docker build` 验证镜像内含模板。注：经费报告 Word 生成不读任何模板文件，`docs/templates/` 仅为版式参照
+
 ## [0.40.0] - 2026-11-17
 
 ### 新增
