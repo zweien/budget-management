@@ -68,9 +68,11 @@ function isFilterActive(type: ColumnFilterType, value: unknown): boolean {
 /**
  * Excel 式表头筛选:列标题 + 漏斗按钮(激活态 link 蓝)+ Popover。
  * - values:faceted 值清单(搜索 + 勾选 + 全选/清空)
- * - text:包含匹配输入
- * - range:金额 min/max
- * - dateRange:日期范围
+ * - text:包含匹配输入(草稿 + 「确定」提交)
+ * - range:金额 min/max(草稿 + 「确定」提交)
+ * - dateRange:日期范围(预设/日历点选即筛;离散动作无需确认)
+ * 输入类筛选一律显式提交(确定/回车):逐字符自动筛选会把服务端分页的
+ * 列表打成一串请求,也让行数跳变难以为继;未确定关闭弹层即丢弃草稿。
  */
 export function HeaderFilter<TData>({
   column,
@@ -140,8 +142,10 @@ export function HeaderFilter<TData>({
               onClose={() => setOpen(false)}
             />
           ) : null}
-          {type === 'text' ? <TextFilter column={column} placeholder={placeholder} /> : null}
-          {type === 'range' ? <RangeFilter column={column} /> : null}
+          {type === 'text' ? (
+            <TextFilter column={column} placeholder={placeholder} onClose={() => setOpen(false)} />
+          ) : null}
+          {type === 'range' ? <RangeFilter column={column} onClose={() => setOpen(false)} /> : null}
           {type === 'dateRange' ? (
             <DateRangeFilter column={column} emptyLabel={emptyLabel} />
           ) : null}
@@ -286,79 +290,106 @@ function ValuesFilter<TData>({
   );
 }
 
-/** 输入先留在控件，短暂停顿或失焦后提交；离散筛选仍即时生效。 */
-function useDebouncedCommit<T>(commit: (value: T) => void) {
-  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pending = React.useRef<{ value: T; commit: (value: T) => void } | null>(null);
-  const flush = React.useCallback(() => {
-    clearTimeout(timer.current);
-    const next = pending.current;
-    pending.current = null;
-    if (next) next.commit(next.value);
-  }, []);
-  React.useEffect(() => () => clearTimeout(timer.current), []);
-  return {
-    schedule: (value: T) => {
-      clearTimeout(timer.current);
-      pending.current = { value, commit };
-      timer.current = setTimeout(flush, 250);
-    },
-    flush,
-  };
+/** 输入类筛选共用的底部按钮行(清除筛选 / 确定);确定后关闭弹层。 */
+function FilterActions({ onClear, onApply }: { onClear: () => void; onApply: () => void }) {
+  return (
+    <div className="flex justify-end gap-1 border-t border-border pt-1.5">
+      <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={onClear}>
+        清除筛选
+      </Button>
+      <Button size="sm" className="h-6 px-3 text-xs" onClick={onApply}>
+        确定
+      </Button>
+    </div>
+  );
 }
 
+/** 文本包含筛选:输入只进草稿,「确定」/回车才提交;未确定关闭弹层即丢弃。 */
 function TextFilter<TData>({
   column,
   placeholder,
+  onClose,
 }: {
   column: Column<TData, unknown>;
   placeholder?: string;
+  onClose: () => void;
 }) {
-  const { schedule, flush } = useDebouncedCommit<string>((value) =>
-    column.setFilterValue(value.trim() === '' ? undefined : value),
-  );
+  const [draft, setDraft] = React.useState((column.getFilterValue() as string | undefined) ?? '');
+  const apply = () => {
+    column.setFilterValue(draft.trim() === '' ? undefined : draft);
+    onClose();
+  };
   return (
-    <Input
-      autoFocus
-      defaultValue={(column.getFilterValue() as string | undefined) ?? ''}
-      placeholder={placeholder ?? '包含…'}
-      onChange={(e) => schedule(e.target.value)}
-      onBlur={flush}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') flush();
-      }}
-    />
+    <div className="space-y-1.5">
+      <Input
+        autoFocus
+        value={draft}
+        placeholder={placeholder ?? '包含…'}
+        className="h-8"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') apply();
+        }}
+      />
+      <FilterActions
+        onClear={() => {
+          column.setFilterValue(undefined);
+          setDraft('');
+          onClose();
+        }}
+        onApply={apply}
+      />
+    </div>
   );
 }
 
-function RangeFilter<TData>({ column }: { column: Column<TData, unknown> }) {
+/** 金额区间筛选:输入只进草稿,「确定」/回车才提交;未确定关闭弹层即丢弃。 */
+function RangeFilter<TData>({
+  column,
+  onClose,
+}: {
+  column: Column<TData, unknown>;
+  onClose: () => void;
+}) {
   const v = (column.getFilterValue() as NumberRangeValue | undefined) ?? {};
-  const draft = React.useRef(v);
-  const { schedule, flush } = useDebouncedCommit<NumberRangeValue>((next) =>
-    column.setFilterValue(next.min || next.max ? next : undefined),
-  );
-  const set = (patch: NumberRangeValue) => {
-    draft.current = { ...draft.current, ...patch };
-    schedule(draft.current);
+  const [min, setMin] = React.useState(v.min ?? '');
+  const [max, setMax] = React.useState(v.max ?? '');
+  const apply = () => {
+    column.setFilterValue(min || max ? { min, max } : undefined);
+    onClose();
+  };
+  const enter = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') apply();
   };
   return (
-    <div className="flex items-center gap-2">
-      <Input
-        type="number"
-        defaultValue={v.min ?? ''}
-        placeholder="最小"
-        className="h-8"
-        onChange={(e) => set({ min: e.target.value })}
-        onBlur={flush}
-      />
-      <span className="text-mute">—</span>
-      <Input
-        type="number"
-        defaultValue={v.max ?? ''}
-        placeholder="最大"
-        className="h-8"
-        onChange={(e) => set({ max: e.target.value })}
-        onBlur={flush}
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          value={min}
+          placeholder="最小"
+          className="h-8"
+          onChange={(e) => setMin(e.target.value)}
+          onKeyDown={enter}
+        />
+        <span className="text-mute">—</span>
+        <Input
+          type="number"
+          value={max}
+          placeholder="最大"
+          className="h-8"
+          onChange={(e) => setMax(e.target.value)}
+          onKeyDown={enter}
+        />
+      </div>
+      <FilterActions
+        onClear={() => {
+          column.setFilterValue(undefined);
+          setMin('');
+          setMax('');
+          onClose();
+        }}
+        onApply={apply}
       />
     </div>
   );
