@@ -36,6 +36,8 @@ interface MineBatch {
   batchId: string;
   hostProjectId: string;
   hostProjectName: string;
+  /** 该批次实际涉及的全部入账项目名(承载项目在前;多项目文件列全去向)。 */
+  projectNames: string[];
   fileName: string;
   templateVersion: string;
   status: string;
@@ -308,8 +310,11 @@ export default function UnifiedImportPage() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{b.fileName}</p>
-                  <p className="text-xs text-mute">
-                    {b.hostProjectName} · {b.rowCount} 行 ·{' '}
+                  <p
+                    className="text-xs text-mute"
+                    title={(b.projectNames ?? [b.hostProjectName]).join('、')}
+                  >
+                    {(b.projectNames ?? [b.hostProjectName]).join('、')} · {b.rowCount} 行 ·{' '}
                     {format(new Date(b.createdAt), 'yyyy-MM-dd HH:mm')}
                   </p>
                 </div>

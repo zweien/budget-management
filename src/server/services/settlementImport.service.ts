@@ -1637,6 +1637,8 @@ export async function listMySettlementBatches(
     batchId: string;
     hostProjectId: string;
     hostProjectName: string;
+    /** 该批次实际涉及的全部入账项目名(承载项目在前,行映射到的其余项目按行序去重)。 */
+    projectNames: string[];
     fileName: string;
     templateVersion: string;
     status: string;
@@ -1671,16 +1673,56 @@ export async function listMySettlementBatches(
       project: { select: { name: true } },
     },
   });
-  return batches.map((b) => ({
-    batchId: b.id,
-    hostProjectId: b.projectId,
-    hostProjectName: b.project.name,
-    fileName: b.fileName,
-    templateVersion: b.templateVersion,
-    status: b.status,
-    createdAt: b.createdAt.toISOString(),
-    rowCount: b._count.rows,
-  }));
+
+  // 行级入账去向(parsedData.targetProjectId,缺省回落承载项目):一条分组 SQL
+  // 取出各批次涉及的全部项目——多项目文件的「我的批次」须列全去向,而非仅承载项目。
+  const batchIds = batches.map((b) => b.id);
+  const targetRows = batchIds.length
+    ? await prisma.$queryRaw<Array<{ batchId: string; pid: string | null }>>(
+        Prisma.sql`SELECT batch_id AS "batchId", parsed_data->>'targetProjectId' AS pid
+          FROM import_rows
+          WHERE batch_id IN (${Prisma.join(batchIds.map((id) => Prisma.sql`${id}::uuid`))})
+          GROUP BY batch_id, parsed_data->>'targetProjectId'`,
+      )
+    : [];
+  const targetsByBatch = new Map<string, string[]>();
+  for (const row of targetRows) {
+    if (!row.pid) continue;
+    const list = targetsByBatch.get(row.batchId) ?? [];
+    list.push(row.pid);
+    targetsByBatch.set(row.batchId, list);
+  }
+  const idsForNames = [
+    ...new Set([
+      ...batches.map((b) => b.projectId),
+      ...targetRows.flatMap((r) => (r.pid ? [r.pid] : [])),
+    ]),
+  ];
+  const nameRows = idsForNames.length
+    ? await prisma.project.findMany({
+        where: { id: { in: idsForNames } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const nameById = new Map(nameRows.map((p) => [p.id, p.name]));
+
+  return batches.map((b) => {
+    // 承载项目在前,行映射目标按行出现顺序去重跟随;已删项目查不到名字的跳过。
+    const projectNames = [...new Set([b.projectId, ...(targetsByBatch.get(b.id) ?? [])])]
+      .map((id) => nameById.get(id))
+      .filter((n): n is string => !!n);
+    return {
+      batchId: b.id,
+      hostProjectId: b.projectId,
+      hostProjectName: b.project.name,
+      projectNames,
+      fileName: b.fileName,
+      templateVersion: b.templateVersion,
+      status: b.status,
+      createdAt: b.createdAt.toISOString(),
+      rowCount: b._count.rows,
+    };
+  });
 }
 
 // ---------- 预览 / 暂存 / 确认 ----------

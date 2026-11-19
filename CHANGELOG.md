@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-11-19
+
+### 修复
+
+- **统一导入页「我的批次」多项目文件只显示一个项目**:批次行原来只展示承载项目名,依次导入多个项目信息的文件看不出去向;`GET /api/imports/mine` 新增 `projectNames` 字段——一条分组 SQL 取出各批次 `import_rows.parsed_data->>'targetProjectId'` 的全部去重去向(承载项目在前、行映射目标按行序跟随),前端批次行改列全部入账项目名(悬停见全量,超长自动换行)。`hostProjectId/hostProjectName` 保留不变(继续预览入口用);补多项目批次服务测试(uuid 参数显式 `::uuid` 转换避免 `uuid = text` 比较)
+
 ## [0.43.0] - 2026-11-19
 
 ### 新增

@@ -231,4 +231,46 @@ describe('settlementImport unified entry (integration, real PG)', () => {
     const other = await listMySettlementBatches({ id: outsiderId, role: UserRole.ADMIN });
     expect(other).toHaveLength(0);
   });
+
+  it('listMySettlementBatches:多项目批次列全入账项目(projectNames)', async () => {
+    // 种子第二个项目乙;v3 文件两行分属甲/乙 → 批次去向须列两个项目(承载=甲在前)。
+    const projectNameB = '统一入口测试项目乙';
+    const projectB = await createProject(
+      {
+        code: `UNI-${uuidv7().slice(0, 8)}-${Math.random().toString(36).slice(2, 6)}`,
+        name: projectNameB,
+      },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(projectB.id);
+    await prisma.initialBudgetApplication
+      .create({
+        data: {
+          id: uuidv7(),
+          projectId: projectB.id,
+          status: 'APPROVED',
+          applicantId: adminId,
+          approvedAt: new Date(),
+        },
+      })
+      .catch(() => {});
+
+    const buf = await buildV3Xlsx([
+      { docNo: 'UNI-MULTI-A', amount: 10, projectName: `其他专项科学技术费/${projectNameA}` },
+      { docNo: 'UNI-MULTI-B', amount: 20, projectName: `其他专项科学技术费/${projectNameB}` },
+    ]);
+    const parsed = await parseSettlementUnified(
+      buf,
+      { id: adminId, role: UserRole.ADMIN },
+      'multi-projects.xlsx',
+    );
+    expect(parsed.needsHost).toBe(false);
+
+    const mine = await listMySettlementBatches({ id: adminId, role: UserRole.ADMIN });
+    const target = mine.find((b) => b.batchId === parsed.batchId);
+    expect(target).toBeTruthy();
+    expect(target!.hostProjectId).toBe(projectAId); // 承载 = 首个预映射目标(甲)
+    expect(target!.projectNames[0]).toBe(projectNameA);
+    expect(target!.projectNames).toContain(projectNameB);
+  });
 });
