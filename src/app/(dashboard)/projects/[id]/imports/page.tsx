@@ -823,7 +823,8 @@ function ImportPageInner() {
           <div>
             <p className="text-sm font-medium">批量上传附件(按单据编号匹配)</p>
             <p className="mt-1 text-xs text-mute">
-              文件名以单据编号开头(如 TYBX…_01_说明.pdf)即可挂到本项目对应业务记录;
+              文件名以单据编号开头(如
+              TYBX…_01_说明.pdf)即可挂到本项目对应业务记录;支持多选与拖入文件夹(递归展开);
               同号多文件全挂同一条记录;与已有附件内容相同的自动跳过。跨项目的附件请用统一导入页入口。
             </p>
           </div>

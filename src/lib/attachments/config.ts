@@ -6,6 +6,9 @@
 /** 默认单文件大小上限:50MB(防 OOM,非业务限制)。 */
 export const MAX_ATTACHMENT_BYTES_DEFAULT = 50 * 1024 * 1024;
 
+/** 批量附件导入单批文件数上限(客户端/服务端单一来源;预览只传文件名+指纹,量级无压力)。 */
+export const MAX_BATCH_ATTACHMENT_FILES = 500;
+
 /**
  * 允许的文件类型规范:扩展名 + MIME 双白名单(两者都要命中才算合法,防伪造)。
  * previewable 标记该类型能否在线预览(单一事实源:预览白名单由此派生,

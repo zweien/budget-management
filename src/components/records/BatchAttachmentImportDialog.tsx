@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   ALLOWED_ATTACHMENT_SPEC,
   MAX_ATTACHMENT_BYTES_DEFAULT,
+  MAX_BATCH_ATTACHMENT_FILES,
   validateAttachment,
 } from '@/lib/attachments/config';
 import {
@@ -36,7 +37,7 @@ import {
 } from '@/lib/api/attachments';
 
 /**
- * 批量附件导入(CONTEXT.md「批量附件导入」):一次选中多个附件文件,
+ * 批量附件导入(CONTEXT.md「批量附件导入」):一次选中多个附件文件或拖入文件夹,
  * 按单据编号前缀匹配挂到既有业务记录。两阶段:文件名(+指纹)匹配预览 →
  * 核对后逐文件串行上传(复用单传接口,内容重复由服务端跳重)。
  *
@@ -44,11 +45,63 @@ import {
  * 同号跨项目在预览行内人工指定)。
  */
 
-/** 单批文件数上限(与服务端 parseMatchPreviewFiles 一致)。 */
-const MAX_BATCH_FILES = 100;
-
 /** 白名单扩展名(单一事实源 ALLOWED_ATTACHMENT_SPEC,file input accept 用)。 */
 const ACCEPT = ALLOWED_ATTACHMENT_SPEC.flatMap((s) => [...s.extensions]).join(',');
+
+/** 文件夹拖入时静默跳过的系统/平台杂项(隐藏文件、资源叉、缩略图缓存、压缩元数据)。 */
+const JUNK_FILE_NAMES = new Set(['Thumbs.db', 'desktop.ini']);
+
+/** readEntries 每次最多返回一批(常见 100 条),空数组才算目录读完。 */
+async function readDirEntries(dir: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> {
+  const reader = dir.createReader();
+  const out: FileSystemEntry[] = [];
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+      reader.readEntries(resolve, reject),
+    );
+    if (!batch.length) break;
+    out.push(...batch);
+  }
+  return out;
+}
+
+/**
+ * 拖放载荷 → 文件列表:支持拖入文件夹递归展开(webkitGetAsEntry;非安全
+ * 环境/不支持 entries 时回退 dataTransfer.files)。隐藏目录(.git、__MACOSX
+ * 等)与系统杂项文件静默跳过。注意:entries 提取必须同步完成(DataTransferItemList
+ * 在事件返回后失效),本函数首个 await 之前即为纯同步收集,调用方不得先 await 别的。
+ */
+async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
+  const entries = Array.from(dt.items ?? [])
+    .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+    .filter((e): e is FileSystemEntry => e !== null);
+  if (!entries.length) return Array.from(dt.files);
+
+  const files: File[] = [];
+  const walk = async (entry: FileSystemEntry): Promise<void> => {
+    if (entry.isFile) {
+      if (
+        entry.name.startsWith('.') ||
+        entry.name.startsWith('._') ||
+        JUNK_FILE_NAMES.has(entry.name)
+      ) {
+        return;
+      }
+      const file = await new Promise<File | null>((resolve) =>
+        (entry as FileSystemFileEntry).file(resolve, () => resolve(null)),
+      );
+      if (file) files.push(file);
+      return;
+    }
+    // 目录:隐藏目录与 macOS 压缩包元数据目录跳过,其余递归展开。
+    if (entry.name.startsWith('.') || entry.name === '__MACOSX') return;
+    for (const child of await readDirEntries(entry as FileSystemDirectoryEntry)) {
+      await walk(child);
+    }
+  };
+  for (const entry of entries) await walk(entry);
+  return files;
+}
 
 interface BatchAttachmentImportDialogProps {
   open: boolean;
@@ -129,26 +182,34 @@ export function BatchAttachmentImportDialog({
 
   const startMatch = useCallback(
     async (fileList: FileList | File[]) => {
-      const files = Array.from(fileList);
-      if (files.length === 0) return;
-      if (files.length > MAX_BATCH_FILES) {
-        toast.error(`单批最多 ${MAX_BATCH_FILES} 个文件,请分批上传`);
-        return;
-      }
+      const all = Array.from(fileList);
+      if (all.length === 0) return;
       // 客户端即时校验(扩展名/MIME 双白名单 + 默认 50MB;服务端仍为权威)。
-      const invalid = files.filter(
-        (f) =>
-          !validateAttachment(
-            { name: f.name, type: f.type || 'application/octet-stream', size: f.size },
-            MAX_ATTACHMENT_BYTES_DEFAULT,
-          ).ok,
-      );
+      // 拖入文件夹时可能夹带不合规文件:剔除并提示,不再整批拒绝。
+      const files: File[] = [];
+      const invalid: File[] = [];
+      for (const f of all) {
+        const ok = validateAttachment(
+          { name: f.name, type: f.type || 'application/octet-stream', size: f.size },
+          MAX_ATTACHMENT_BYTES_DEFAULT,
+        ).ok;
+        (ok ? files : invalid).push(f);
+      }
       if (invalid.length > 0) {
-        toast.error(
-          `${invalid.length} 个文件不合规(类型不在白名单或超过 50MB):${invalid
+        toast.warning(
+          `已跳过 ${invalid.length} 个不合规文件(类型不在白名单或超过 50MB):${invalid
             .slice(0, 3)
             .map((f) => f.name)
             .join('、')}${invalid.length > 3 ? ' 等' : ''}`,
+        );
+      }
+      if (files.length === 0) {
+        toast.error('没有可导入的文件(全部不合规或为空)');
+        return;
+      }
+      if (files.length > MAX_BATCH_ATTACHMENT_FILES) {
+        toast.error(
+          `共 ${all.length} 个文件,超过单批上限 ${MAX_BATCH_ATTACHMENT_FILES},请分批上传`,
         );
         return;
       }
@@ -274,7 +335,8 @@ export function BatchAttachmentImportDialog({
             批量上传附件(按单据编号匹配)
           </DialogTitle>
           <DialogDescription>
-            文件名以单据编号开头(如 TYBX…_01_说明.pdf)即可自动挂到对应业务记录;
+            文件名以单据编号开头(如
+            TYBX…_01_说明.pdf)即可自动挂到对应业务记录;支持多选与拖入文件夹(递归展开);
             同号多文件全挂同一条记录;内容与已有附件相同的文件自动跳过。
             {projectId ? '在本项目范围内匹配。' : '跨项目匹配:同号跨项目时需逐文件指定目标项目。'}
           </DialogDescription>
@@ -298,17 +360,23 @@ export function BatchAttachmentImportDialog({
                 e.preventDefault();
                 setDragOver(false);
                 if (phase === 'matching') return;
-                void startMatch(e.dataTransfer.files);
+                // 文件夹拖入:entries 必须在事件处理器同步阶段收集
+                // (filesFromDataTransfer 首个 await 前为纯同步),之后再异步展开。
+                void filesFromDataTransfer(e.dataTransfer).then((files) => {
+                  if (files.length) return startMatch(files);
+                  toast.error('未识别到文件(空文件夹或不支持的拖入内容)');
+                });
               }}
             >
               <Upload className="size-8 text-mute" />
               <p className="text-sm">
                 {phase === 'matching'
                   ? `正在计算内容指纹并匹配 ${progress}/${rows.length || ''}…`
-                  : `点击或拖拽附件文件到此处(多选,单批 ≤ ${MAX_BATCH_FILES} 个)`}
+                  : `点击或拖拽附件文件/文件夹到此处(多选,单批 ≤ ${MAX_BATCH_ATTACHMENT_FILES} 个)`}
               </p>
               <p className="text-xs text-mute">
-                支持格式:{ACCEPT.replaceAll(',', ' / ')};单文件 ≤ 50MB
+                支持格式:{ACCEPT.replaceAll(',', ' / ')};单文件 ≤ 50MB;拖入文件夹会递归展开,
+                自动跳过隐藏/系统文件
               </p>
               <input
                 type="file"

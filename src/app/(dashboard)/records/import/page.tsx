@@ -278,7 +278,7 @@ export default function UnifiedImportPage() {
           <div>
             <p className="text-sm font-medium">批量上传附件(按单据编号匹配)</p>
             <p className="mt-1 text-xs text-mute">
-              文件名以单据编号开头即可自动挂到对应业务记录(跨项目;同号跨项目需指定目标);
+              文件名以单据编号开头即可自动挂到对应业务记录(跨项目;同号跨项目需指定目标);支持多选与拖入文件夹(递归展开);
               与已有附件内容相同的文件自动跳过。适合财务导出的报销凭证 PDF/扫描件成批归档。
             </p>
           </div>

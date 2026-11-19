@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { HTTPError } from '@/lib/auth/session';
 import { requirePermission } from '@/lib/auth/permissions';
 import { matchDocNo } from '@/lib/attachments/docNoMatch';
+import { MAX_BATCH_ATTACHMENT_FILES } from '@/lib/attachments/config';
 
 /**
  * 批量附件导入的匹配预览(CONTEXT.md「批量附件导入」)。
@@ -13,9 +14,6 @@ import { matchDocNo } from '@/lib/attachments/docNoMatch';
  * 范围:项目内入口限定单项目(命中必唯一);统一入口跨项目——候选仅限
  * 用户有 record:edit 的非归档项目,唯一命中自动归属,同号跨项目标歧义。
  */
-
-/** 单批文件数上限(逐文件串行上传,超限提示分批)。 */
-export const MAX_BATCH_ATTACHMENT_FILES = 100;
 
 export interface AttachmentMatchFileInput {
   name: string;

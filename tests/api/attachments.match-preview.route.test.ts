@@ -293,8 +293,8 @@ describe('批量附件匹配预览 API(项目内 + 跨项目)', () => {
     }
   });
 
-  it('单批超过 100 个文件 → 400', async () => {
-    const files = Array.from({ length: 101 }, (_, i) => ({ name: `F${i}_x.pdf` }));
+  it('单批超过 500 个文件 → 400', async () => {
+    const files = Array.from({ length: 501 }, (_, i) => ({ name: `F${i}_x.pdf` }));
     const res = await postProject({ files });
     expect(res.status).toBe(400);
   });
