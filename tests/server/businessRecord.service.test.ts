@@ -226,6 +226,63 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(saved!.amount.toFixed(2)).toBe('700.00');
   });
 
+  it('createRecord: 负数金额(冲正)可入账冲减占用;0 → 422', async () => {
+    const { project, leafA } = await seedApprovedProject('NEG');
+
+    // 先正后负:同科目 100 − 40 → 台账净占用 60。
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '100.00',
+        businessDate: '2026-06-01',
+        handler: '经办人A',
+        summary: '原报销',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    const reversal = await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '-40.00',
+        businessDate: '2026-06-10',
+        handler: '经办人A',
+        summary: '冲正:科目更正',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    expect(reversal.record.amount.toFixed(2)).toBe('-40.00');
+    expect(reversal.overBudget).toBe(false); // 负数只会减少占用
+
+    const sum = await prisma.businessRecord.aggregate({
+      where: { projectId: project.id, isVoid: false },
+      _sum: { amount: true },
+    });
+    expect(sum._sum.amount?.toFixed(2)).toBe('60.00');
+
+    // 0 无业务含义,仍拒绝。
+    await expect(
+      createRecord(
+        project.id,
+        {
+          budgetYear: 2026,
+          subjectId: leafA.id,
+          amount: '0.00',
+          businessDate: '2026-06-11',
+          handler: '经办人A',
+          summary: '零金额',
+          status: BusinessStatus.PAID,
+        },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({ status: 422 });
+  });
+
   it('createRecord: 余额锚定双层预警——超科目总预算(跨年累计)亮 overSubjectTotal,超项目总预算亮 overTotalBudget', async () => {
     // 定制编制:total 1000;2026 年度只有 A 300(计划从紧);A 的 STB=600(天花板从宽)
     // ——年度计划与科目天花板脱钩,分别验证两层预警。
@@ -626,26 +683,6 @@ describe('businessRecord.service (integration, real PG)', () => {
           budgetYear: 2026,
           subjectId: root.id,
           amount: '100.00',
-          businessDate: '2026-06-01',
-          handler: '经办人A',
-          summary: 'x',
-          status: BusinessStatus.PLACEHOLDER,
-        },
-        adminUser(),
-      ),
-    ).rejects.toMatchObject({ status: 422 });
-  });
-
-  it('createRecord: amount <= 0 → HTTPError 422', async () => {
-    const { project, leafA } = await seedApprovedProject('NEG');
-
-    await expect(
-      createRecord(
-        project.id,
-        {
-          budgetYear: 2026,
-          subjectId: leafA.id,
-          amount: '0.00',
           businessDate: '2026-06-01',
           handler: '经办人A',
           summary: 'x',

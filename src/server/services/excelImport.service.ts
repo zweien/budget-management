@@ -6,7 +6,7 @@ import { HTTPError } from '@/lib/auth/session';
 import { env } from '@/lib/env';
 import { requirePermission } from '@/lib/auth/permissions';
 import { uuidv7 } from '@/lib/id';
-import { D, ZERO, fromStored, toStored } from '@/lib/decimal';
+import { D, fromStored, toStored } from '@/lib/decimal';
 import { createImportedRecords } from '@/server/services/importRecords.service';
 import { checkDuplicates, hardDupReason } from '@/server/services/duplicateCheck.service';
 import { requireApprovedInitialBudget } from '@/server/services/initialBudget.service';
@@ -178,7 +178,7 @@ export function normalizeDate(s: string | null): string | null {
   return formatYmd(dt);
 }
 
-/** 校验金额字符串 > 0,返回 2 位小数字符串;失败返回 null。export 供结算单导入复用。 */
+/** 校验金额字符串非 0(负数=冲正记录),返回 2 位小数字符串;失败返回 null。export 供结算单导入复用。 */
 export function normalizeAmount(s: string | null): string | null {
   if (s === null || s === '') return null;
   let d: D;
@@ -187,7 +187,7 @@ export function normalizeAmount(s: string | null): string | null {
   } catch {
     return null;
   }
-  if (!d.isFinite() || d.lte(ZERO)) return null;
+  if (!d.isFinite() || d.isZero()) return null;
   return d.toFixed(2);
 }
 
@@ -375,7 +375,7 @@ export async function parseAndValidate(
     // 金额。
     const amount = normalizeAmount(data.amount);
     if (amount === null) {
-      errors.push({ field: 'amount', message: '金额必须为大于 0 的数字' });
+      errors.push({ field: 'amount', message: '金额必须为非 0 数字(负数表示冲正)' });
     }
 
     // 业务日期。

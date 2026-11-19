@@ -237,11 +237,26 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
         finCode: '1891953874BR24002V',
         remark: '市内交通报销',
       },
-      // 纯冲账组:净额 -3741.82 → 整组跳过。
+      // 冲正单据:独立编号、净额为负 → 照常入账为负数记录(冲减科目占用)。
       {
         docNo: 'TYBX-REVERSE-1',
         applyDate: '2025-03-04',
         amount: -3741.82,
+        handler: '张小亚',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+      },
+      // 纯冲销组:同号 -500 + 500 → 净额 0 → 整组跳过留痕。
+      {
+        docNo: 'TYBX-ZERO-1',
+        applyDate: '2025-03-05',
+        amount: -500,
+        handler: '张小亚',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+      },
+      {
+        docNo: 'TYBX-ZERO-1',
+        applyDate: '2025-03-05',
+        amount: 500,
         handler: '张小亚',
         detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
       },
@@ -259,10 +274,10 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     const preview = await getSettlementBatch(batchId, adminUser());
 
     expect(preview.templateVersion).toBe(SETTLEMENT_V3_TEMPLATE_VERSION);
-    // 合并组 + 单行组进 pending(2 条);纯冲账组 skipped(1)。
-    expect(preview.pending).toHaveLength(2);
+    // 合并组 + 单行组 + 负数冲正单进 pending(3 条);净额 0 纯冲销组 skipped(1)。
+    expect(preview.pending).toHaveLength(3);
     expect(preview.skippedCount).toBe(1);
-    expect(Object.keys(preview.skippedReasons)[0]).toContain('冲账');
+    expect(Object.keys(preview.skippedReasons)[0]).toContain('纯冲销');
 
     const merged = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-MERGE-1')!;
     expect(merged).toBeTruthy();
@@ -281,6 +296,12 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     const single = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-SINGLE-1')!;
     expect(single.parsedData.amount).toBe('68.50');
     expect(single.parsedData.subjectId).toBe(leafTrafficId);
+
+    // 冲正单据:负数净额照常入账,科目预选同规则(冲减对应科目)。
+    const reverse = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-REVERSE-1')!;
+    expect(reverse.parsedData.amount).toBe('-3741.82');
+    expect(reverse.normalizedAmount).toBe('-3741.82');
+    expect(reverse.parsedData.subjectId).toBe(leafTravelId);
 
     const skipped = preview.errors; // skipped 行不出现在 pending/duplicates
     void skipped;

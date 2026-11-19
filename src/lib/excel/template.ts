@@ -126,21 +126,21 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
     };
   }
 
-  // 「金额」列(第 4 列)数据校验:大于 0 的十进制。
+  // 「金额」列(第 4 列)数据校验:非 0 十进制(负数=冲正记录,冲减科目占用)。
   const amountColIdx = EXCEL_COLUMNS.findIndex((c) => c.key === 'amount') + 1;
   sheet.getCell(1, amountColIdx).note = {
-    texts: [{ text: '金额必须大于 0,例如 1000.00' }],
+    texts: [{ text: '金额非 0;负数表示冲正(更正业务),例如 1000.00 / -100.00' }],
   };
   for (let r = 2; r <= 200; r++) {
     const cell = sheet.getCell(r, amountColIdx);
     cell.dataValidation = {
       type: 'decimal',
-      operator: 'greaterThan',
+      operator: 'notEqual',
       allowBlank: true,
       formulae: [0],
       showErrorMessage: true,
       errorTitle: '金额无效',
-      error: '金额必须为大于 0 的数字',
+      error: '金额必须为非 0 数字(负数表示冲正)',
     };
   }
 
@@ -168,7 +168,7 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
     ['项目编号', '必须与当前项目编号一致(系统校验)。'],
     ['预算年度', '正整数,例如 2026。'],
     ['科目编码', '必须是该项目下已存在的【叶节点】科目编码(非叶节点会报错)。'],
-    ['金额', '大于 0 的数字,例如 1000.00。'],
+    ['金额', '非 0 的数字,例如 1000.00;负数表示冲正(更正业务)。'],
     ['申请日期', 'YYYY-MM-DD 文本日期。'],
     ['经办人', '非空。'],
     ['摘要', '非空。'],

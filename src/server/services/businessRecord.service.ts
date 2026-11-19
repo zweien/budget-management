@@ -148,16 +148,16 @@ function assertValidYear(year: number, label = 'budgetYear'): void {
   }
 }
 
-/** 校验金额字符串 > 0。 */
-function parsePositiveAmount(amount: string): D {
+/** 校验金额字符串非 0(负数=冲正记录,冲减科目占用;0 无业务含义仍拒)。 */
+function parseNonZeroAmount(amount: string): D {
   let d: D;
   try {
     d = new D(amount);
   } catch {
     throw new HTTPError(422, `金额格式无效:${amount}`);
   }
-  if (!d.isFinite() || d.lte(ZERO)) {
-    throw new HTTPError(422, '金额必须大于 0');
+  if (!d.isFinite() || d.isZero()) {
+    throw new HTTPError(422, '金额不能为 0(负数表示冲正)');
   }
   return d;
 }
@@ -317,7 +317,7 @@ export async function createRecord(
 
   // 基础字段校验(在事务外做,失败即返回 422,无需占连接)。
   assertValidYear(input.budgetYear);
-  const amount = parsePositiveAmount(input.amount);
+  const amount = parseNonZeroAmount(input.amount);
   if (!BUSINESS_STATUSES.includes(input.status)) {
     throw new HTTPError(422, `状态非法,仅允许 ${BUSINESS_STATUSES.join('/')}`);
   }
@@ -536,7 +536,7 @@ export async function updateRecord(
   if (!BUSINESS_STATUSES.includes(newStatus)) {
     throw new HTTPError(422, `状态非法,仅允许 ${BUSINESS_STATUSES.join('/')}`);
   }
-  const amount = parsePositiveAmount(newAmountRaw);
+  const amount = parseNonZeroAmount(newAmountRaw);
   if (input.handler !== undefined && !input.handler.trim()) {
     throw new HTTPError(422, '经办人不能为空');
   }

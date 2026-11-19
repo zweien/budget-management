@@ -154,7 +154,7 @@ export interface SettlementBatchPreview {
   errors: SettlementPreviewRow[];
   /** 业务退单等被跳过的行数(仅提示条数)。 */
   skippedCount: number;
-  /** 行被跳过的原因 → 条数(业务退单/纯冲账净额非正等)。 */
+  /** 行被跳过的原因 → 条数(业务退单/净额为 0 的纯冲销等)。 */
   skippedReasons: Record<string, number>;
   /** 项目名称。 */
   projectName: string | null;
@@ -464,7 +464,7 @@ export async function parseSettlement(
 
     const amount = normalizeAmount(amountRaw);
     if (amount === null) {
-      errors.push({ field: 'amount', message: '金额必须为大于 0 的数字' });
+      errors.push({ field: 'amount', message: '金额必须为非 0 数字(负数表示冲正)' });
     }
 
     if (!handler) {
@@ -680,7 +680,8 @@ interface V3RawRow {
  *
  * 与 v1/v2 的差异:
  * - 单据编号是明细行粒度,冲账重报会产生同号多行(含负数行)→ 按单据编号分组,
- *   金额取组内代数和(净额)成一条记录;净额 ≤ 0 的组(纯冲账)整组跳过留痕;
+ *   金额取组内代数和(净额)成一条记录;净额为 0 的组(纯冲销)整组跳过留痕,
+ *   净额为负的冲正单照常入账为负数记录(冲减科目占用);
  *   组内 经办人/开支细项 不一致 → error 交人工。
  * - 摘要取「摘要」列,空则退「备注」,组内取第一个非空。
  * - 科目自动预选:开支细项末段与本地叶科目名精确相等(且不重名)时预选;
@@ -871,8 +872,9 @@ async function parseSettlementV3(opts: {
       net = net === null ? d : net.plus(d);
     }
     const netStr = net === null ? null : net.toFixed(2);
-    if (net !== null && netStr !== null && net.lessThanOrEqualTo(0)) {
-      // 纯冲账/净额非正:整组跳过留痕(不阻断其它组)。
+    if (net !== null && netStr !== null && net.isZero()) {
+      // 净额为 0(纯冲销,冲完无余):整组跳过留痕(不阻断其它组);
+      // 净额为负 = 冲正单据,照常入账为负数记录(冲减科目占用),走下方正常流程。
       parsedRows.push({
         rowNo,
         data: {
@@ -893,7 +895,7 @@ async function parseSettlementV3(opts: {
           fileProjectName: fileProjectName || null,
           sourceRows: grp.map((r) => r.rowNo),
         },
-        errors: [{ field: 'amount', message: `单据净额 ${netStr} ≤ 0(冲账单据),不导入` }],
+        errors: [{ field: 'amount', message: `单据净额为 0(纯冲销),不导入` }],
         validationStatus: 'skipped',
         duplicate: false,
         duplicateLevel: 'none',
@@ -1102,7 +1104,7 @@ interface V4RawRow {
 
 /**
  * v4(单据台账,财务系统台账导出)解析:单据粒度一行一单,无需 v3 的同号分组——
- * 冲销以「冲销金额(元)」列表达,金额 = 报销金额 − 冲销金额(净额 ≤ 0 视为纯冲销,
+ * 冲销以「冲销金额(元)」列表达,金额 = 报销金额 − 冲销金额(净额为 0 视为纯冲销,
  * 整行跳过留痕)。年度取「年度」列(不从日期推导);业务日期 = 填报日期;完成日期
  * 可为 ISO 时间戳(截取日期部分)。「项目」「控制项」与 v3 的 科研项目名称/
  * 开支细项名称 同语义:去口径前缀自动预映射项目 + 控制项末段预选叶科目;查重/
@@ -1281,8 +1283,9 @@ async function parseSettlementV4(opts: {
     }
     const net = claim !== null && offset !== null ? claim.minus(offset) : null;
     const netStr = net === null ? null : net.toFixed(2);
-    if (net !== null && netStr !== null && net.lessThanOrEqualTo(0)) {
-      // 纯冲销/净额非正:整行跳过留痕(不阻断其它行)。
+    if (net !== null && netStr !== null && net.isZero()) {
+      // 净额为 0(纯冲销,冲完无余):整行跳过留痕(不阻断其它行);
+      // 净额为负 = 冲正单据,照常入账为负数记录(冲减科目占用)。
       parsedRows.push({
         rowNo: r.rowNo,
         data: {
@@ -1302,7 +1305,7 @@ async function parseSettlementV4(opts: {
           detailPath: r.controlPath || null,
           sourceRows: [r.rowNo],
         },
-        errors: [{ field: 'amount', message: `单据净额 ${netStr} ≤ 0(冲销单据),不导入` }],
+        errors: [{ field: 'amount', message: `单据净额为 0(纯冲销),不导入` }],
         validationStatus: 'skipped',
         duplicate: false,
         duplicateLevel: 'none',

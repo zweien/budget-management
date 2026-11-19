@@ -231,8 +231,19 @@ describe('settlementImport v4 (单据台账,单据粒度净额)', () => {
         project: '科研试制费/台账驱动测试专属项目甲',
         controlPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
       },
-      // 全额冲销:100 − 100 = 0 → skipped。
+      // 全额冲销:100 − 100 = 0 → skipped(净额为 0 才跳)。
       { docNo: 'TZ-V4-3', claim: 100, offset: 100, project: '科研试制费/台账驱动测试专属项目甲' },
+      // 冲正单据:冲销 > 报销 → 净额 -150 → 照常入账为负数记录。
+      {
+        docNo: 'TZ-V4-6',
+        year: 2025,
+        docStatus: '完成记账',
+        claim: 50,
+        offset: 200,
+        fillDate: '2025-12-01',
+        project: '科研试制费/台账驱动测试专属项目甲',
+        controlPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+      },
       // 业务退单 → skipped。
       { docNo: 'TZ-V4-4', docStatus: '业务退单', project: '科研试制费/台账驱动测试专属项目甲' },
       // 项目未命中 → error 未映射项目。
@@ -258,8 +269,8 @@ describe('settlementImport v4 (单据台账,单据粒度净额)', () => {
 
     const preview = await getSettlementBatch(batchId, adminUser());
     expect(preview.templateVersion).toBe(SETTLEMENT_V4_TEMPLATE_VERSION);
-    // 待导入:TZ-V4-1/2;错误(未映射):TZ-V4-5;跳过:全额冲销 + 业务退单。
-    expect(preview.pending).toHaveLength(2);
+    // 待导入:TZ-V4-1/2/6(负数冲正);错误(未映射):TZ-V4-5;跳过:全额冲销 + 业务退单。
+    expect(preview.pending).toHaveLength(3);
     expect(preview.errors).toHaveLength(1);
     expect(preview.skippedCount).toBe(2);
 
@@ -287,19 +298,27 @@ describe('settlementImport v4 (单据台账,单据粒度净额)', () => {
     const r5 = byDoc('TZ-V4-5')!;
     expect(r5.errors.some((e) => e.message.includes('未映射项目'))).toBe(true);
 
-    // 确认入账:预选科目的两行 → 写业务记录(净额 + 科目 + 完成日期)。
+    // 冲正单据:净额 50 − 200 = -150,照常待导入(负数入账冲减科目)。
+    const r6 = byDoc('TZ-V4-6')!;
+    expect(r6.parsedData.amount).toBe('-150.00');
+
+    // 确认入账:预选科目的三行 → 写业务记录(净额 + 科目 + 完成日期,含负数冲正)。
     const res = await confirmSettlementImport(
       batchId,
       preview.pending.map((r) => r.rowId),
       adminUser(),
     );
-    expect(res.created).toBe(2);
+    expect(res.created).toBe(3);
     const rec1 = await prisma.businessRecord.findFirst({
       where: { projectId, docNo: 'TZ-V4-1' },
     });
     expect(rec1?.amount.toFixed(2)).toBe('80.00');
     expect(rec1?.subjectId).toBe(leafTravelId);
     expect(rec1?.completedDate?.toISOString().slice(0, 10)).toBe('2025-11-28');
+    const rec6 = await prisma.businessRecord.findFirst({
+      where: { projectId, docNo: 'TZ-V4-6' },
+    });
+    expect(rec6?.amount.toFixed(2)).toBe('-150.00');
   });
 
   it('v4:统一入口自动预映射承载项目;已入库同号同额再传 → 硬重复', async () => {

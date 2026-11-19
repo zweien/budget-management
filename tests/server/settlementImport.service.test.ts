@@ -318,7 +318,8 @@ describe('settlementImport.service (integration, real PG)', () => {
         docStatus: '完成记账',
         fillDate: '2026-01-02',
         subject: 's',
-        amount: '-5',
+        // 0 金额仍拒(负数=冲正已放行,0 无业务含义)。
+        amount: '0',
         handler: '乙',
       },
     ]);
