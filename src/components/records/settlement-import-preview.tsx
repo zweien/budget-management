@@ -16,13 +16,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { TablePagination } from '@/components/ui/table-pagination';
 import { Combobox } from '@/components/ui/combobox';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -624,22 +617,16 @@ export function SettlementImportPreview({
                   {readOnly ? (
                     <span>{mapped?.name ?? '未映射'}</span>
                   ) : (
-                    <Select
+                    <Combobox
+                      options={mappableProjects.map((p) => ({ value: p.id, label: p.name }))}
                       value={m.targetProjectId ?? undefined}
+                      onChange={(v) => void applyProjectMapping(m.fileProjectName, v)}
+                      placeholder="选择目标项目…"
+                      searchPlaceholder="输入项目名称筛选…"
+                      emptyText="无匹配项目"
                       disabled={remapping}
-                      onValueChange={(v) => void applyProjectMapping(m.fileProjectName, v)}
-                    >
-                      <SelectTrigger className="w-72">
-                        <SelectValue placeholder="选择目标项目…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {mappableProjects.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      className="w-72"
+                    />
                   )}
                   {!mapped ? <Badge variant="error">未映射</Badge> : null}
                 </div>

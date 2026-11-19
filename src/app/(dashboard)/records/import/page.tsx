@@ -12,14 +12,8 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Combobox } from '@/components/ui/combobox';
 import {
   SettlementImportPreview,
   type SettlementBatchData,
@@ -243,22 +237,16 @@ export default function UnifiedImportPage() {
               <span className="text-sm">
                 未能自动识别目标项目,请选择承载项目(批次容器;行入账仍按映射):
               </span>
-              <Select
+              <Combobox
+                options={mappableProjects.map((p) => ({ value: p.id, label: p.name }))}
                 value={hostProjectId || undefined}
-                onValueChange={setHostProjectId}
+                onChange={setHostProjectId}
+                placeholder="选择承载项目…"
+                searchPlaceholder="输入项目名称筛选…"
+                emptyText="无匹配项目"
                 disabled={uploading}
-              >
-                <SelectTrigger className="w-72">
-                  <SelectValue placeholder="选择承载项目…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {mappableProjects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                className="w-72"
+              />
               <Button
                 size="sm"
                 disabled={!hostProjectId || uploading || !pendingFile}
