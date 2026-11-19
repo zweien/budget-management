@@ -260,6 +260,14 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
         handler: '张小亚',
         detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
       },
+      // 亚分净额:0.004 舍入到分 = 0.00 → 按纯冲销跳过(不得绕过零值校验)。
+      {
+        docNo: 'TYBX-SUBCENT-1',
+        applyDate: '2025-03-06',
+        amount: 0.004,
+        handler: '张小亚',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+      },
     ]);
 
     const wb = await loadSettlementWorkbookIfMatch(buf);
@@ -274,9 +282,9 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     const preview = await getSettlementBatch(batchId, adminUser());
 
     expect(preview.templateVersion).toBe(SETTLEMENT_V3_TEMPLATE_VERSION);
-    // 合并组 + 单行组 + 负数冲正单进 pending(3 条);净额 0 纯冲销组 skipped(1)。
+    // 合并组 + 单行组 + 负数冲正单进 pending(3 条);净额 0/亚分净额组 skipped(2)。
     expect(preview.pending).toHaveLength(3);
-    expect(preview.skippedCount).toBe(1);
+    expect(preview.skippedCount).toBe(2);
     expect(Object.keys(preview.skippedReasons)[0]).toContain('纯冲销');
 
     const merged = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-MERGE-1')!;

@@ -199,7 +199,8 @@ const recordSchema = z
     amount: z
       .string()
       .min(1, '请输入金额')
-      .refine((v) => Number(v) > 0, '金额必须大于 0'),
+      // 负数=冲正记录放行;0 拒绝(与服务端「金额 ≠ 0」同口径,NaN 一并拦)。
+      .refine((v) => Number.isFinite(Number(v)) && Number(v) !== 0, '金额不能为 0(负数表示冲正)'),
     businessDate: z.date().optional(), // 选填:留空默认当天(服务端兜底)
     /** 完成日期(选填);与申请日期都填时不得早于申请日期。 */
     completedDate: z.date().optional(),

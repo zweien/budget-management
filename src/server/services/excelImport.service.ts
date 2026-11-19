@@ -178,7 +178,8 @@ export function normalizeDate(s: string | null): string | null {
   return formatYmd(dt);
 }
 
-/** 校验金额字符串非 0(负数=冲正记录),返回 2 位小数字符串;失败返回 null。export 供结算单导入复用。 */
+/** 校验金额字符串非 0(负数=冲正记录),返回 2 位小数字符串;失败返回 null。
+ *  先舍入到分再判零:亚分值(如 -0.001 → 0.00)按 0 拒。export 供结算单导入复用。 */
 export function normalizeAmount(s: string | null): string | null {
   if (s === null || s === '') return null;
   let d: D;
@@ -187,8 +188,10 @@ export function normalizeAmount(s: string | null): string | null {
   } catch {
     return null;
   }
-  if (!d.isFinite() || d.isZero()) return null;
-  return d.toFixed(2);
+  if (!d.isFinite()) return null;
+  const rounded = d.toDecimalPlaces(2);
+  if (rounded.isZero()) return null;
+  return rounded.toFixed(2);
 }
 
 /** 校验年度正整数(1900~9999)。 */
@@ -206,7 +209,7 @@ function normalizeYear(s: string | null): number | null {
  *
  * - 权限:record:import + 项目范围。
  * - exceljs 读 buffer;每数据行(第 2 行起)按 §10.4 列序映射。
- * - 校验:项目编号匹配;年度正整数;科目编码为该项目叶节点;金额 > 0;
+ * - 校验:项目编号匹配;年度正整数;科目编码为该项目叶节点;金额 ≠ 0(负数=冲正);
  *   业务状态合法四态;业务日期可解析;经办人/摘要非空。
  * - 疑似重复(§10.3):对有效行,按(项目+年度+科目+金额+业务日期+摘要)
  *   匹配既有 business_records(含作废?——按摘要等强匹配,作废行不算重复),

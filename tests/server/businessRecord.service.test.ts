@@ -281,6 +281,23 @@ describe('businessRecord.service (integration, real PG)', () => {
         adminUser(),
       ),
     ).rejects.toMatchObject({ status: 422 });
+
+    // 亚分值先舍入到分再判零(codex review):-0.001 → 0.00 → 按 0 拒,不得绕过入库。
+    await expect(
+      createRecord(
+        project.id,
+        {
+          budgetYear: 2026,
+          subjectId: leafA.id,
+          amount: '-0.001',
+          businessDate: '2026-06-12',
+          handler: '经办人A',
+          summary: '亚分冲正',
+          status: BusinessStatus.PAID,
+        },
+        adminUser(),
+      ),
+    ).rejects.toMatchObject({ status: 422 });
   });
 
   it('createRecord: 余额锚定双层预警——超科目总预算(跨年累计)亮 overSubjectTotal,超项目总预算亮 overTotalBudget', async () => {

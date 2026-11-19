@@ -871,8 +871,11 @@ async function parseSettlementV3(opts: {
       }
       net = net === null ? d : net.plus(d);
     }
-    const netStr = net === null ? null : net.toFixed(2);
-    if (net !== null && netStr !== null && net.isZero()) {
+    // 净额先舍入到分再判零(codex review):亚分净额(如 0.004 → 0.00)按纯冲销跳过,
+    // 防止预览放过、确认时才因 0 金额失败。
+    const netRounded = net === null ? null : net.toDecimalPlaces(2);
+    const netStr = netRounded === null ? null : netRounded.toFixed(2);
+    if (netRounded !== null && netStr !== null && netRounded.isZero()) {
       // 净额为 0(纯冲销,冲完无余):整组跳过留痕(不阻断其它组);
       // 净额为负 = 冲正单据,照常入账为负数记录(冲减科目占用),走下方正常流程。
       parsedRows.push({
@@ -1282,8 +1285,10 @@ async function parseSettlementV4(opts: {
       errors.push({ field: 'amount', message: `冲销金额无法解析:${r.offsetRaw}` });
     }
     const net = claim !== null && offset !== null ? claim.minus(offset) : null;
-    const netStr = net === null ? null : net.toFixed(2);
-    if (net !== null && netStr !== null && net.isZero()) {
+    // 净额先舍入到分再判零(codex review):亚分净额按纯冲销跳过,防预览/确认不一致。
+    const netRounded = net === null ? null : net.toDecimalPlaces(2);
+    const netStr = netRounded === null ? null : netRounded.toFixed(2);
+    if (netRounded !== null && netStr !== null && netRounded.isZero()) {
       // 净额为 0(纯冲销,冲完无余):整行跳过留痕(不阻断其它行);
       // 净额为负 = 冲正单据,照常入账为负数记录(冲减科目占用)。
       parsedRows.push({

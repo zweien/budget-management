@@ -148,7 +148,8 @@ function assertValidYear(year: number, label = 'budgetYear'): void {
   }
 }
 
-/** 校验金额字符串非 0(负数=冲正记录,冲减科目占用;0 无业务含义仍拒)。 */
+/** 校验金额字符串非 0(负数=冲正记录,冲减科目占用;0 无业务含义仍拒)。
+ *  先舍入到分再判零:亚分值(如 -0.001 → 0.00)按 0 拒绝,防止绕过零值校验入库。 */
 function parseNonZeroAmount(amount: string): D {
   let d: D;
   try {
@@ -156,10 +157,14 @@ function parseNonZeroAmount(amount: string): D {
   } catch {
     throw new HTTPError(422, `金额格式无效:${amount}`);
   }
-  if (!d.isFinite() || d.isZero()) {
+  if (!d.isFinite()) {
+    throw new HTTPError(422, `金额格式无效:${amount}`);
+  }
+  const rounded = d.toDecimalPlaces(2);
+  if (rounded.isZero()) {
     throw new HTTPError(422, '金额不能为 0(负数表示冲正)');
   }
-  return d;
+  return rounded;
 }
 
 /** 校验日期字符串(yyyy-mm-dd)可解析为合法日历日期,标签用于报错文案。 */
@@ -302,7 +307,7 @@ async function requireLeafSubject(
 /**
  * §8.1/8.4 新增业务记录。
  * - 权限:record:create + 项目范围。
- * - 校验:subjectId 为该项目叶节点;budgetYear 正整数;amount > 0;status 合法四态之一;
+ * - 校验:subjectId 为该项目叶节点;budgetYear 正整数;amount ≠ 0(负数=冲正);status 合法四态之一;
  *   businessDate 选填(缺省默认当天);handler/summary 非空。
  * - §8.4 超预算仍保存,仅返回 overBudget 标志。
  * - 事务内:写 business_record(id=uuidv7,createdById) + 审计 create。
