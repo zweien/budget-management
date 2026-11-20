@@ -60,9 +60,12 @@ export interface CustomStatisticsFilters {
   voidOnly?: boolean;
   /** 经办人集合(in;与 handler 模糊叠加)。 */
   handlers?: string[];
-  /** 科目名集合(in,精确)。 */
+  /** 科目名集合(精确;跨项目同名并集 = 同名叶 ∪ 同名非叶的全部后代叶,含下级)。 */
   subjectNames?: string[];
-  /** 项目记录页按科目 ID 精确筛选，避免同名科目混入；空集哨兵仍为零行。 */
+  /**
+   * 项目记录页按科目 ID 精确筛选,避免同名科目混入;非叶 ID = 含其全部后代叶
+   * (含下级,服务端展开);空集哨兵仍为零行。
+   */
   subjectIds?: string[];
   /** 录入人姓名集合(in)。 */
   creatorNames?: string[];
@@ -263,12 +266,47 @@ export async function prepareRecordSelection(
   ];
   if (yearVals.none && yearsIn.length === 0) where.budgetYear = { in: [] };
   else if (yearsIn.length > 0) where.budgetYear = { in: yearsIn };
-  if (subjectLeafIds) where.subjectId = { in: [...subjectLeafIds] };
+  // 科目三通道统一收敛为叶 ID 集合后 AND 叠加(业务记录只挂叶科目,任何科目筛选
+  // 最终都等价于叶 ID 集合;非叶命中 = 含其全部后代叶,v0.47.0 起):
+  // - subject(模糊):matchSubjects contains 展开(既有行为)。
+  // - subjectIds(ID 精确):叶原样保留,非叶展开为全部后代叶。
+  // - subjectNames(名称精确):同名并集 = 同名叶 ∪ 同名非叶的全部后代叶。
+  let subjectIdIn: Set<string> | undefined;
+  const andSubjectLeaves = (leaves: Set<string>): void => {
+    subjectIdIn = subjectIdIn ? new Set([...subjectIdIn].filter((id) => leaves.has(id))) : leaves;
+  };
+  if (subjectLeafIds) andSubjectLeaves(subjectLeafIds);
   if (filters.subjectIds) {
     const selected = splitValuesNone(filters.subjectIds);
-    const ids = selected.none && !selected.values.length ? [] : selected.values;
-    where.subjectId = { in: subjectLeafIds ? ids.filter((id) => subjectLeafIds.has(id)) : ids };
+    if (selected.none && !selected.values.length) {
+      andSubjectLeaves(new Set());
+    } else if (selected.values.length > 0) {
+      andSubjectLeaves(
+        await expandHitsToLeafIds(
+          await prisma.budgetSubject.findMany({
+            where: { id: { in: selected.values } },
+            select: { id: true, projectId: true, isLeaf: true },
+          }),
+        ),
+      );
+    }
   }
+  if (subjectVals.none && subjectVals.values.length === 0) {
+    andSubjectLeaves(new Set());
+  } else if (subjectVals.values.length > 0) {
+    andSubjectLeaves(
+      await expandHitsToLeafIds(
+        await prisma.budgetSubject.findMany({
+          where: {
+            ...(requestedProjectIds.length ? { projectId: { in: requestedProjectIds } } : {}),
+            name: { in: subjectVals.values },
+          },
+          select: { id: true, projectId: true, isLeaf: true },
+        }),
+      ),
+    );
+  }
+  if (subjectIdIn) where.subjectId = { in: [...subjectIdIn] };
   // voidOnly:仅看作废;statuses 与 includeVoid 并存 = status IN … OR isVoid(作废不改 status)。
   const statusesIn = [...statusVals.values, ...(filters.status ? [filters.status] : [])];
   if (filters.voidOnly) {
@@ -292,12 +330,6 @@ export async function prepareRecordSelection(
     where.handler = { in: handlerVals.values };
   } else if (filters.handler) {
     where.handler = { contains: filters.handler, mode: 'insensitive' };
-  }
-  if (subjectVals.none && subjectVals.values.length === 0) {
-    // subjectNames 精确 in 与科目模糊检索叠加(and)。
-    where.AND = [{ subject: { name: { in: [] } } }];
-  } else if (subjectVals.values.length > 0) {
-    where.AND = [{ subject: { name: { in: subjectVals.values } } }];
   }
   if (creatorVals.none && creatorVals.values.length === 0) {
     where.createdBy = { name: { in: [] } };
@@ -755,6 +787,49 @@ interface SubjectMatch {
 }
 
 /**
+ * 收集科目子树的全部叶 ID(root 自身为叶时即 [rootId];树由调用方给定)。
+ * 模糊检索与非叶展开(subjectIds/subjectNames 通道)共用的子树遍历。
+ */
+function collectSubtreeLeafIds(
+  subjects: Array<{ id: string; parentId: string | null; isLeaf: boolean }>,
+  rootId: string,
+): string[] {
+  const byId = new Map(subjects.map((s) => [s.id, s]));
+  const out: string[] = [];
+  const stack = [rootId];
+  while (stack.length) {
+    const cur = byId.get(stack.pop()!);
+    if (!cur) continue;
+    if (cur.isLeaf) {
+      out.push(cur.id);
+      continue;
+    }
+    for (const s of subjects) if (s.parentId === cur.id) stack.push(s.id);
+  }
+  return out;
+}
+
+/**
+ * 命中科目(叶/非叶混合)展开为叶 ID 集合:叶原样保留,非叶展开为全部后代叶
+ * (含下级)。命中行的查库由调用方完成;非叶所需的项目科目树在此补查。
+ */
+async function expandHitsToLeafIds(
+  hits: Array<{ id: string; projectId: string; isLeaf: boolean }>,
+): Promise<Set<string>> {
+  const leaves = new Set(hits.filter((h) => h.isLeaf).map((h) => h.id));
+  const nonLeaf = hits.filter((h) => !h.isLeaf);
+  if (nonLeaf.length === 0) return leaves;
+  const tree = await prisma.budgetSubject.findMany({
+    where: { projectId: { in: [...new Set(nonLeaf.map((h) => h.projectId))] } },
+    select: { id: true, parentId: true, isLeaf: true },
+  });
+  for (const h of nonLeaf) {
+    for (const id of collectSubtreeLeafIds(tree, h.id)) leaves.add(id);
+  }
+  return leaves;
+}
+
+/**
  * 科目模糊匹配:名称/编号 contains(不区分大小写)。
  * - query 为空 → 不匹配任何行,leafIds 为空集(调用方据此决定"全部"语义)。
  * - 匹配到叶 → 该行为叶;匹配到非叶 → 行指标按其全部后代叶汇总。
@@ -765,29 +840,11 @@ function matchSubjects(
 ): SubjectMatch {
   const q = query.trim().toLowerCase();
   if (!q) return { rows: [], leafIds: new Set() };
-  const byId = new Map(subjects.map((s) => [s.id, s]));
-
-  /** 收集科目子树的全部叶 ID。 */
-  const collectLeaves = (rootId: string, out: string[]): void => {
-    const stack = [rootId];
-    while (stack.length) {
-      const cur = byId.get(stack.pop()!);
-      if (!cur) continue;
-      if (cur.isLeaf) {
-        out.push(cur.id);
-        continue;
-      }
-      for (const s of subjects) if (s.parentId === cur.id) stack.push(s.id);
-    }
-  };
-
   const rows: SubjectMatch['rows'] = [];
   const leafIds = new Set<string>();
   for (const s of subjects) {
     if (!s.name.toLowerCase().includes(q) && !s.code.toLowerCase().includes(q)) continue;
-    const leaves: string[] = [];
-    if (s.isLeaf) leaves.push(s.id);
-    else collectLeaves(s.id, leaves);
+    const leaves = collectSubtreeLeafIds(subjects, s.id);
     rows.push({ id: s.id, code: s.code, name: s.name, isLeaf: s.isLeaf, leafIds: leaves });
     for (const id of leaves) leafIds.add(id);
   }
@@ -1337,8 +1394,9 @@ export interface CustomStatisticsFacets {
 }
 
 /**
- * 筛选候选:年度/经办人/录入人/科目名(仅叶科目,项目范围内)。
- * 全局只读;selected-scope 凭证拒绝(跨项目接口)。projectIds 为空 = 全部项目。
+ * 筛选候选:年度/经办人/录入人/科目名(含非叶科目,项目范围内;选中非叶名
+ * = 含下级并集,展开语义见 prepareRecordSelection)。全局只读;selected-scope
+ * 凭证拒绝(跨项目接口)。projectIds 为空 = 全部项目。
  */
 export async function customStatisticsFacets(
   projectIds: string[] | null,
@@ -1355,7 +1413,7 @@ export async function customStatisticsFacets(
     }),
     prisma.businessRecord.groupBy({ by: ['createdById'], where: scopeWhere }),
     prisma.budgetSubject.findMany({
-      where: { ...scopeWhere, isLeaf: true },
+      where: scopeWhere,
       select: { name: true },
       orderBy: { name: 'asc' },
     }),

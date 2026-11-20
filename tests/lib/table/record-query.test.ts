@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { VALUES_FILTER_NONE } from '@/lib/table/filter-fns';
 import { buildRecordQuery } from '@/lib/table/record-query';
 
 describe('记录页服务端查询协议', () => {
@@ -18,5 +19,25 @@ describe('记录页服务端查询协议', () => {
     const global = buildRecordQuery([], [], { page: 1, pageSize: 100 });
     expect(global.has('includeVoid')).toBe(false);
     expect(global.has('entryTimeField')).toBe(false);
+  });
+
+  it('科目筛选参数映射：subject → subjectNames、subjectId → subjectIds；取消全选发空集哨兵', () => {
+    const params = buildRecordQuery(
+      [
+        { id: 'subject', value: ['材料费'] },
+        { id: 'subjectId', value: ['uuid-1', 'uuid-2'] },
+      ],
+      [],
+      { projectId: 'project', page: 1, pageSize: 100 },
+    );
+    expect(params.getAll('subjectNames')).toEqual(['材料费']);
+    expect(params.getAll('subjectIds')).toEqual(['uuid-1', 'uuid-2']);
+
+    const cleared = buildRecordQuery([{ id: 'subjectId', value: [] }], [], {
+      projectId: 'project',
+      page: 1,
+      pageSize: 100,
+    });
+    expect(cleared.getAll('subjectIds')).toEqual([VALUES_FILTER_NONE]);
   });
 });

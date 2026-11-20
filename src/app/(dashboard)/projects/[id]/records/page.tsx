@@ -188,6 +188,11 @@ interface LeafSubject {
   name: string;
 }
 
+/** 筛选侧科目选项(含非叶;非叶选中 = 含下级,服务端展开为全部后代叶)。 */
+interface SubjectFilterOption extends LeafSubject {
+  isLeaf: boolean;
+}
+
 interface ProjectDetail {
   id: string;
   code: string;
@@ -258,6 +263,8 @@ function BusinessRecordsPageInner() {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   // 叶科目列表(用于筛选 + 新增/修改表单)。
   const [leafSubjects, setLeafSubjects] = useState<LeafSubject[]>([]);
+  // 筛选候选的全量科目(含非叶):表头漏斗 options/徽章用它;表单下拉仍只用叶科目。
+  const [filterSubjects, setFilterSubjects] = useState<SubjectFilterOption[]>([]);
   // 业务记录列表。
   const [records, setRecords] = useState<BusinessRecordRow[]>([]);
   const [loadedQueryKey, setLoadedQueryKey] = useState('');
@@ -381,11 +388,11 @@ function BusinessRecordsPageInner() {
         ]);
         if (cancelled) return;
         setProject(proj);
-        const leaves: LeafSubject[] = (subjectData.subjects ?? [])
-          .filter((n) => n.isLeaf)
-          .map((n) => ({ subjectId: n.id, code: n.code, name: n.name }))
+        const all: SubjectFilterOption[] = (subjectData.subjects ?? [])
+          .map((n) => ({ subjectId: n.id, code: n.code, name: n.name, isLeaf: n.isLeaf }))
           .sort((a, b) => a.code.localeCompare(b.code));
-        setLeafSubjects(leaves);
+        setLeafSubjects(all.filter((n) => n.isLeaf));
+        setFilterSubjects(all);
       } catch (e) {
         if (!cancelled) {
           if (e instanceof Error) toast.error(e.message);
@@ -751,12 +758,15 @@ function BusinessRecordsPageInner() {
     [projectId],
   );
 
-  // subjectMap 同步更新为 HeaderFilter 的 valueLabels(subjectId → 科目名)。
+  // subjectMap 同步更新为 HeaderFilter 的 valueLabels(subjectId → 科目名;
+  // 非叶科目标「编码 名称（含下级）」,与筛选语义(服务端展开后代叶)一致)。
   const subjectLabels = useMemo(() => {
     const m: Record<string, string> = {};
-    for (const s of leafSubjects) m[s.subjectId] = s.name;
+    for (const s of filterSubjects) {
+      m[s.subjectId] = s.isLeaf ? s.name : `${s.code} ${s.name}（含下级）`;
+    }
     return m;
-  }, [leafSubjects]);
+  }, [filterSubjects]);
 
   /** 新增记录科目下拉选项:默认只显示名称;存在同名叶科目时追加编号消歧(防记错科目)。 */
   const subjectSelectOptions = useMemo(() => {
@@ -769,8 +779,8 @@ function BusinessRecordsPageInner() {
     }));
   }, [leafSubjects]);
 
-  /** 科目/年度列的稳定候选(不受本列筛选影响)。 */
-  const subjectOptions = useMemo(() => leafSubjects.map((s) => s.subjectId), [leafSubjects]);
+  /** 科目/年度列的稳定候选(不受本列筛选影响);科目候选含非叶(选中=含下级)。 */
+  const subjectOptions = useMemo(() => filterSubjects.map((s) => s.subjectId), [filterSubjects]);
   const yearOptions = useMemo(() => facets?.years ?? [], [facets]);
   const creatorOptions = useMemo(() => facets?.creatorNames ?? [], [facets]);
   const handlerOptions = useMemo(() => facets?.handlerNames ?? [], [facets]);

@@ -133,6 +133,48 @@ describe('statistics.service (integration, real PG)', () => {
     return { project, leafA, leafB };
   }
 
+  /** helper:自定义科目树的编制 payload(叶科目各配年度预算,合计=projectTotal)。 */
+  function payloadWithSubjects(
+    subjects: InitialBudgetPayload['subjects'],
+    leafBudgets: Array<{ code: string; amount: string }>,
+    total: string,
+  ): InitialBudgetPayload {
+    return {
+      projectTotal: total,
+      annualBudgets: [{ year: 2026, amount: total }],
+      subjects,
+      subjectBudgets: leafBudgets.map((b) => ({
+        year: 2026,
+        subjectCode: b.code,
+        amount: b.amount,
+        unit: '次',
+        quantity: b.amount,
+        unitPrice: '1.00',
+      })),
+      subjectTotalBudgets: leafBudgets.map((b) => ({
+        subjectCode: b.code,
+        amount: b.amount,
+      })),
+    };
+  }
+
+  /** helper:建项目 + 自定义树编制生效 → 返回 project。 */
+  async function seedApprovedCustomProject(
+    suffix: string,
+    payload: InitialBudgetPayload,
+  ): Promise<{ id: string }> {
+    const code = `STAT-${suffix}-${uuidv7().slice(0, 8)}`;
+    const project = await createProject(
+      { code, name: `stat ${suffix}` },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    const { appId } = await createDraft(project.id, payload, adminUser());
+    await submitDraft(appId, adminUser());
+    await approveApplication(appId, adminUser());
+    return project;
+  }
+
   // ---------------- crossProjectStatistics:年度口径 ----------------
 
   it('crossProjectStatistics: 年度视图预算取年度预算——只编总预算未编年度的项目贡献 0', async () => {
@@ -691,6 +733,153 @@ describe('statistics.service (integration, real PG)', () => {
     expect(none.summary.currentBudget).toBe('0.00');
   });
 
+  // ---------------- customStatistics 非叶科目筛选(含下级,v0.47.0) ----------------
+
+  it('customStatistics: subjectIds 非叶 ID = 含下级(展开为全部后代叶);与模糊科目 AND 叠加', async () => {
+    const { project, leafA, leafB } = await seedApprovedProject('CSID');
+    const root = (await prisma.budgetSubject.findFirst({
+      where: { projectId: project.id, isLeaf: false },
+    }))!;
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '100.00',
+        businessDate: '2026-03-01',
+        handler: '经',
+        summary: 'csid-a',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+    await createRecord(
+      project.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafB.id,
+        amount: '200.00',
+        businessDate: '2026-03-02',
+        handler: '经',
+        summary: 'csid-b',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // 非叶 ROOT → 服务端展开为 A+B,两行都在。
+    const viaRoot = await customStatistics(
+      { projectId: project.id, subjectIds: [root.id] },
+      adminUser(),
+    );
+    expect(viaRoot.total).toBe(2);
+
+    // 叶 ID 原样精确:仅 A。
+    const viaLeaf = await customStatistics(
+      { projectId: project.id, subjectIds: [leafA.id] },
+      adminUser(),
+    );
+    expect(viaLeaf.total).toBe(1);
+    expect(viaLeaf.records[0].summary).toBe('csid-a');
+
+    // 非叶 + 子叶混选 = 并集去重(仍 2 行,不是 3)。
+    const mixed = await customStatistics(
+      { projectId: project.id, subjectIds: [root.id, leafA.id] },
+      adminUser(),
+    );
+    expect(mixed.total).toBe(2);
+
+    // 与模糊 subject 叠加(AND 交集):ROOT 展开 {A,B} ∩ 模糊「叶A」{A} = {A}。
+    const andFuzzy = await customStatistics(
+      { projectId: project.id, subjectIds: [root.id], subject: '叶A' },
+      adminUser(),
+    );
+    expect(andFuzzy.total).toBe(1);
+    expect(andFuzzy.records[0].summary).toBe('csid-a');
+
+    // 不存在的 ID → 空集零行。
+    const invalid = await customStatistics(
+      { projectId: project.id, subjectIds: [uuidv7()] },
+      adminUser(),
+    );
+    expect(invalid.total).toBe(0);
+  });
+
+  it('customStatistics: subjectNames 非叶名 = 含下级并集(跨项目同名叶+非叶一并命中)', async () => {
+    // P:材料费是叶;Q:材料费是非叶(下挂 试剂费/耗材费),另有无关叶 其他费。
+    const p = await seedApprovedCustomProject(
+      'CSNM1',
+      payloadWithSubjects(
+        [
+          { code: 'R', name: 'nm1根', parentCode: null, isLeaf: false },
+          { code: 'L', name: '材料费', parentCode: 'R', isLeaf: true },
+        ],
+        [{ code: 'L', amount: '100.00' }],
+        '100.00',
+      ),
+    );
+    const q = await seedApprovedCustomProject(
+      'CSNM2',
+      payloadWithSubjects(
+        [
+          { code: 'R', name: 'nm2根', parentCode: null, isLeaf: false },
+          { code: 'M', name: '材料费', parentCode: 'R', isLeaf: false },
+          { code: 'M1', name: '试剂费', parentCode: 'M', isLeaf: true },
+          { code: 'M2', name: '耗材费', parentCode: 'M', isLeaf: true },
+          { code: 'O', name: '其他费', parentCode: 'R', isLeaf: true },
+        ],
+        [
+          { code: 'M1', amount: '100.00' },
+          { code: 'M2', amount: '50.00' },
+          { code: 'O', amount: '50.00' },
+        ],
+        '200.00',
+      ),
+    );
+    const subj = async (projectId: string, code: string) =>
+      (await prisma.budgetSubject.findFirst({ where: { projectId, code } }))!;
+    const rec = (projectId: string, subjectId: string, summary: string) =>
+      createRecord(
+        projectId,
+        {
+          budgetYear: 2026,
+          subjectId,
+          amount: '10.00',
+          businessDate: '2026-04-01',
+          handler: '经',
+          summary,
+          status: BusinessStatus.PAID,
+        },
+        adminUser(),
+      );
+    await rec(p.id, (await subj(p.id, 'L')).id, 'nm-p');
+    await rec(q.id, (await subj(q.id, 'M1')).id, 'nm-m1');
+    await rec(q.id, (await subj(q.id, 'M2')).id, 'nm-m2');
+    await rec(q.id, (await subj(q.id, 'O')).id, 'nm-o');
+
+    // 跨项目同名并集:P 的叶「材料费」 ∪ Q 非叶「材料费」的全部后代叶;
+    // 不含 Q 的「其他费」。(共享库可能有其他项目同名科目,按摘要前缀收敛断言。)
+    const union = await customStatistics({ subjectNames: ['材料费'] }, adminUser());
+    const own = union.records
+      .filter((r) => r.summary.startsWith('nm-'))
+      .map((r) => r.summary)
+      .sort();
+    expect(own).toEqual(['nm-m1', 'nm-m2', 'nm-p']);
+
+    // 叶名精确照旧。
+    const leafOnly = await customStatistics({ subjectNames: ['其他费'] }, adminUser());
+    expect(
+      leafOnly.records.filter((r) => r.summary.startsWith('nm-')).map((r) => r.summary),
+    ).toEqual(['nm-o']);
+
+    // 项目范围内同理(Q 内 = 2 行,其他费不在其下)。
+    const scoped = await customStatistics(
+      { projectIds: [q.id], subjectNames: ['材料费'] },
+      adminUser(),
+    );
+    expect(scoped.total).toBe(2);
+  });
+
   // ---------------- riskSummary:首页风险预警(跨项目负结余科目) ----------------
 
   it('riskSummary: 一次取回全部项目负结余科目(仅超支科目,作废不计,最负在前)', async () => {
@@ -1018,7 +1207,7 @@ describe('statistics.service (integration, real PG)', () => {
     expect(ranged.records[0]?.summary).toBe('csf2-b');
   });
 
-  it('customStatisticsFacets: 候选清单(年度/经办人/录入人/叶科目名)', async () => {
+  it('customStatisticsFacets: 候选清单(年度/经办人/录入人/科目名,含非叶)', async () => {
     const { project: p2, leafA } = await seedApprovedProject('CSF3B');
     await createRecord(
       p2.id,
@@ -1037,7 +1226,8 @@ describe('statistics.service (integration, real PG)', () => {
     expect(facets.years).toContain(2026);
     expect(facets.handlerNames).toContain('facet-甲');
     expect(facets.creatorNames).toContain('admin-stat');
-    expect(facets.subjectNames).toEqual(expect.arrayContaining(['叶A', '叶B']));
+    // v0.47.0 起候选含非叶科目名(选中非叶名 = 含下级),叶科目照旧。
+    expect(facets.subjectNames).toEqual(expect.arrayContaining(['叶A', '叶B', '根']));
   });
 
   it('customStatisticsFacets: 同名科目跨项目去重(全局录入页科目筛选候选唯一)', async () => {

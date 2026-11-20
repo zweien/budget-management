@@ -227,13 +227,11 @@ export default function ProjectLedgerPage() {
               mode === 'total' && totalInfo?.budgetMode === 'LUMP_SUM' ? '累计计划' : '总预算'
             }
             subjectHref={(n) =>
-              // 业务记录只挂在叶科目上:仅叶科目可点。
+              // 科目名链到业务记录页:叶=单科目,非叶=含下级(服务端展开为全部后代叶)。
               // 年度视图携带年份筛选;总预算视图跳该科目全部年度记录。
-              n.isLeaf
-                ? mode === 'annual'
-                  ? `/projects/${projectId}/records?subjectId=${n.subjectId}&year=${year}`
-                  : `/projects/${projectId}/records?subjectId=${n.subjectId}`
-                : undefined
+              mode === 'annual'
+                ? `/projects/${projectId}/records?subjectId=${n.subjectId}&year=${year}`
+                : `/projects/${projectId}/records?subjectId=${n.subjectId}`
             }
           />
         </>

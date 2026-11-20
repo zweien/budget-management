@@ -56,7 +56,8 @@ interface Props {
   nodes: LedgerNode[];
   /**
    * 科目名链接构造(可选):返回 href 则该科目名渲染为链接(DESIGN.md link 蓝),
-   * 返回 undefined 则纯文本。台账页用它把叶科目链到业务记录筛选视图。
+   * 返回 undefined 则纯文本。台账页用它把科目链到业务记录筛选视图
+   * (叶=单科目,非叶=含下级,展开在服务端)。
    */
   subjectHref?: (node: LedgerNode) => string | undefined;
   /**

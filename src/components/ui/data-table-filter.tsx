@@ -179,10 +179,15 @@ function ValuesFilter<TData>({
     () =>
       // 先去重再排序:候选源可能含重复(如各项目同名科目「差旅费」)——重复项会撞
       // React key 报错,且「全选=不过滤」的 next.size === allValues.length 判定失真。
+      // 按展示标签排序(值本身可能是 UUID 这类无序主键,直接排对用户不可读)。
       Array.from(new Set(options ?? Array.from(faceted.keys()))).sort((a, b) =>
-        String(a).localeCompare(String(b), 'zh-CN', { numeric: true }),
+        (valueLabels?.[String(a)] ?? String(a)).localeCompare(
+          valueLabels?.[String(b)] ?? String(b),
+          'zh-CN',
+          { numeric: true },
+        ),
       ),
-    [faceted, options],
+    [faceted, options, valueLabels],
   );
   const selected = column.getFilterValue() as unknown[] | undefined;
   // 本地草稿:弹层挂载时以当前筛选初始化(undefined = 全选);勾选/全选/

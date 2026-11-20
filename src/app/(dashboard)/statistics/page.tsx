@@ -1436,23 +1436,17 @@ function BalanceTab() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    {row.isLeaf ? (
-                      /* 叶科目直达:跳该项目的业务记录页(深链带入科目;应用了年度筛选时连同年度)。 */
-                      <Link
-                        href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}${hasYear ? `&year=${appliedYear}` : ''}`}
-                        className="text-link underline-offset-4 hover:underline"
-                      >
-                        <span className="block max-w-48 truncate" title={row.subjectName}>
-                          {row.subjectName}
-                        </span>
-                      </Link>
-                    ) : (
-                      /* 非叶(含下级):记录接口按叶精确过滤,深链无意义,保持纯文本。 */
+                    {/* 科目直达:跳该项目的业务记录页(深链带入科目;非叶=含下级,
+                        服务端展开为全部后代叶;应用了年度筛选时连同年度)。 */}
+                    <Link
+                      href={`/projects/${row.projectId}/records?subjectId=${row.subjectId}${hasYear ? `&year=${appliedYear}` : ''}`}
+                      className="text-link underline-offset-4 hover:underline"
+                    >
                       <span className="block max-w-48 truncate" title={row.subjectName}>
                         {row.subjectName}
-                        <span className="ml-1 text-xs text-mute">(含下级)</span>
+                        {!row.isLeaf && <span className="ml-1 text-xs text-mute">(含下级)</span>}
                       </span>
-                    )}
+                    </Link>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{row.totalBudget}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.paid}</TableCell>
