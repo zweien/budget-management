@@ -126,6 +126,9 @@ interface PreviewRow {
 let rowSeq = 0;
 const nextRowId = () => ++rowSeq;
 
+/** 歧义行「匹配所有项目」哨兵:同一文件挂到全部候选记录(跨记录不去重,合法)。 */
+const TARGET_ALL = '__all__';
+
 /** 上传后的逐文件终态(报告用)。 */
 type ReportRow = {
   name: string;
@@ -232,6 +235,8 @@ export function BatchAttachmentImportDialog({
             file: files[i],
             contentHash: inputs[i].contentHash,
             result,
+            // 歧义行默认挂到全部候选项目,可下拉改为单个。
+            ...(result.status === 'ambiguous' ? { chosenRecordId: TARGET_ALL } : {}),
           })),
         );
         setPhase('preview');
@@ -243,17 +248,22 @@ export function BatchAttachmentImportDialog({
     [projectId],
   );
 
-  /** 行的上传目标(matched 唯一候选;歧义行取人工指定)。 */
-  const targetOf = useCallback((row: PreviewRow): AttachmentMatchCandidate | null => {
-    if (row.result.status === 'matched') return row.result.record;
+  /** 行的上传目标列表:matched 唯一候选;歧义行=「全部候选」或人工指定的单个。 */
+  const targetsOf = useCallback((row: PreviewRow): AttachmentMatchCandidate[] => {
+    if (row.result.status === 'matched') return [row.result.record];
     if (row.result.status === 'ambiguous') {
-      return row.result.candidates.find((c) => c.recordId === row.chosenRecordId) ?? null;
+      if (row.chosenRecordId === TARGET_ALL) return row.result.candidates;
+      const chosen = row.result.candidates.find((c) => c.recordId === row.chosenRecordId);
+      return chosen ? [chosen] : [];
     }
-    return null;
+    return [];
   }, []);
 
-  const uploadableCount = rows.filter((r) => targetOf(r)).length;
-  const duplicateMarked = rows.filter((r) => targetOf(r)?.duplicate).length;
+  const uploadableCount = rows.filter((r) => targetsOf(r).length > 0).length;
+  const duplicateMarked = rows.filter((r) => {
+    const targets = targetsOf(r);
+    return targets.length > 0 && targets.every((t) => t.duplicate);
+  }).length;
 
   const startUpload = useCallback(async () => {
     setPhase('uploading');
@@ -265,8 +275,8 @@ export function BatchAttachmentImportDialog({
     try {
       for (const row of rows) {
         try {
-          const target = targetOf(row);
-          if (!target) {
+          const targets = targetsOf(row);
+          if (targets.length === 0) {
             results.push({
               name: row.file.name,
               outcome:
@@ -278,31 +288,37 @@ export function BatchAttachmentImportDialog({
             });
             continue;
           }
-          try {
-            const outcome = await uploadAttachment(
-              target.projectId,
-              target.recordId,
-              row.file,
-              'record',
-              { via: 'docno-batch' },
-            );
-            if (outcome.status === 'duplicate') {
+          // 「匹配所有项目」逐候选串行上传(跨记录不去重,同文件可挂多条记录);
+          // 多目标时报告名带项目名,逐条可辨。
+          for (const target of targets) {
+            const label =
+              targets.length > 1 ? `${row.file.name} → ${target.projectName}` : row.file.name;
+            try {
+              const outcome = await uploadAttachment(
+                target.projectId,
+                target.recordId,
+                row.file,
+                'record',
+                { via: 'docno-batch' },
+              );
+              if (outcome.status === 'duplicate') {
+                results.push({
+                  name: label,
+                  outcome: 'skipped-duplicate',
+                  message: `与「${outcome.existing.fileName}」内容相同`,
+                });
+              } else {
+                uploaded += 1;
+                changed = true;
+                results.push({ name: label, outcome: 'uploaded' });
+              }
+            } catch (e) {
               results.push({
-                name: row.file.name,
-                outcome: 'skipped-duplicate',
-                message: `与「${outcome.existing.fileName}」内容相同`,
+                name: label,
+                outcome: 'failed',
+                message: e instanceof Error ? e.message : '上传失败',
               });
-            } else {
-              uploaded += 1;
-              changed = true;
-              results.push({ name: row.file.name, outcome: 'uploaded' });
             }
-          } catch (e) {
-            results.push({
-              name: row.file.name,
-              outcome: 'failed',
-              message: e instanceof Error ? e.message : '上传失败',
-            });
           }
         } finally {
           // 跳过/失败/成功都计一格,进度最终到达 rows.length。
@@ -322,7 +338,7 @@ export function BatchAttachmentImportDialog({
       toast.error(`批量附件导入完成:成功 ${uploaded},跳过 ${skipped},失败 ${failed}(见明细)`);
     }
     if (changed) onChanged?.();
-  }, [rows, onChanged, targetOf]);
+  }, [rows, onChanged, targetsOf]);
 
   const removeRow = (uid: number) => setRows((prev) => prev.filter((r) => r.uid !== uid));
 
@@ -338,7 +354,9 @@ export function BatchAttachmentImportDialog({
             文件名以单据编号开头(如
             TYBX…_01_说明.pdf)即可自动挂到对应业务记录;支持多选与拖入文件夹(递归展开);
             同号多文件全挂同一条记录;内容与已有附件相同的文件自动跳过。
-            {projectId ? '在本项目范围内匹配。' : '跨项目匹配:同号跨项目时需逐文件指定目标项目。'}
+            {projectId
+              ? '在本项目范围内匹配。'
+              : '跨项目匹配:同号跨项目时默认挂到全部候选项目,可在预览中改为单个。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -396,11 +414,12 @@ export function BatchAttachmentImportDialog({
           {phase === 'preview' ? (
             <>
               <p className="text-xs text-mute">
-                将上传 {uploadableCount} 个
+                将上传 {uploadableCount} 个文件
                 {duplicateMarked > 0
                   ? `(其中 ${duplicateMarked} 个与已有附件内容相同,上传时将跳过)`
                   : ''}
-                ; 其余 {rows.length - uploadableCount} 个未匹配/待指定,不会上传。
+                ;同号跨项目的文件默认挂到全部候选项目;其余 {rows.length - uploadableCount}{' '}
+                个未匹配,不会上传。
               </p>
               <div className="space-y-1.5">
                 {rows.map((row) => (
@@ -431,7 +450,7 @@ export function BatchAttachmentImportDialog({
                         </p>
                       ) : (
                         <div className="mt-1 flex items-center gap-2">
-                          <span className="text-xs text-warning">同号跨项目,请指定:</span>
+                          <span className="text-xs text-warning">同号跨项目(默认挂全部):</span>
                           <Select
                             value={row.chosenRecordId ?? ''}
                             onValueChange={(v) =>
@@ -446,6 +465,9 @@ export function BatchAttachmentImportDialog({
                               <SelectValue placeholder="选择目标项目…" />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value={TARGET_ALL}>
+                                匹配所有项目({row.result.candidates.length} 个)
+                              </SelectItem>
                               {row.result.candidates.map((c) => (
                                 <SelectItem key={c.recordId} value={c.recordId}>
                                   {c.projectName} · {c.summary} · ¥{c.amount}
@@ -465,6 +487,12 @@ export function BatchAttachmentImportDialog({
                         )
                       ) : row.result.status === 'unmatched' ? (
                         <Badge variant="warning">未匹配</Badge>
+                      ) : row.chosenRecordId === TARGET_ALL ? (
+                        <Badge variant="secondary">
+                          全部{' '}
+                          {row.result.status === 'ambiguous' ? row.result.candidates.length : 0}{' '}
+                          项目
+                        </Badge>
                       ) : row.chosenRecordId ? (
                         <Badge variant="secondary">已指定</Badge>
                       ) : (
