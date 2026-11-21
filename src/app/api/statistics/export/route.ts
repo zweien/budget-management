@@ -10,7 +10,7 @@ import type { BalanceStatisticsFilters } from '@/server/services/statistics.serv
  * GET /api/statistics/export — 导出统计结果 xlsx(§10.5)。
  * - mode=balance:经费余额(总预算口径),参数 subject/projectId/year/onlyNegative。
  * - 缺省:自定义统计,参数同 /api/statistics/custom:
- *   projectId, budgetYear, subject, status,
+ *   projectId, budgetYear, subject, status/statuses(多值,如「应付未付」组合口径),
  *   businessDateFrom, businessDateTo, handler, includeVoid(0/1)。
  * 返回 application/vnd.openxmlformats-officedocument.spreadsheetml.sheet。
  */

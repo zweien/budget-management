@@ -260,6 +260,57 @@ describe('statistics.service (integration, real PG)', () => {
     }
   });
 
+  it('customStatistics: 未指定年度(总经费视图)预算取 project_budgets,指定年度仍取年度科目预算', async () => {
+    const { project } = await seedApprovedProject('TOTALFUND');
+    // 人为分离两套口径:项目总经费调到 5000,2026 年度科目预算保持 1000。
+    // (年度预算 = 当年可花额度,未花完结转下年,各年加总不构成总经费——口径回归。)
+    await prisma.projectBudget.updateMany({
+      where: { projectId: project.id },
+      data: { currentAmount: new Prisma.Decimal('5000') },
+    });
+
+    // 总经费视图:预算 = 项目总经费字段,不再对 subject_budgets 逐年求和。
+    const noYear = await customStatistics({ projectId: project.id }, adminUser());
+    expect(noYear.summary.currentBudget).toBe('5000.00');
+
+    // 年度视图:预算 = 该年度科目预算之和(既有行为不变)。
+    const withYear = await customStatistics(
+      { projectId: project.id, budgetYear: 2026 },
+      adminUser(),
+    );
+    expect(withYear.summary.currentBudget).toBe('1000.00');
+  });
+
+  it('customStatistics: 总经费视图跨项目排除已归档项目;projectIds 多值不影响预算口径', async () => {
+    const { project: p1, leafA } = await seedApprovedProject('TFARCH');
+    const { project: p2 } = await seedApprovedProject('TFARCH2');
+    await createRecord(
+      p1.id,
+      {
+        budgetYear: 2026,
+        subjectId: leafA.id,
+        amount: '10.00',
+        businessDate: '2026-05-01',
+        handler: '经办T',
+        summary: 'tf-arch-rec',
+        status: BusinessStatus.PAID,
+      },
+      adminUser(),
+    );
+
+    // 归档 p2(总经费 1000):跨项目总经费应恰好减少该值(串行库内前后对照,规避共享数据)。
+    const before = await customStatistics({}, adminUser());
+    await prisma.project.update({ where: { id: p2.id }, data: { archivedAt: new Date() } });
+    const after = await customStatistics({}, adminUser());
+    expect(Number(before.summary.currentBudget) - Number(after.summary.currentBudget)).toBe(1000);
+
+    // projectIds 多值:记录按多值过滤,但预算口径不跟随(仍为跨项目全量总经费)。
+    const viaMulti = await customStatistics({ projectIds: [p1.id] }, adminUser());
+    expect(viaMulti.summary.currentBudget).toBe(after.summary.currentBudget);
+    expect(viaMulti.records).toHaveLength(1);
+    expect(viaMulti.records[0]?.summary).toBe('tf-arch-rec');
+  });
+
   it('customStatistics: 值清单哨兵 __none__(取消全选)= 该维度匹配零行', async () => {
     const { project, leafA } = await seedApprovedProject('NONE');
     await createRecord(

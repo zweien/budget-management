@@ -193,8 +193,9 @@ export interface CustomStatisticsResult {
  * 实现:
  * - 按 filters 构建 Prisma where 查询 business_records(按 businessDate desc 排序)。
  * - 占用走 computeOccupancy(对所查记录全集)。
- * - 预算:取筛选项目/年度对应的 subject_budgets.currentAmount 之和;无年度/项目时为 0。
- *   (跨项目场景下取所有匹配项目的 subject_budgets 汇总。)
+ * - 预算:指定年度 → 该年度 subject_budgets.currentAmount 之和(年度可花口径);
+ *   未指定年度(总经费视图)→ project_budgets.currentAmount(项目总经费字段)之和,
+ *   跨项目时汇总所有非归档项目。多值 projectIds 不参与预算口径,仍只认单值 projectId。
  * - balance / executionRate 同 ledger 口径。
  */
 /** 列表与导出共用授权、筛选和稳定排序；不读取明细或计算汇总。 */
@@ -453,10 +454,15 @@ export async function customStatistics(
       ? { skip: (Math.max(1, filters.page) - 1) * filters.pageSize, take: filters.pageSize }
       : {};
 
-  // 预算仍沿用现有项目/单年度口径；多值筛选的预算含义不在性能改造中更改。
-  const sbWhere: Prisma.SubjectBudgetWhereInput = filters.projectId
+  // 预算口径(用户反馈修正):年度预算 = 当年可花的额度,未花完结转下年,
+  // 各年度预算加总不构成总经费。因此——
+  // - 指定年度 → Σ 该年度科目预算(subject_budgets,年度可花口径);
+  // - 未指定年度(总经费视图)→ Σ 项目总经费(project_budgets.currentAmount)。
+  // 多值筛选(projectIds)不影响预算口径,仍只认单值 projectId;跨项目分支排除已归档项目。
+  const budgetScope = filters.projectId
     ? { projectId: filters.projectId }
     : { project: { archivedAt: null } };
+  const sbWhere: Prisma.SubjectBudgetWhereInput = { ...budgetScope };
   if (filters.budgetYear !== undefined) sbWhere.year = filters.budgetYear;
   const [rows, occRows, totalCount, budgetAgg] = await Promise.all([
     prisma.businessRecord.findMany({
@@ -478,7 +484,12 @@ export async function customStatistics(
       _count: { id: true },
     }),
     prisma.businessRecord.count({ where }),
-    prisma.subjectBudget.aggregate({ where: sbWhere, _sum: { currentAmount: true } }),
+    filters.budgetYear === undefined
+      ? prisma.projectBudget.aggregate({
+          where: budgetScope,
+          _sum: { currentAmount: true },
+        })
+      : prisma.subjectBudget.aggregate({ where: sbWhere, _sum: { currentAmount: true } }),
   ]);
   const records = rows.map(({ createdBy, _count, ...r }) => ({
     ...r,
@@ -504,8 +515,7 @@ export async function customStatistics(
     amountSum: occ.totalOccupied.toFixed(2),
   };
 
-  // 5) 预算:筛选项目/年度对应的 subject_budgets.currentAmount 之和。
-  //    跨项目(无 projectId)分支排除已归档项目,与记录口径一致;未指定年度时预算为全年度口径。
+  // 5) 预算:指定年度 → 该年度科目预算之和;未指定年度(总经费视图)→ 项目总经费之和。
   const currentBudget = fromStored(budgetAgg._sum.currentAmount ?? '0');
 
   // 6) 结余 / 执行率。

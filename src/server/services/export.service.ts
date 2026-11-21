@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { Writable } from 'node:stream';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
-import { Prisma, UserRole } from '@prisma/client';
+import { BusinessStatus, Prisma, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
@@ -15,6 +15,7 @@ import {
   balanceStatistics,
   customStatistics,
   prepareRecordSelection,
+  VALUES_FILTER_NONE,
   type BalanceStatisticsFilters,
   type CustomStatisticsFilters,
 } from '@/server/services/statistics.service';
@@ -361,7 +362,8 @@ export async function exportStatistics(
       // 汇总区(第 5 行起)。
       const summaryStart = 5;
       const summaryRows: [string, string][] = [
-        ['当前预算', summary.currentBudget],
+        // 口径与统计页一致:未选年度 = 总经费(项目总预算字段),选了年度 = 该年度预算。
+        [filters.budgetYear === undefined ? '总经费' : '当前预算', summary.currentBudget],
         ['已支出', summary.paid],
         ['应付未付', summary.payable],
         ['总占用', summary.totalOccupied],
@@ -539,7 +541,19 @@ function describeFilters(
   }
   if (filters.budgetYear !== undefined) parts.push(`年度=${filters.budgetYear}`);
   if (filters.subject) parts.push(`科目=${filters.subject}`);
-  if (filters.status) parts.push(`状态=${filters.status}`);
+  // 状态:单值与多值在服务端(prepareRecordSelection)取并集,描述同步合并去重;
+  // 多值来自统计页「应付未付」快捷口径等,空集哨兵渲染为「无」。
+  const statusSet = new Set<BusinessStatus | typeof VALUES_FILTER_NONE>(
+    filters.status ? [filters.status] : [],
+  );
+  for (const s of filters.statuses ?? []) statusSet.add(s);
+  if (statusSet.size > 0) {
+    parts.push(
+      `状态=${[...statusSet]
+        .map((s) => (s === VALUES_FILTER_NONE ? '无' : (STATUS_ENUM_TO_CN[s] ?? s)))
+        .join('/')}`,
+    );
+  }
   if (filters.businessDateFrom) parts.push(`起始=${filters.businessDateFrom}`);
   if (filters.businessDateTo) parts.push(`截止=${filters.businessDateTo}`);
   if (filters.handler) parts.push(`经办人=${filters.handler}`);

@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import type { DateRange } from 'react-day-picker';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
+import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/page-header';
 import { AttachmentSheet } from '@/components/records/AttachmentSheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -93,6 +94,10 @@ function renderRate(rate: number | null | undefined): string {
 
 /** Select 的"全部/清除"哨兵值(radix SelectItem 不允许空串)。 */
 const ALL = '__all__';
+
+/** 「应付未付」快捷口径哨兵:未支出三态(占位/合同/财务审批)组合,经 statuses 多值参数下发。 */
+const PAYABLE = '__payable__';
+type StatusFilter = BusinessStatus | typeof PAYABLE;
 
 // ============================================================
 // 主组件
@@ -241,7 +246,8 @@ interface CustomFilters {
   budgetYear?: number;
   /** 科目模糊(名称/编号 contains,跨项目;服务端含非叶展开)。 */
   subject?: string;
-  status?: BusinessStatus;
+  /** 状态单选,或 PAYABLE 哨兵(未支出三态组合,见摘要卡快捷筛选)。 */
+  status?: StatusFilter;
   dateRange?: DateRange;
   handler?: string;
   includeVoid?: boolean;
@@ -252,12 +258,26 @@ function buildCustomQuery(f: CustomFilters): string {
   if (f.projectId) qs.set('projectId', f.projectId);
   if (f.budgetYear !== undefined) qs.set('budgetYear', String(f.budgetYear));
   if (f.subject?.trim()) qs.set('subject', f.subject.trim());
-  if (f.status) qs.set('status', f.status);
+  if (f.status === PAYABLE) {
+    // 应付未付 = 未支出三态组合;服务端支持 statuses 多值参数(record-filters)。
+    for (const s of BUSINESS_STATUSES) {
+      if (s !== 'PAID') qs.append('statuses', s);
+    }
+  } else if (f.status) {
+    qs.set('status', f.status);
+  }
   if (f.dateRange?.from) qs.set('businessDateFrom', format(f.dateRange.from, 'yyyy-MM-dd'));
   if (f.dateRange?.to) qs.set('businessDateTo', format(f.dateRange.to, 'yyyy-MM-dd'));
   if (f.handler?.trim()) qs.set('handler', f.handler.trim());
   if (f.includeVoid) qs.set('includeVoid', '1');
   return qs.toString();
+}
+
+/** 摘要卡快捷筛选:quick 存在即可点(点击设置/还原状态口径);active = 该口径当前生效。 */
+interface SummaryCard {
+  label: string;
+  node: React.ReactNode;
+  quick?: { status: StatusFilter | undefined; active: boolean };
 }
 
 function CustomStatisticsTab() {
@@ -347,6 +367,21 @@ function CustomStatisticsTab() {
     void runQuery(filters, 1, pageSize);
   };
 
+  /** 摘要卡快捷筛选(已支出/应付未付/总占用):在已应用筛选上叠加状态口径并查询,
+   *  再点同一张卡 = 还原全部状态。卡片数字均为「仅有效」口径,同步关掉含作废,列表与数字一致。 */
+  const applyCardQuickFilter = (target: StatusFilter | undefined) => {
+    const next: CustomFilters = {
+      ...appliedFilters,
+      status: appliedFilters.status === target ? undefined : target,
+      includeVoid: undefined,
+    };
+    setFilters(next);
+    setAppliedFilters(next);
+    setLoading(true);
+    setPage(1);
+    void runQuery(next, 1, pageSize);
+  };
+
   const handleReset = () => {
     setFilters({});
     setAppliedFilters({});
@@ -387,10 +422,11 @@ function CustomStatisticsTab() {
 
   const summary = result?.summary;
 
-  const summaryCards: Array<{ label: string; node: React.ReactNode }> = summary
+  const summaryCards: SummaryCard[] = summary
     ? [
         {
-          label: '当前预算',
+          // 口径随已应用筛选切换:总经费视图(未选年度)取项目总经费,年度视图取该年度预算。
+          label: appliedFilters.budgetYear === undefined ? '总经费' : '当前预算',
           node: (
             <MoneyText value={summary.currentBudget} riskOnNegative={false} className="text-left" />
           ),
@@ -398,16 +434,20 @@ function CustomStatisticsTab() {
         {
           label: '已支出',
           node: <MoneyText value={summary.paid} riskOnNegative={false} className="text-left" />,
+          quick: { status: 'PAID', active: appliedFilters.status === 'PAID' },
         },
         {
           label: '应付未付',
           node: <MoneyText value={summary.payable} riskOnNegative={false} className="text-left" />,
+          quick: { status: PAYABLE, active: appliedFilters.status === PAYABLE },
         },
         {
           label: '总占用',
           node: (
             <MoneyText value={summary.totalOccupied} riskOnNegative={false} className="text-left" />
           ),
+          // 总占用 = 不限状态;点击即清掉状态筛选,回到全部状态。
+          quick: { status: undefined, active: appliedFilters.status === undefined },
         },
         { label: '结余', node: <MoneyText value={summary.balance} className="text-left" /> },
         { label: '执行率', node: renderRate(summary.executionRate) },
@@ -450,10 +490,12 @@ function CustomStatisticsTab() {
               }
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="全部年度" />
+                <SelectValue placeholder="总经费" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>全部年度</SelectItem>
+                {/* 总经费 = 不按年度筛记录,预算卡取项目总经费(project_budgets)而非各年预算加总
+                    (年度预算是当年可花额度,未花完结转下年,加总无意义)。 */}
+                <SelectItem value={ALL}>总经费</SelectItem>
                 {yearOptions().map((y) => (
                   <SelectItem key={y} value={String(y)}>
                     {y}
@@ -478,7 +520,7 @@ function CustomStatisticsTab() {
             <Select
               value={filters.status ?? ALL}
               onValueChange={(v) =>
-                setFilters((f) => ({ ...f, status: v === ALL ? undefined : (v as BusinessStatus) }))
+                setFilters((f) => ({ ...f, status: v === ALL ? undefined : (v as StatusFilter) }))
               }
             >
               <SelectTrigger className="w-full">
@@ -486,6 +528,7 @@ function CustomStatisticsTab() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>全部状态</SelectItem>
+                <SelectItem value={PAYABLE}>应付未付(未支出)</SelectItem>
                 {BUSINESS_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
                     {STATUS_LABEL[s]}
@@ -551,14 +594,40 @@ function CustomStatisticsTab() {
 
       {summary ? (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          {summaryCards.map((c) => (
-            <Card key={c.label} className="p-3">
-              <p className="caption-mono">{c.label}</p>
-              <p className="mt-1.5 text-lg font-semibold tracking-[-0.4px] tabular-nums">
-                {c.node}
-              </p>
-            </Card>
-          ))}
+          {summaryCards.map((c) => {
+            const clickable = c.quick !== undefined;
+            return (
+              <Card
+                key={c.label}
+                onClick={clickable ? () => applyCardQuickFilter(c.quick!.status) : undefined}
+                onKeyDown={
+                  clickable
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          applyCardQuickFilter(c.quick!.status);
+                        }
+                      }
+                    : undefined
+                }
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                aria-pressed={clickable ? c.quick!.active : undefined}
+                title={clickable ? '点击按此口径筛选明细;再点一次还原全部状态' : undefined}
+                className={cn(
+                  'p-3',
+                  clickable &&
+                    'cursor-pointer transition-colors hover:border-primary/60 hover:bg-accent/40',
+                  clickable && c.quick!.active && 'border-primary bg-primary/5 ring-1 ring-primary',
+                )}
+              >
+                <p className="caption-mono">{c.label}</p>
+                <p className="mt-1.5 text-lg font-semibold tracking-[-0.4px] tabular-nums">
+                  {c.node}
+                </p>
+              </Card>
+            );
+          })}
         </div>
       ) : null}
 
