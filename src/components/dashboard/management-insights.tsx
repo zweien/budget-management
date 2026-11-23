@@ -24,11 +24,12 @@ import {
 
 import { apiFetch } from '@/lib/api/client';
 import {
-  DEFAULT_DASH_THRESHOLDS,
+  clearDashThresholds,
   readDashThresholds,
   writeDashThresholds,
   type DashThresholds,
 } from '@/lib/ui-prefs';
+import { useSystemSettings } from '@/components/layout/system-settings-provider';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -211,14 +212,17 @@ function MonthlyTrendChart({ trend }: { trend: TrendBucket[] }) {
 }
 
 // ============================================================
-// 阈值设置弹层(cookie 持久化,即时生效)
+// 阈值设置弹层(cookie 持久化,即时生效;没调过时跟随系统设置里的默认值)
 // ============================================================
 function ThresholdsPopover({
   thresholds,
+  systemDefault,
   onChange,
 }: {
   thresholds: DashThresholds;
-  onChange: (next: DashThresholds) => void;
+  /** 系统设置里的默认值:「恢复默认」回到它,并清除个人偏好。 */
+  systemDefault: DashThresholds;
+  onChange: (next: DashThresholds, followSystem?: boolean) => void;
 }) {
   // Popover 内容随开合挂载/卸载,打开即取外部最新值(重置后再次打开同步)。
   const [warn, setWarn] = useState(String(thresholds.warn));
@@ -282,12 +286,12 @@ function ThresholdsPopover({
               variant="ghost"
               size="sm"
               onClick={() => {
-                setWarn(String(DEFAULT_DASH_THRESHOLDS.warn));
-                setDanger(String(DEFAULT_DASH_THRESHOLDS.danger));
-                onChange(DEFAULT_DASH_THRESHOLDS);
+                setWarn(String(systemDefault.warn));
+                setDanger(String(systemDefault.danger));
+                onChange(systemDefault, true);
               }}
             >
-              重置默认(50 / 80)
+              恢复默认({systemDefault.warn} / {systemDefault.danger})
             </Button>
           </div>
         </div>
@@ -427,7 +431,8 @@ export function ManagementInsights() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [thresholds, setThresholds] = useState<DashThresholds>(DEFAULT_DASH_THRESHOLDS);
+  const systemThresholds = useSystemSettings().dashThresholds;
+  const [thresholds, setThresholds] = useState<DashThresholds>(systemThresholds);
   const [sheetKind, setSheetKind] = useState<SignalKind | null>(null);
 
   useEffect(() => {
@@ -451,15 +456,20 @@ export function ManagementInsights() {
   }, []);
 
   // 挂载后读个人阈值偏好(rAF 派发,通过 set-state-in-effect 规则;
-  // 与列显隐偏好的回落路径同款)。
+  // 与列显隐偏好的回落路径同款)。没有个人偏好时取系统默认。
   useEffect(() => {
-    const raf = requestAnimationFrame(() => setThresholds(readDashThresholds()));
+    const raf = requestAnimationFrame(() => setThresholds(readDashThresholds(systemThresholds)));
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [systemThresholds]);
 
-  const updateThresholds = (next: DashThresholds) => {
+  /** followSystem:清除个人偏好、回到跟随系统默认;否则写入个人偏好。 */
+  const updateThresholds = (next: DashThresholds, followSystem = false) => {
     setThresholds(next);
-    writeDashThresholds(next);
+    if (followSystem) {
+      clearDashThresholds();
+    } else {
+      writeDashThresholds(next);
+    }
   };
 
   if (error) {
@@ -491,7 +501,11 @@ export function ManagementInsights() {
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-bold tracking-[-0.025em]">管理决策</h2>
-        <ThresholdsPopover thresholds={thresholds} onChange={updateThresholds} />
+        <ThresholdsPopover
+          thresholds={thresholds}
+          systemDefault={systemThresholds}
+          onChange={updateThresholds}
+        />
       </div>
 
       {/* 月度执行趋势 */}

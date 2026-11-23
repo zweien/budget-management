@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { describe, it, expect } from 'vitest';
 import { parseChangelog } from '@/lib/changelog';
 
@@ -60,5 +63,38 @@ describe('parseChangelog', () => {
     const releases = parseChangelog(md);
     expect(releases).toHaveLength(1);
     expect(releases[0].sections).toEqual([]);
+  });
+
+  it('未发布版本(## [Unreleased],无日期)的条目不进入解析结果', () => {
+    const md = [
+      '# 更新日志',
+      '',
+      '## [Unreleased]',
+      '',
+      '### 新增',
+      '',
+      '- 尚未发布的功能',
+      '',
+      '## [1.0.0] - 2026-01-01',
+      '',
+      '### 新增',
+      '',
+      '- 已发布的功能',
+      '',
+    ].join('\n');
+    const releases = parseChangelog(md);
+    expect(releases.map((r) => r.version)).toEqual(['1.0.0']);
+    expect(releases[0].sections[0].items).toEqual(['已发布的功能']);
+  });
+
+  it('真实 CHANGELOG.md:/changelog 页运行期直接读该文件,Unreleased 节的内容不得外显', async () => {
+    // 生产实例就读仓库工作区的这个文件:未发布条目写进 Unreleased 后,页面必须仍然只显示已发布版本。
+    const text = await readFile(path.resolve(process.cwd(), 'CHANGELOG.md'), 'utf8');
+    const releases = parseChangelog(text);
+    expect(releases.length).toBeGreaterThan(0);
+    for (const release of releases) {
+      expect(release.version).toMatch(/^\d+\.\d+\.\d+/);
+      expect(release.version).not.toBe('Unreleased');
+    }
   });
 });

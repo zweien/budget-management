@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { requirePermission } from '@/lib/auth/permissions';
 import { D, ZERO, fromStored, sumAmounts } from '@/lib/decimal';
 import { computeOccupancy, executionRate } from '@/lib/budget';
+import { ledgerYearWindow } from '@/lib/ledger-years';
+import { getSystemSettings } from '@/server/services/systemSetting.service';
 
 /**
  * 预算执行台账(§11.1/11.2):树形科目 + 每节点实时占用聚合。
@@ -251,6 +253,35 @@ export async function getProjectTotalLedger(
     totalOccupied: allOccupied.totalOccupied.toFixed(2),
     totalExecutionRate: executionRate(allOccupied.totalOccupied, projectTotal),
   };
+}
+
+/**
+ * 台账默认年度与年度候选(CONTEXT.md「系统设置」)。
+ * - 系统默认年度 = current:当前年度;候选沿用前端的固定窗口(此时 years 为空数组)。
+ * - 系统默认年度 = latest:该项目「最近有预算的年度」= 不晚于当前年度、该年度科目预算的
+ *   现行预算不为 0 的最大年份;一个都没有则回退当前年度。候选 = 固定窗口 ∪ 该项目有预算的
+ *   年份(降序)——老项目的预算年份落在窗口之外时也选得到。
+ */
+export async function resolveLedgerDefaultYear(projectId: string): Promise<{
+  year: number;
+  years: number[];
+}> {
+  const currentYear = new Date().getFullYear();
+  const { ledgerYear } = await getSystemSettings();
+  if (ledgerYear !== 'latest') return { year: currentYear, years: [] };
+  const budgetYears = (
+    await prisma.subjectBudget.findMany({
+      where: { projectId, currentAmount: { not: 0 } },
+      select: { year: true },
+      distinct: ['year'],
+    })
+  ).map((row) => row.year);
+  const withBudget = budgetYears.filter((y) => y <= currentYear);
+  const year = withBudget.length > 0 ? Math.max(...withBudget) : currentYear;
+  const years = Array.from(new Set([...ledgerYearWindow(currentYear), ...budgetYears])).sort(
+    (a, b) => b - a,
+  );
+  return { year, years };
 }
 
 /**

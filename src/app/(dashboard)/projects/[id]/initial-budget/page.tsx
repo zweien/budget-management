@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
+import { useUnsavedChangesGuard } from '@/lib/hooks/use-unsaved-changes-guard';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -465,31 +466,8 @@ export default function InitialBudgetPage() {
     };
   }, []);
 
-  // 脏状态离开拦截:beforeunload 管浏览器关闭/刷新;
-  // capture 阶段拦截站内 <a> 点击,管 SPA 客户端导航(项目 Tab/侧边栏等,绕过 beforeunload)。
-  useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    const onClick = (e: MouseEvent) => {
-      const anchor = (e.target as HTMLElement | null)?.closest?.('a');
-      if (!anchor) return;
-      const href = anchor.getAttribute('href');
-      // 仅拦站内页面跳转;外链、hash、tel/mailto 等放行。
-      if (!href || !href.startsWith('/')) return;
-      if (!window.confirm('有未保存的修改,确定要离开吗?离开后将丢失未保存内容。')) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    document.addEventListener('click', onClick, true);
-    return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload);
-      document.removeEventListener('click', onClick, true);
-    };
-  }, [dirty]);
+  // 脏状态离开拦截(浏览器关闭/刷新 + 站内客户端导航)。
+  useUnsavedChangesGuard(dirty);
 
   /** 把 draft 回填到表单状态(DRAFT/REJECTED/WITHDRAWN 可再编辑)。 */
   const hydrateForm = useCallback((d: InitialBudgetDraftView) => {

@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { BusinessStatus, UserRole } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { uuidv7 } from '@/lib/id';
 import { fromStored } from '@/lib/decimal';
+import { ledgerYearWindow } from '@/lib/ledger-years';
+import {
+  invalidateSystemSettingsCache,
+  updateSystemSettings,
+} from '@/server/services/systemSetting.service';
 import {
   approveApplication,
   createDraft,
@@ -11,7 +16,11 @@ import {
   type InitialBudgetPayload,
 } from '@/server/services/initialBudget.service';
 import { createProject } from '@/server/services/project.service';
-import { getProjectLedger, getProjectTotalLedger } from '@/server/services/ledger.service';
+import {
+  getProjectLedger,
+  getProjectTotalLedger,
+  resolveLedgerDefaultYear,
+} from '@/server/services/ledger.service';
 import {
   approveAdjustment,
   createAdjustment,
@@ -539,5 +548,120 @@ describe('ledger.service getProjectLedger (integration, real PG)', () => {
     // 总口径无年度维度:年度三列恒 0(前端整组隐藏)。
     expect(a.initial).toBe('0.00');
     expect(a.current).toBe('0.00');
+  });
+});
+
+describe('ledger.service resolveLedgerDefaultYear(系统设置「台账默认年度」,integration, real PG)', () => {
+  // 年份相对当前年构造,用例不随时间推移失效。
+  const thisYear = new Date().getFullYear();
+  const createdProjectIds: string[] = [];
+  let adminId: string;
+  const admin = () => ({ id: adminId, role: UserRole.ADMIN });
+
+  /** 直插一个已生效年度预算的叶科目(currentAmount 可控,不走编制审批)。 */
+  async function insertBudgetYear(projectId: string, year: number, currentAmount: string) {
+    const subject = await prisma.budgetSubject.create({
+      data: {
+        id: uuidv7(),
+        projectId,
+        code: `L${year}-${uuidv7().slice(0, 4)}`,
+        name: `叶${year}`,
+        level: 0,
+        isLeaf: true,
+      },
+    });
+    await prisma.subjectBudget.create({
+      data: {
+        id: uuidv7(),
+        projectId,
+        year,
+        subjectId: subject.id,
+        initialAmount: fromStored(currentAmount),
+        currentAmount: fromStored(currentAmount),
+      },
+    });
+  }
+
+  async function seedProject(tag: string) {
+    const project = await createProject(
+      { code: `T5Y-${tag}-${uuidv7().slice(0, 8)}`, name: `t5y ${tag}` },
+      admin(),
+    );
+    createdProjectIds.push(project.id);
+    return project;
+  }
+
+  /** 设置是全实例单例:每个用例后清库 + 清缓存。 */
+  const resetSettings = async () => {
+    await prisma.systemSetting.deleteMany();
+    invalidateSystemSettingsCache();
+  };
+
+  beforeAll(async () => {
+    await prisma.$connect();
+    adminId = uuidv7();
+    await prisma.user.create({
+      data: { id: adminId, name: 'admin-t5y', role: UserRole.ADMIN },
+    });
+  });
+
+  afterEach(resetSettings);
+
+  afterAll(async () => {
+    await resetSettings();
+    for (const id of createdProjectIds.splice(0)) {
+      await cleanupProject(id);
+    }
+    await prisma.auditLog.deleteMany({ where: { operatorId: adminId } }).catch(() => {});
+    await prisma.user.deleteMany({ where: { id: adminId } }).catch(() => {});
+    await prisma.$disconnect();
+  });
+
+  it('默认(当前年度):不管项目编了哪些年都取当前年度,且不下发候选(前端沿用固定窗口)', async () => {
+    const project = await seedProject('CUR');
+    await insertBudgetYear(project.id, thisYear - 3, '100.00');
+    expect(await resolveLedgerDefaultYear(project.id)).toEqual({ year: thisYear, years: [] });
+  });
+
+  it('「最近有预算的年度」:取不晚于今年、现行预算不为 0 的最大年份;未来年度的预算不作为默认', async () => {
+    await updateSystemSettings(admin(), { ledgerYear: 'latest' });
+    const project = await seedProject('LATEST');
+    await insertBudgetYear(project.id, thisYear - 2, '100.00');
+    await insertBudgetYear(project.id, thisYear - 1, '200.00');
+    await insertBudgetYear(project.id, thisYear + 1, '300.00');
+    const { year, years } = await resolveLedgerDefaultYear(project.id);
+    expect(year).toBe(thisYear - 1);
+    // 候选仍纳入未来年度(可选),整体降序。
+    expect(years).toContain(thisYear + 1);
+    expect(years[0]).toBe(thisYear + 1);
+  });
+
+  it('「最近有预算的年度」:现行预算为 0 的年份不算有预算;今年有预算则取今年', async () => {
+    await updateSystemSettings(admin(), { ledgerYear: 'latest' });
+    const project = await seedProject('ZERO');
+    await insertBudgetYear(project.id, thisYear - 1, '0.00');
+    await insertBudgetYear(project.id, thisYear, '150.00');
+    expect((await resolveLedgerDefaultYear(project.id)).year).toBe(thisYear);
+  });
+
+  it('「最近有预算的年度」:没有任何预算(或项目不存在)→ 回退当前年度', async () => {
+    await updateSystemSettings(admin(), { ledgerYear: 'latest' });
+    const project = await seedProject('NONE');
+    await insertBudgetYear(project.id, thisYear - 1, '0.00');
+    expect((await resolveLedgerDefaultYear(project.id)).year).toBe(thisYear);
+    expect((await resolveLedgerDefaultYear(uuidv7())).year).toBe(thisYear);
+  });
+
+  it('「最近有预算的年度」:年度候选 = 固定窗口 ∪ 该项目有预算的年份(降序去重),窗口外的旧年份也选得到', async () => {
+    await updateSystemSettings(admin(), { ledgerYear: 'latest' });
+    const project = await seedProject('UNION');
+    await insertBudgetYear(project.id, thisYear - 9, '100.00');
+    await insertBudgetYear(project.id, thisYear, '100.00');
+    const { years } = await resolveLedgerDefaultYear(project.id);
+    expect(years).toEqual(
+      [...new Set([thisYear, ...ledgerYearWindow(thisYear), thisYear - 9])].sort((a, b) => b - a),
+    );
+    expect(years).toContain(thisYear - 9);
+    expect(years.filter((y) => y === thisYear)).toHaveLength(1);
   });
 });

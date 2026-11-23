@@ -5,9 +5,14 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { getSystemSettingsSafe } from '@/server/services/systemSetting.service';
 
-/** 关于页:系统简介、核心能力与版本信息(纯静态,版本号来自 package.json)。 */
-export default function AboutPage() {
+/**
+ * 关于页:系统简介、核心能力与版本信息(版本号来自 package.json)。
+ * 副标题与系统简介取系统设置(管理员可在「系统设置」里改);能力清单是内置的。
+ */
+export default async function AboutPage() {
+  const { title, subtitle, aboutIntro } = await getSystemSettingsSafe();
   const features: [string, string][] = [
     [
       '预算编制与审批',
@@ -20,17 +25,17 @@ export default function AboutPage() {
   ];
   return (
     <div className="space-y-4">
-      <PageHeader eyebrow="ABOUT" title="关于" description="科研项目预算管理系统" />
+      <PageHeader eyebrow="ABOUT" title="关于" description={subtitle ?? title} />
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">系统简介</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm leading-6 text-muted-foreground">
-            面向科研经费的全生命周期预算管理:从初始预算编制与审批,到业务记录登记、结算单导入、
-            预算调整,再到执行台账与统计分析。年度预算回归「当年计划」定位,支持以总预算剩余额度
-            为锚的余额式编制;所有敏感操作(审批、作废、权限变更)均留审计痕迹。
-          </p>
+          {aboutIntro ? (
+            <p className="text-sm leading-6 whitespace-pre-line text-muted-foreground">
+              {aboutIntro}
+            </p>
+          ) : null}
           <div className="grid gap-3 md:grid-cols-2">
             {features.map(([title, desc]) => (
               <div key={title} className="rounded-lg border border-border p-3">

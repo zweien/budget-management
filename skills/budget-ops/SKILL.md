@@ -33,7 +33,7 @@ python budget.py upload ~/budget-inbox/A-001/结算单.xlsx /projects/$PID/impor
 - **403 且消息含「凭证档位」「凭证未授权访问该项目」或「禁止…跨项目操作」**:key 的范围收窄(档位/项目范围),同样**不得**绕过;原样上报,或请用户换范围更大的 key。指定项目范围的 key:统计/审计等聚合接口必须携带已授权的 `projectId`,项目列表也只含授权项目。
 - **403 且消息含「仅项目负责人」或「成员」**:不是凭证范围问题,是服务账号本身没有该项目成员身份——编制/调整/科目维护等 OWNER 动作要求 ADMIN 或项目 OWNER 成员(HANDLER 不行);请管理员在项目「成员管理」把服务账号以 **OWNER** 加入,或换管理员凭证。
 - **422**:业务校验失败,按消息修正后可重试。
-- **排查 403 先查本凭证元数据(仅适用全范围 key)**:Bearer 不能访问 `/api/api-keys*`(红线);**指定项目范围(selected)的 key 此路不通**——无 projectId 的 `GET /audit-logs` 属跨项目接口会被拒,带 projectId 也查不到签发记录(`apikey.issue` 审计行的 projectId 为空)。全范围(all)key:`GET /audit-logs?limit=50` 找 `action=apikey.issue` 且 `afterData.prefix` 匹配本 key 前缀的记录,可得档位(tier)/项目范围(projectScope)/无人值守(unattended)/有效期(expiresAt);selected-scope 场景请用户在「API 凭证」页查看或问管理员。
+- **排查 403 先查本凭证元数据(仅适用全范围 key)**:Bearer 不能访问 `/api/api-keys*`(红线),也不能修改系统设置(`PATCH /api/settings`,仅限管理员登录会话;读取 `GET /api/settings` 不需要登录);**指定项目范围(selected)的 key 此路不通**——无 projectId 的 `GET /audit-logs` 属跨项目接口会被拒,带 projectId 也查不到签发记录(`apikey.issue` 审计行的 projectId 为空)。全范围(all)key:`GET /audit-logs?limit=50` 找 `action=apikey.issue` 且 `afterData.prefix` 匹配本 key 前缀的记录,可得档位(tier)/项目范围(projectScope)/无人值守(unattended)/有效期(expiresAt);selected-scope 场景请用户在「API 凭证」页查看或问管理员。
 
 ## 2. 确认策略(必须遵守)
 

@@ -14,13 +14,15 @@ import {
   LayoutDashboard,
   NotebookText,
   ScrollText,
+  Settings,
   UserCog,
   Wallet,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api/client';
-import { Brand } from '@/components/layout/brand';
+import { SystemLogo } from '@/components/layout/system-logo';
+import { useSystemSettings } from '@/components/layout/system-settings-provider';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const WORKSPACE_GROUP = {
@@ -48,7 +50,10 @@ const SYSTEM_GROUP = {
 const CHANGELOG_ITEM = { href: '/changelog', label: '更新日志', icon: NotebookText } as const;
 const ABOUT_ITEM = { href: '/about', label: '关于', icon: Info } as const;
 /** 仅管理员可见(经 /api/me 判定;MOCK 模式随身份切换即时显隐)。 */
-const ADMIN_NAV_ITEM = { href: '/users', label: '用户管理', icon: UserCog } as const;
+const ADMIN_NAV_ITEMS = [
+  { href: '/users', label: '用户管理', icon: UserCog },
+  { href: '/settings', label: '系统设置', icon: Settings },
+] as const;
 
 function isActive(pathname: string, href: string) {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -160,7 +165,9 @@ export function SidebarNav({ collapsed, onNavigate }: NavState) {
     };
   }, []);
 
-  const systemItems = isAdmin ? [...SYSTEM_GROUP.items, ADMIN_NAV_ITEM] : [...SYSTEM_GROUP.items];
+  const systemItems = isAdmin
+    ? [...SYSTEM_GROUP.items, ...ADMIN_NAV_ITEMS]
+    : [...SYSTEM_GROUP.items];
 
   return (
     <nav
@@ -197,8 +204,12 @@ export function SidebarNav({ collapsed, onNavigate }: NavState) {
   );
 }
 
-/** 品牌区:IDRL 字标(窄栏用 symbol)+ 应用名空间标签(IDRL space-label)。 */
+/**
+ * 品牌区:系统标志(未设置自定义标志时为 IDRL 字标,窄栏用 symbol)
+ * + 应用名卡片(标题/副标题取系统设置)。
+ */
 export function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
+  const { title, subtitle } = useSystemSettings();
   return (
     <div className={cn('pt-7', collapsed ? 'pb-2' : 'px-1 pb-6')}>
       <Link
@@ -209,8 +220,13 @@ export function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
           collapsed && 'mx-auto w-fit',
         )}
       >
-        <Brand compact={collapsed} />
-        {collapsed ? <span className="sr-only">预算管理系统</span> : null}
+        {/* 自定义标志只收窄展示尺寸:字标位与内置 IDRL 字标同高、限宽 140px;窄栏用 symbol 位。 */}
+        {collapsed ? (
+          <SystemLogo compact className="brand-symbol" />
+        ) : (
+          <SystemLogo className="max-h-9 w-auto max-w-[140px] object-contain" />
+        )}
+        {collapsed ? <span className="sr-only">{title}</span> : null}
       </Link>
       {!collapsed ? (
         <div className="mt-7 flex items-center gap-2.5 rounded-lg border border-border px-2.5 py-3">
@@ -218,8 +234,12 @@ export function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
             <Wallet className="size-4" aria-hidden="true" />
           </span>
           <span className="min-w-0">
-            <strong className="block text-xs leading-4">预算管理系统</strong>
-            <span className="block text-xs leading-4 text-muted-foreground">科研项目预算管理</span>
+            <strong className="block truncate text-xs leading-4">{title}</strong>
+            {subtitle ? (
+              <span className="block truncate text-xs leading-4 text-muted-foreground">
+                {subtitle}
+              </span>
+            ) : null}
           </span>
         </div>
       ) : null}
@@ -232,9 +252,10 @@ interface FooterProps extends NavState {
   version: string;
 }
 
-/** 底栏:关于 + 更新日志入口 + 版本号。 */
+/** 底栏:关于 + 更新日志入口 + 版本号 + 页脚文字(取系统设置,可为空)。 */
 export function SidebarFooter({ collapsed, version, onNavigate }: FooterProps) {
   const pathname = usePathname();
+  const { footerText } = useSystemSettings();
   const changelogActive = isActive(pathname, CHANGELOG_ITEM.href);
   const aboutActive = isActive(pathname, ABOUT_ITEM.href);
 
@@ -266,8 +287,11 @@ export function SidebarFooter({ collapsed, version, onNavigate }: FooterProps) {
           <span className="font-mono text-[10px] leading-none text-mute">v{version}</span>
         </div>
       ) : (
-        <div className="mt-2 px-3 py-1">
-          <span className="text-xs text-mute">v{version}</span>
+        <div className="mt-2 space-y-1 px-3 py-1">
+          <span className="block text-xs text-mute">v{version}</span>
+          {footerText ? (
+            <p className="break-words text-xs leading-4 text-mute">{footerText}</p>
+          ) : null}
         </div>
       )}
     </div>

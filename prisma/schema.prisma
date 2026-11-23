@@ -542,3 +542,26 @@ model RecordAttachment {
   @@index([recordId])
   @@map("record_attachments")
 }
+
+/// 系统设置单例(ADR 0004):id 恒为 'default'。settings 是稀疏 JSON——只存管理员显式
+/// 保存过的键,读取时与代码内出厂默认合并;没有行即全部内置默认。
+model SystemSetting {
+  id        String   @id
+  settings  Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+/// 系统标志字节(ADR 0004):key = standard(标准版)/ dark(深色主题版)/ compact(窄栏图标版)。
+/// bytea 入库与附件同模式(容器文件系统不持久、public/ 在构建期固定);
+/// 与设置单例分表,读设置时不带出大字段。
+model SystemLogo {
+  key         String   @id
+  contentType String   @map("content_type")
+  sizeBytes   Int      @map("size_bytes")
+  data        Bytes
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_logos")
+}

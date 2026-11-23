@@ -21,6 +21,7 @@ const PAGE_LABELS: Array<{ href: string; label: string }> = [
   { href: '/audit-logs', label: '操作日志' },
   { href: '/api-keys', label: 'API 凭证' },
   { href: '/users', label: '用户管理' },
+  { href: '/settings', label: '系统设置' },
   { href: '/changelog', label: '更新日志' },
   { href: '/about', label: '关于' },
 ];

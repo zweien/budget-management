@@ -84,6 +84,7 @@ const OBJECT_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'subject_change_applications', label: '科目变更' },
   { value: 'business_records', label: '业务记录' },
   { value: 'receipt_records', label: '到账流水' },
+  { value: 'system_settings', label: '系统设置' },
 ];
 
 /** §14.1 已知动作类型(与 server recordAudit 调用点保持一致)。 */
@@ -101,6 +102,7 @@ const ACTION_OPTIONS: { value: string; label: string }[] = [
   { value: 'status_switch', label: '状态切换' },
   { value: 'import', label: '导入' },
   { value: 'carryover', label: '跨年结转' },
+  { value: 'settings.update', label: '修改系统设置' },
 ];
 
 /** Select 的"全部"哨兵值(radix SelectItem 不允许空串)。 */

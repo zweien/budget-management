@@ -6,7 +6,9 @@ import { Download } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch, downloadFile } from '@/lib/api/client';
+import { ledgerYearWindow } from '@/lib/ledger-years';
 import { cn } from '@/lib/utils';
+import { useSystemSettings } from '@/components/layout/system-settings-provider';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { BudgetTreeTable, type LedgerNode } from '@/components/ui/BudgetTreeTable';
@@ -23,6 +25,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 interface ProjectLedger {
   year: number;
   nodes: LedgerNode[];
+  /** 年度下拉候选;仅系统默认年度为「最近有预算的年度」且请求未显式指定年度时下发。 */
+  years?: number[];
 }
 
 /** 总口径接口返回:含页头汇总条数据与预算模式(包干制列名改「累计计划」)。 */
@@ -69,20 +73,25 @@ function TotalSummaryBand({
   );
 }
 
-/** 生成最近 5 年的年度选项(含当前年,按降序)。 */
-function yearOptions(): number[] {
-  const now = new Date().getFullYear();
-  return [now, now - 1, now - 2, now - 3, now - 4];
+/** 年度下拉的固定窗口候选(今天所在年 + 前 4 年,降序);服务端下发 years 时由其取代。 */
+function defaultYearWindow(): number[] {
+  return ledgerYearWindow(new Date().getFullYear());
 }
 
 export default function ProjectLedgerPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
+  const settings = useSystemSettings();
 
   // 口径:annual = 年度视图(预算=该年度科目预算,占用=该年度记录);
   // total = 总预算视图(预算=科目总预算,占用=全部年度记录,无年度维度)。
-  const [mode, setMode] = useState<'annual' | 'total'>('annual');
-  const [year, setYear] = useState<number>(() => new Date().getFullYear());
+  // 进页取系统设置的「台账默认口径」;个人切换只对当次有效,不记个人偏好。
+  const [mode, setMode] = useState<'annual' | 'total'>(settings.ledgerBasis);
+  // year:本人选定的年度;null = 尚未选定,请求不带 year → 由服务端按系统默认裁决。
+  const [year, setYear] = useState<number | null>(null);
+  // shownYear:当前展示的年度(首屏由响应回填;导出与科目链接以它为准)。不入拉取依赖,避免二次请求。
+  const [shownYear, setShownYear] = useState<number | null>(null);
+  const [years, setYears] = useState<number[]>(defaultYearWindow);
   // 台账节点(两种口径共用;年度响应额外带 year,总口径响应额外带汇总条数据)。
   const [ledger, setLedger] = useState<{ nodes: LedgerNode[] } | null>(null);
   const [totalInfo, setTotalInfo] = useState<TotalLedgerResponse | null>(null);
@@ -106,11 +115,15 @@ export default function ProjectLedgerPage() {
           setTotalInfo(res);
         } else {
           const res = await apiFetch<ProjectLedger>(
-            `/api/projects/${projectId}/ledger?year=${year}`,
+            year === null
+              ? `/api/projects/${projectId}/ledger`
+              : `/api/projects/${projectId}/ledger?year=${year}`,
           );
           if (cancelled) return;
           setLedger(res);
           setTotalInfo(null);
+          setShownYear(res.year);
+          if (res.years && res.years.length > 0) setYears(res.years);
         }
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : '加载台账失败');
@@ -133,18 +146,21 @@ export default function ProjectLedgerPage() {
 
   /** 年度切换:同步重置在途状态后由上面的 effect 重拉。 */
   const handleYearChange = (next: string) => {
+    const nextYear = Number(next);
     setLoading(true);
     setError(null);
-    setYear(Number(next));
+    setYear(nextYear);
+    setShownYear(nextYear);
   };
 
   /** 导出当前年度台账为 xlsx(§10.5;仅年度视图提供)。 */
   const handleExport = async () => {
+    if (shownYear === null) return;
     setExporting(true);
     try {
       await downloadFile(
-        `/api/projects/${projectId}/export/ledger?year=${year}`,
-        `ledger-${year}.xlsx`,
+        `/api/projects/${projectId}/export/ledger?year=${shownYear}`,
+        `ledger-${shownYear}.xlsx`,
       );
       toast.success('已开始下载台账');
     } catch (e: unknown) {
@@ -173,12 +189,16 @@ export default function ProjectLedgerPage() {
           {mode === 'annual' ? (
             <div className="grid w-36 gap-1.5">
               <Label>年度</Label>
-              <Select value={String(year)} onValueChange={handleYearChange}>
+              <Select
+                value={shownYear === null ? '' : String(shownYear)}
+                onValueChange={handleYearChange}
+                disabled={shownYear === null}
+              >
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue placeholder="加载中…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {yearOptions().map((y) => (
+                  {years.map((y) => (
                     <SelectItem key={y} value={String(y)}>
                       {y} 年
                     </SelectItem>
@@ -189,7 +209,11 @@ export default function ProjectLedgerPage() {
           ) : null}
         </div>
         {mode === 'annual' ? (
-          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={exporting || shownYear === null}
+          >
             <Download />
             {exporting ? '导出中…' : '导出台账'}
           </Button>
@@ -220,7 +244,7 @@ export default function ProjectLedgerPage() {
           <BudgetTreeTable
             nodes={ledger.nodes}
             showLevel1Total
-            yearLabel={mode === 'annual' ? year : undefined}
+            yearLabel={mode === 'annual' && shownYear !== null ? shownYear : undefined}
             hideAnnualColumns={mode === 'total'}
             defaultHiddenColumns={['totalInitial', 'totalAdjustment', 'initial', 'adjustment']}
             totalGroupLabel={
@@ -229,15 +253,15 @@ export default function ProjectLedgerPage() {
             subjectHref={(n) =>
               // 科目名链到业务记录页:叶=单科目,非叶=含下级(服务端展开为全部后代叶)。
               // 年度视图携带年份筛选;总预算视图跳该科目全部年度记录。
-              mode === 'annual'
-                ? `/projects/${projectId}/records?subjectId=${n.subjectId}&year=${year}`
+              mode === 'annual' && shownYear !== null
+                ? `/projects/${projectId}/records?subjectId=${n.subjectId}&year=${shownYear}`
                 : `/projects/${projectId}/records?subjectId=${n.subjectId}`
             }
           />
         </>
       ) : mode === 'annual' ? (
         <Alert variant="info">
-          <AlertTitle>{year} 年度暂无预算执行数据</AlertTitle>
+          <AlertTitle>{shownYear ?? ''} 年度暂无预算执行数据</AlertTitle>
           <AlertDescription>
             可能是尚未编制或审批通过该年度的初始预算,或本年度还没有业务记录。
           </AlertDescription>
