@@ -22,7 +22,8 @@ Single-context 布局（repo 根目录一个 `CONTEXT.md` + `docs/adr/`）。See
 - **改 `CHANGELOG.md` 和 `public/` 会立即影响线上**：`/changelog` 页在请求时直接读 `CHANGELOG.md`，`public/` 由生产进程直接对外提供。未发布条目写在 `## [Unreleased]` 下即可（解析器跳过无日期的版本节）；`src/` 下的改动要重新构建并重启才生效。
 - **重活会挤占生产**：类型检查、全量测试、开发服务器各占几百 MB 到 1G 以上。放进限资源的 cgroup 里跑，超限只杀自己：
   `systemd-run --scope --collect --unit=<名字> -p MemoryMax=<上限> -p MemorySwapMax=0 -p CPUQuota=250% <命令>`，结束时 `systemctl stop <名字>.scope`。注意 Node 会按 cgroup 上限推算默认 V8 堆大小，跑 `tsc` 要显式给 `NODE_OPTIONS=--max-old-space-size=1024`（上限 1500M）。
-- **不要用 `pkill`/`kill` 按命令行模式匹配杀进程**（会误伤生产进程或自己的 shell）：按 PID 终止，并先核对 `/proc/<pid>/cwd`。
+- **不要用 `pkill`/`kill` 按命令行模式匹配杀进程**（会误伤生产进程，也会匹配到承载这条命令的 shell 自身）：按 PID 终止，并先核对 `/proc/<pid>/cwd`。用 `pgrep -f` 查找时把模式写成 `nam[e]` 的形式，并排除 `$$`，避免匹配到当前命令。
+- **`codex review`（以及任何会自己执行命令的评审代理）要在隔离副本里跑，不要在本目录跑**：它会在当前目录执行 `npm run check-types` / `npm test`。只读沙箱能拦住写入（实测报 `EROFS`），但计算照跑；而且本目录里生成的 Prisma 客户端不随分支更新，`check-types` 会报出与代码无关的错误。
 
 ### 隔离验证的做法
 
