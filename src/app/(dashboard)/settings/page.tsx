@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { apiFetch } from '@/lib/api/client';
 import { fetchSystemSettings } from '@/lib/api/systemSettings';
@@ -14,13 +15,27 @@ import { WorkspaceCard } from '@/components/settings/workspace-card';
 
 /**
  * 系统设置页(仅 ADMIN;CONTEXT.md「系统设置」)。
- * 三张卡片各自独立保存、互不覆盖;保存后其他页面在刷新或跳转时生效(不做实时推送)。
+ * 三张卡片各自独立保存、互不覆盖;保存后本页 router.refresh() 让服务端布局重读
+ * 设置并更新 Provider——壳内其余页面随后跳转即见新值(不做实时推送,其他浏览器
+ * 标签页仍在各自下次刷新时生效)。
  * 非管理员不渲染表单(写接口另有服务端把关,这里的门控只是不让表单白屏报错)。
  */
 export default function SettingsPage() {
+  const router = useRouter();
   const [settings, setSettings] = useState<SystemSettingsSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+
+  /**
+   * 保存成功后的统一回调:更新本页状态 + router.refresh()。
+   * refresh 重取当前路由的服务端组件(含 dashboard 布局),布局重读设置后
+   * SystemSettingsProvider 拿到新值——否则 SPA 跳转到的页面(如执行台账进页的
+   * 「台账默认口径」)仍读旧上下文,要整页刷新才生效。
+   */
+  const handleSaved = (next: SystemSettingsSnapshot) => {
+    setSettings(next);
+    router.refresh();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -74,9 +89,9 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <BrandCard saved={settings} onSaved={setSettings} />
-          <AppearanceCard saved={settings} onSaved={setSettings} />
-          <WorkspaceCard saved={settings} onSaved={setSettings} />
+          <BrandCard saved={settings} onSaved={handleSaved} />
+          <AppearanceCard saved={settings} onSaved={handleSaved} />
+          <WorkspaceCard saved={settings} onSaved={handleSaved} />
         </div>
       )}
     </div>
