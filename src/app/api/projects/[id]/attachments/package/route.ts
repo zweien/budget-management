@@ -95,6 +95,12 @@ export const GET = withRoute(
           status: r.record.status,
           year: String(r.record.budgetYear),
           original: r.attachment.fileName,
+          completed: r.record.completedDate
+            ? r.record.completedDate.toISOString().slice(0, 10)
+            : '',
+          docNo: r.record.docNo ?? '',
+          voucherNo: r.record.voucherNo ?? '',
+          remark: (r.record.remark ?? '').slice(0, 40),
         };
         const baseName = renderFilename(template, ctx);
         let used = usedByFolder.get(folder);

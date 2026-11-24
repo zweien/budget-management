@@ -21,17 +21,21 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { packageAttachmentsBySubject } from '@/lib/api/attachments';
-import { ensureExtension } from '@/lib/attachments/packagePath';
+import { renderFilename, type TokenContext } from '@/lib/attachments/packagePath';
 
 const DEFAULT_TEMPLATE = '{date}_{amount}_{summary}_{original}';
 const ALL_YEAR = '__ALL__';
 /** 占位符清单:token 点击插入模板;desc 供「各占位符含义」说明区与按钮悬停提示。 */
 const TOKENS: Array<{ token: string; desc: string }> = [
   { token: '{date}', desc: '申请日期(yyyy-mm-dd)' },
+  { token: '{completed}', desc: '完成日期(yyyy-mm-dd,可为空)' },
   { token: '{amount}', desc: '金额(两位小数,如 1200.00)' },
   { token: '{handler}', desc: '经办人姓名' },
+  { token: '{docNo}', desc: '单据编号(可为空)' },
+  { token: '{voucherNo}', desc: '凭证编号(可为空)' },
   { token: '{subject}', desc: '叶科目名称' },
   { token: '{summary}', desc: '摘要(超 40 字截断)' },
+  { token: '{remark}', desc: '备注(超 40 字截断,可为空)' },
   {
     token: '{status}',
     desc: '状态码(PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/RETURNED/PAID)',
@@ -41,12 +45,16 @@ const TOKENS: Array<{ token: string; desc: string }> = [
 ];
 
 // 预览用的样例数据(固定,直观展示各占位符效果)。
-const PREVIEW_CTX: Record<string, string> = {
+const PREVIEW_CTX: TokenContext = {
   date: '2026-08-05',
+  completed: '2026-08-20',
   amount: '1200.00',
   handler: '张三',
+  docNo: 'BX-2026-0311',
+  voucherNo: '记-0123',
   subject: '设备购置费',
   summary: '差旅费',
+  remark: '含往返高铁票',
   status: 'PAID',
   year: '2026',
   original: '发票.pdf',
@@ -71,13 +79,9 @@ export function PackageAttachmentsDialog({
   const [busy, setBusy] = useState(false);
 
   const previewName = useMemo(() => {
-    // 与服务端同规则:空模板回落默认模板(路由对空 template 用 DEFAULT_TEMPLATE)。
-    const tpl = template.trim() || DEFAULT_TEMPLATE;
-    const rendered = tpl.replace(/\{(\w+)\}/g, (full, key: string) => {
-      return PREVIEW_CTX[key] ?? full;
-    });
-    // 与服务端 renderFilename 同规则:模板未含 {original} 时也补原文件扩展名。
-    return ensureExtension(rendered, PREVIEW_CTX.original);
+    // 与服务端同规则:空模板回落默认模板(路由对空 template 用 DEFAULT_TEMPLATE),
+    // 渲染统一走共享 renderFilename(含空值折叠/消毒/补扩展名),两端不漂移。
+    return renderFilename(template.trim() || DEFAULT_TEMPLATE, PREVIEW_CTX);
   }, [template]);
 
   const handlePackage = async () => {
@@ -167,7 +171,7 @@ export function PackageAttachmentsDialog({
               </ul>
               <p className="mt-1.5 text-mute">
                 规则:未知占位符原样保留;模板为空用默认模板;文件名始终以原文件扩展名结尾;非法字符替换为下划线;同目录同名自动追加
-                (1)(2)。
+                (1)(2);可空占位符(完成日期/单据编号/凭证编号/备注)值为空时,连同紧邻的一个分段符一起折叠,不留连续分隔符。
               </p>
             </details>
           </div>

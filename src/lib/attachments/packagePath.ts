@@ -2,7 +2,7 @@
  * 按预算科目层级打包附件 — 路径与文件名构建(纯函数,无 IO/无 DB)。
  *
  * 文件夹路径:walk 附件所属叶科目的 parentId 到根,每段取科目名称。
- * 文件名:占位符模板渲染({date}/{amount}/.../{original})。
+ * 文件名:占位符模板渲染({date}/{completed}/{docNo}/{voucherNo}/{remark}/…/{original})。
  * 全部经过 OS 安全消毒(防 zip-slip 与 Windows 非法字符)。
  */
 
@@ -16,7 +16,7 @@ export interface SubjectNode {
 }
 
 export interface TokenContext {
-  date: string; // yyyy-mm-dd
+  date: string; // yyyy-mm-dd(申请日期)
   amount: string; // 2 位小数
   handler: string;
   subject: string; // 叶科目名
@@ -24,6 +24,10 @@ export interface TokenContext {
   status: string; // 枚举字符串
   year: string;
   original: string; // 原文件名(含扩展名)
+  completed: string; // yyyy-mm-dd(完成日期);可空
+  docNo: string; // 单据编号;可空
+  voucherNo: string; // 凭证编号;可空
+  remark: string; // 备注;可空
 }
 
 const ILLEGAL_CHARS = /[\\/:*?"<>|\0]/g;
@@ -131,20 +135,54 @@ const TOKENS: Record<string, (ctx: TokenContext) => string> = {
   status: (c) => c.status,
   year: (c) => c.year,
   original: (c) => c.original,
+  completed: (c) => c.completed,
+  docNo: (c) => c.docNo,
+  voucherNo: (c) => c.voucherNo,
+  remark: (c) => c.remark,
 };
+
+/** 空值折叠视为「分段符」的字符(下划线/连字符/空格类,含全角);不含点,防吃掉扩展名分隔。 */
+const SEPARATOR_CHAR = /[-_－—\s]/;
 
 /**
  * 渲染文件名:把 {token} 替换为对应值,未知占位符原样保留。
+ * 可空占位符(completed/docNo/voucherNo/remark)值为空时,该占位符连同紧邻的
+ * 一个分段符一起折叠——只吃字面段里的分段符,不碰占位符取值,避免文件名出现
+ * 连续分隔符;每处只吃一个,字面文本不动。
  * 渲染后整体消毒并补齐原文件扩展名(模板不含 {original} 或不在末尾时,
- * zip 内条目将没有后缀,Windows 无法识别类型);超长(>200)截断保留扩展名。
+ * zip 内条目将没有后缀,Windows 无法识别类型);超长(>200)截断保留扩展名;
+ * 消毒后为空(模板值全空/全非法字符)→ 回退原文件名。
  */
 export function renderFilename(template: string, ctx: TokenContext): string {
   const tpl = template.trim() || '{original}';
-  const rendered = tpl.replace(/\{(\w+)\}/g, (full, key: string) => {
-    const fn = TOKENS[key];
-    return fn ? fn(ctx) : full;
-  });
-  // 消毒后为空(模板值全空/全非法字符)→ 回退原文件名。
+  // 切成 字面/占位符 交替段,逐段取值;空值折叠在其上进行。
+  const parts = tpl
+    .split(/(\{\w+\})/)
+    .filter((p) => p !== '')
+    .map((piece) => {
+      const m = /^\{(\w+)\}$/.exec(piece);
+      const fn = m ? TOKENS[m[1]] : undefined;
+      return { fromToken: fn !== undefined, text: fn ? fn(ctx) : piece };
+    });
+  const kept = parts.map((p) => ({ ...p }));
+  for (let i = 0; i < kept.length; i++) {
+    const part = kept[i];
+    if (part.fromToken && part.text === '') {
+      const next = kept[i + 1];
+      const prev = kept[i - 1];
+      if (next && !next.fromToken && next.text !== '' && SEPARATOR_CHAR.test(next.text[0])) {
+        next.text = next.text.slice(1);
+      } else if (
+        prev &&
+        !prev.fromToken &&
+        prev.text !== '' &&
+        SEPARATOR_CHAR.test(prev.text.at(-1) ?? '')
+      ) {
+        prev.text = prev.text.slice(0, -1);
+      }
+    }
+  }
+  const rendered = kept.map((p) => p.text).join('');
   let name = ensureExtension(
     sanitizeSegment(rendered) || sanitizeSegment(ctx.original),
     ctx.original,

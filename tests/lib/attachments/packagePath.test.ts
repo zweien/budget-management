@@ -27,6 +27,10 @@ const ctx: TokenContext = {
   status: 'PAID',
   year: '2026',
   original: '发票.pdf',
+  completed: '2026-08-20',
+  docNo: 'BX-2026-0311',
+  voucherNo: '记-0123',
+  remark: '含往返高铁票',
 };
 
 describe('sanitizeSegment', () => {
@@ -201,6 +205,59 @@ describe('renderFilename', () => {
   });
   it('空模板 → 返回 original(兜底)', () => {
     expect(renderFilename('', ctx)).toBe('发票.pdf');
+  });
+});
+
+describe('renderFilename 可空占位符与空值折叠', () => {
+  it('新增占位符:completed/docNo/voucherNo/remark', () => {
+    expect(renderFilename('{completed}_{docNo}_{voucherNo}_{remark}_{original}', ctx)).toBe(
+      '2026-08-20_BX-2026-0311_记-0123_含往返高铁票_发票.pdf',
+    );
+  });
+  it('单段空:空占位符连同紧邻分段符折叠,不留连续分隔符', () => {
+    expect(renderFilename('{date}_{docNo}_{summary}_{original}', { ...ctx, docNo: '' })).toBe(
+      '2026-08-05_差旅费_发票.pdf',
+    );
+  });
+  it('连续多段空:逐段折叠不叠加', () => {
+    expect(
+      renderFilename('{date}_{docNo}_{voucherNo}_{original}', {
+        ...ctx,
+        docNo: '',
+        voucherNo: '',
+      }),
+    ).toBe('2026-08-05_发票.pdf');
+  });
+  it('折叠吃后面的分段符优先;末尾空段吃前面的;渲染后仍补原扩展名', () => {
+    expect(renderFilename('{date}_{docNo}', { ...ctx, docNo: '' })).toBe('2026-08-05.pdf');
+  });
+  it('字面文本相邻:吃字面段里的分段符,文本保留', () => {
+    expect(renderFilename('附件-{docNo}-费用_{original}', { ...ctx, docNo: '' })).toBe(
+      '附件-费用_发票.pdf',
+    );
+  });
+  it('只有可空占位符且全空 → 回退原文件名', () => {
+    expect(renderFilename('{docNo}_{original}', { ...ctx, docNo: '' })).toBe('发票.pdf');
+    expect(renderFilename('{completed}', { ...ctx, completed: '' })).toBe('发票.pdf');
+  });
+  it('不吃占位符取值:相邻是占位符(无字面段)时只丢弃空段本身', () => {
+    expect(renderFilename('{docNo}{original}', { ...ctx, docNo: '' })).toBe('发票.pdf');
+    expect(renderFilename('{date}{docNo}{original}', { ...ctx, docNo: '' })).toBe(
+      '2026-08-05发票.pdf',
+    );
+  });
+  it('点不是分段符,不参与折叠;残留首点由消毒去除', () => {
+    expect(renderFilename('{docNo}.{original}', { ...ctx, docNo: '' })).toBe('发票.pdf');
+  });
+  it('分段符包含全角连字符/长破折号/全角空格', () => {
+    expect(renderFilename('附件－{docNo}－{original}', { ...ctx, docNo: '' })).toBe(
+      '附件－发票.pdf',
+    );
+  });
+  it('未知占位符不受折叠影响,原样保留', () => {
+    expect(renderFilename('{docNo}_{unknown}_{original}', { ...ctx, docNo: '' })).toBe(
+      '{unknown}_发票.pdf',
+    );
   });
 });
 

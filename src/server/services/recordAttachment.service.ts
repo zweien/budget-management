@@ -343,6 +343,10 @@ export async function listForExport(
       amount: Prisma.Decimal;
       budgetYear: number;
       status: string;
+      completedDate: Date | null;
+      docNo: string | null;
+      voucherNo: string | null;
+      remark: string | null;
     };
     attachment: AttachmentMeta;
     data: Buffer;
@@ -366,6 +370,10 @@ export async function listForExport(
             amount: true,
             budgetYear: true,
             status: true,
+            completedDate: true,
+            docNo: true,
+            voucherNo: true,
+            remark: true,
           },
         },
         uploadedBy: { select: { id: true, name: true } },
