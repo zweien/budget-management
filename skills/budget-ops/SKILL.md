@@ -49,26 +49,27 @@ python budget.py upload ~/budget-inbox/A-001/结算单.xlsx /projects/$PID/impor
 
 ### 自主
 
-| 操作               | 调用                                                                                                                                                                         |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 项目列表           | `GET /projects?includeArchived=1`                                                                                                                                            |
-| 项目详情           | `GET /projects/$PID`                                                                                                                                                         |
-| 执行台账           | `GET /projects/$PID/ledger?year=2026`                                                                                                                                        |
-| 总预算台账(跨年度) | `GET /projects/$PID/ledger-total` — 占用/结余/执行率按科目总预算(包干制 = Σ年度)对全部年度记录计算                                                                           |
-| 业务记录列表       | `GET /projects/$PID/records?year=&subjectId=&status=&includeVoid=1&handler=&summary=&businessDateFrom=&businessDateTo=`(status ∈ PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/PAID) |
-| 记录变更历史       | `GET /projects/$PID/records/:recordId/history`                                                                                                                               |
-| 导入批次列表       | `GET /projects/$PID/imports`(最近 20 条)                                                                                                                                     |
-| 导入批次预览       | `GET /projects/$PID/imports/:batchId`                                                                                                                                        |
-| **科目映射记忆**   | `GET /projects/$PID/subject-mappings?q=&limit=` → `{summary, subjectId, subjectCode, subjectName, useCount}`                                                                 |
-| 月度统计           | `GET /statistics/monthly?projectId=$PID&year=2026`                                                                                                                           |
-| 余额统计           | `GET /statistics/balance?subject=&projectId=&year=&onlyNegative=1`                                                                                                           |
-| 审计日志           | `GET /audit-logs?projectId=&action=&dateFrom=&dateTo=&limit=`(无人值守被拒尝试 action=`unattended.denied`)                                                                   |
-| 编制单回读         | `GET /projects/$PID/initial-budget` — 初始预算编制单全量(状态/科目树/年度/明细/总预算);**404 = 有权限且该项目尚未编制**,可作「完整档 + OWNER」权限的只读探测                 |
-| 调整单列表         | `GET /projects/$PID/adjustments` — 全部调整单(状态/kind/明细/锁),响应 `{adjustments:[…]}`;`GET …/adjustments/:adjId` 取单张,响应 `{adjustment:{…}}`                          |
-| 上传解析(不改台账) | `upload <文件.xlsx> /projects/$PID/imports`(multipart 字段 `file`)→ `{batchId}`,格式自动识别(结算单 v1 填制日期版 / v2 申请日期版 / 标准模板)                                |
-| 补全更新预览       | 结算单再次导入命中同单据编号且金额一致、带来新信息(补完成日期/状态推进到已支出)→ 行标「补全更新」,确认后**更新**既有记录(非新增);金额不一致或无新信息 = 硬重复,禁止          |
-| 导入前置条件       | 目标项目**初始预算须已审批生效**:未审批项目的上传/确认统一 422「项目初始预算尚未审批通过」;v3 多项目文件中未审批目标的行标 error,改映射到已审批项目即可                      |
-| 暂存行修改         | `PATCH /projects/$PID/imports/:batchId`,body `{"updates":[{"rowId","subjectId"?,"budgetYear"?,"forcedImport"?}]}`                                                            |
+| 操作               | 调用                                                                                                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 项目列表           | `GET /projects?includeArchived=1`                                                                                                                                                                                    |
+| 项目详情           | `GET /projects/$PID`                                                                                                                                                                                                 |
+| 执行台账           | `GET /projects/$PID/ledger?year=2026`                                                                                                                                                                                |
+| 总预算台账(跨年度) | `GET /projects/$PID/ledger-total` — 占用/结余/执行率按科目总预算(包干制 = Σ年度)对全部年度记录计算                                                                                                                   |
+| 业务记录列表       | `GET /projects/$PID/records?year=&subjectId=&status=&includeVoid=1&handler=&summary=&businessDateFrom=&businessDateTo=`(status ∈ PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/RETURNED/PAID;RETURNED=业务退单,计入应付未付) |
+| 记录变更历史       | `GET /projects/$PID/records/:recordId/history`                                                                                                                                                                       |
+| 导入批次列表       | `GET /projects/$PID/imports`(最近 20 条)                                                                                                                                                                             |
+| 导入批次预览       | `GET /projects/$PID/imports/:batchId`                                                                                                                                                                                |
+| **科目映射记忆**   | `GET /projects/$PID/subject-mappings?q=&limit=` → `{summary, subjectId, subjectCode, subjectName, useCount}`                                                                                                         |
+| 月度统计           | `GET /statistics/monthly?projectId=$PID&year=2026`                                                                                                                                                                   |
+| 余额统计           | `GET /statistics/balance?subject=&projectId=&year=&onlyNegative=1`                                                                                                                                                   |
+| 审计日志           | `GET /audit-logs?projectId=&action=&dateFrom=&dateTo=&limit=`(无人值守被拒尝试 action=`unattended.denied`)                                                                                                           |
+| 编制单回读         | `GET /projects/$PID/initial-budget` — 初始预算编制单全量(状态/科目树/年度/明细/总预算);**404 = 有权限且该项目尚未编制**,可作「完整档 + OWNER」权限的只读探测                                                         |
+| 调整单列表         | `GET /projects/$PID/adjustments` — 全部调整单(状态/kind/明细/锁),响应 `{adjustments:[…]}`;`GET …/adjustments/:adjId` 取单张,响应 `{adjustment:{…}}`                                                                  |
+| 上传解析(不改台账) | `upload <文件.xlsx> /projects/$PID/imports`(multipart 字段 `file`)→ `{batchId}`,格式自动识别(结算单 v1 填制日期版 / v2 申请日期版 / 标准模板)                                                                        |
+| 补全更新预览       | 结算单再次导入命中同单据编号且金额一致、带来新信息(补完成日期 / 状态可回写:推进到已支出,或在途 ↔ 业务退单;已支出不回退)→ 行标「补全更新」,确认后**更新**既有记录(非新增);金额不一致或无新信息 = 硬重复,禁止          |
+| 业务退单           | 财务系统状态「业务退单」的行不再跳过:照常待导入,入账为状态 `RETURNED`(计入应付未付);预览里与其它行一样指派科目后确认                                                                                                 |
+| 导入前置条件       | 目标项目**初始预算须已审批生效**:未审批项目的上传/确认统一 422「项目初始预算尚未审批通过」;v3 多项目文件中未审批目标的行标 error,改映射到已审批项目即可                                                              |
+| 暂存行修改         | `PATCH /projects/$PID/imports/:batchId`,body `{"updates":[{"rowId","subjectId"?,"budgetYear"?,"forcedImport"?}]}`                                                                                                    |
 
 ### 指令授权
 

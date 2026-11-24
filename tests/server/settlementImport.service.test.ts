@@ -18,6 +18,7 @@ import {
   listImportBatches,
 } from '@/server/services/settlementImport.service';
 import { parseAndValidate } from '@/server/services/excelImport.service';
+import { customStatistics } from '@/server/services/statistics.service';
 
 /**
  * 个人结算单 Excel 导入集成测试(直连真实 PG :5434)。
@@ -262,7 +263,7 @@ describe('settlementImport.service (integration, real PG)', () => {
     });
   });
 
-  it('parse:状态映射/退单跳过/年度推导/富文本拍平/错误行', async () => {
+  it('parse:状态映射/退单入账/年度推导/富文本拍平/错误行', async () => {
     const buf = await buildSettlementXlsx([
       {
         docNo: 'TY1',
@@ -335,11 +336,11 @@ describe('settlementImport.service (integration, real PG)', () => {
 
     const preview = await getSettlementBatch(batchId, adminUser());
     expect(preview.templateVersion).toBe(SETTLEMENT_TEMPLATE_VERSION);
-    // 待导入:TY1/TY2/TY4;重复:无;错误:TY5/TY6/TY7;跳过:TY3。
-    expect(preview.pending).toHaveLength(3);
+    // 待导入:TY1/TY2/TY3(业务退单)/TY4;重复:无;错误:TY5/TY6/TY7;跳过:无(业务退单照常入账)。
+    expect(preview.pending).toHaveLength(4);
     expect(preview.duplicates).toHaveLength(0);
     expect(preview.errors).toHaveLength(3);
-    expect(preview.skippedCount).toBe(1);
+    expect(preview.skippedCount).toBe(0);
 
     const ty1 = preview.pending.find((r) => r.parsedData.docNo === 'TY1')!;
     expect(ty1.parsedData.status).toBe(BusinessStatus.PAID);
@@ -348,6 +349,10 @@ describe('settlementImport.service (integration, real PG)', () => {
     const ty2 = preview.pending.find((r) => r.parsedData.docNo === 'TY2')!;
     expect(ty2.parsedData.status).toBe(BusinessStatus.FINANCE_APPROVAL);
     expect(ty2.normalizedAmount).toBe('280.50');
+    const ty3 = preview.pending.find((r) => r.parsedData.docNo === 'TY3')!;
+    expect(ty3.parsedData.status).toBe(BusinessStatus.RETURNED);
+    expect(ty3.parsedData.statusLabel).toBe('业务退单');
+    expect(ty3.normalizedAmount).toBe('2738.31');
     const ty4 = preview.pending.find((r) => r.parsedData.docNo === 'TY4')!;
     // 富文本拍平:粗体前缀 + 正文拼接。
     expect(ty4.parsedData.summary).toBe('（出版文献事务费）高拍仪');
@@ -359,6 +364,11 @@ describe('settlementImport.service (integration, real PG)', () => {
     expect(errFields).toContain('docStatus');
     expect(errFields).toContain('fillDate');
     expect(errFields).toContain('amount');
+    // 无法识别的状态:提示的支持清单含业务退单(不再标注「不导入」)。
+    const ty5 = preview.errors.find((r) => r.parsedData.docNo === 'TY5')!;
+    const statusErr = ty5.errors.find((e) => e.field === 'docStatus')!;
+    expect(statusErr.message).toContain('业务退单');
+    expect(statusErr.message).not.toContain('不导入');
 
     // docNo 非必填:解析不因缺单据编号报错。
     const buf2 = await buildSettlementXlsx([
@@ -824,7 +834,7 @@ describe('settlementImport.service (integration, real PG)', () => {
     return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
   }
 
-  it('v2 申请日期版:识别/列映射/完成审核→财务审批/完成日期入库;单位等部门等新列忽略', async () => {
+  it('v2 申请日期版:识别/列映射/完成审核→财务审批/业务退单→业务退单状态/完成日期入库;单位等部门等新列忽略', async () => {
     const buf = await buildSettlementV2Xlsx([
       {
         docNo: 'V2-PAID',
@@ -844,7 +854,7 @@ describe('settlementImport.service (integration, real PG)', () => {
         remark: '研发中心陈柏瑞报（其他支出）外出参会市内交通费',
       },
       {
-        docNo: 'V2-VOID',
+        docNo: 'V2-RETURNED',
         docStatus: '业务退单',
         applyDate: '2026-08-01',
         amount: '10',
@@ -885,25 +895,37 @@ describe('settlementImport.service (integration, real PG)', () => {
     expect(audit.parsedData.status).toBe(BusinessStatus.FINANCE_APPROVAL);
     expect(audit.parsedData.completedDate ?? null).toBeNull();
 
-    expect(preview.skippedCount).toBe(1);
+    // 业务退单不再跳过:进入待导入分组,映射为业务退单状态。
+    const returned = preview.pending.find((r) => r.parsedData.docNo === 'V2-RETURNED')!;
+    expect(returned.parsedData.status).toBe(BusinessStatus.RETURNED);
+    expect(preview.skippedCount).toBe(0);
 
-    // 指定科目 → 确认:created=2,完成日期写入已支出行。
+    // 指定科目 → 确认:created=3,完成日期写入已支出行。
     await updateSettlementRows(
       batchId,
       [
         { rowId: paid.rowId, subjectId: leafId },
         { rowId: audit.rowId, subjectId: leafId2 },
+        { rowId: returned.rowId, subjectId: leafId },
       ],
       adminUser(),
     );
-    const res = await confirmSettlementImport(batchId, [paid.rowId, audit.rowId], adminUser());
-    expect(res.created).toBe(2); // 倒挂行在错误分组,不参与确认。
+    const res = await confirmSettlementImport(
+      batchId,
+      [paid.rowId, audit.rowId, returned.rowId],
+      adminUser(),
+    );
+    expect(res.created).toBe(3); // 倒挂行在错误分组,不参与确认。
     expect(res.updated).toBe(0);
     const saved = await prisma.businessRecord.findFirst({ where: { docNo: 'V2-PAID' } });
     expect(saved!.completedDate?.toISOString().slice(0, 10)).toBe('2026-07-13');
     const savedAudit = await prisma.businessRecord.findFirst({ where: { docNo: 'V2-AUDIT' } });
     expect(savedAudit!.completedDate).toBeNull();
     expect(savedAudit!.status).toBe(BusinessStatus.FINANCE_APPROVAL);
+    const savedReturned = await prisma.businessRecord.findFirst({
+      where: { docNo: 'V2-RETURNED' },
+    });
+    expect(savedReturned!.status).toBe(BusinessStatus.RETURNED);
   });
 
   it('§补全更新:状态推进(v1)与完成日期回填(v2)走 refresh;金额不一致/无新信息仍硬重复;确认复核竞态 422', async () => {
@@ -1141,6 +1163,150 @@ describe('settlementImport.service (integration, real PG)', () => {
     await expect(confirmSettlementImport(batchId2, [r2.rowId], adminUser())).rejects.toMatchObject({
       status: 422,
     });
+  });
+
+  it('业务退单:入账为 RETURNED 且计入应付未付;在途↔业务退单随导入回写;已支出不回退', async () => {
+    // 1) 首次导入即业务退单 → 正常待导入行(不跳过),确认后入账为 RETURNED。
+    const buf = await buildSettlementV2Xlsx([
+      {
+        docNo: 'RT-NEW',
+        docStatus: '业务退单',
+        applyDate: '2026-06-11',
+        amount: '11',
+        handler: '新',
+        remark: '首见即退单',
+      },
+      {
+        docNo: 'RT-PAID',
+        docStatus: '完成记账',
+        applyDate: '2026-06-12',
+        completeDate: '2026-06-20',
+        amount: '12',
+        handler: '新',
+        remark: '已支出源',
+      },
+    ]);
+    const wb = await loadSettlementWorkbookIfMatch(buf);
+    const batchId = await parseSettlement(wb!, projectId, adminUser());
+    const preview = await getSettlementBatch(batchId, adminUser());
+    expect(preview.skippedCount).toBe(0);
+    const rtNew = preview.pending.find((r) => r.parsedData.docNo === 'RT-NEW')!;
+    expect(rtNew.parsedData.status).toBe(BusinessStatus.RETURNED);
+    const rtPaid = preview.pending.find((r) => r.parsedData.docNo === 'RT-PAID')!;
+    await updateSettlementRows(
+      batchId,
+      [
+        { rowId: rtNew.rowId, subjectId: leafId },
+        { rowId: rtPaid.rowId, subjectId: leafId },
+      ],
+      adminUser(),
+    );
+    expect(
+      (await confirmSettlementImport(batchId, [rtNew.rowId, rtPaid.rowId], adminUser())).created,
+    ).toBe(2);
+    const recNew = await prisma.businessRecord.findFirst({
+      where: { projectId, docNo: 'RT-NEW' },
+    });
+    expect(recNew!.status).toBe(BusinessStatus.RETURNED);
+    expect(recNew!.completedDate).toBeNull();
+
+    // 业务退单计入应付未付(与在途态同口径),不计入已支出。
+    const returnedStats = await customStatistics(
+      { projectId, status: BusinessStatus.RETURNED },
+      adminUser(),
+    );
+    const returnedSum = await prisma.businessRecord.aggregate({
+      where: { projectId, isVoid: false, status: BusinessStatus.RETURNED },
+      _sum: { amount: true },
+    });
+    expect(returnedStats.summary.paid).toBe('0.00');
+    expect(returnedStats.summary.payable).toBe(returnedSum._sum.amount!.toFixed(2));
+
+    /** 单行 v2 结算单:解析并取该行(落在哪个分组都取得到)。 */
+    const parseOne = async (row: V2RowData) => {
+      const b = await loadSettlementWorkbookIfMatch(await buildSettlementV2Xlsx([row]));
+      const id = await parseSettlement(b!, projectId, adminUser());
+      const p = await getSettlementBatch(id, adminUser());
+      return { batchId: id, row: [...p.pending, ...p.duplicates, ...p.errors][0] };
+    };
+    const statusOfNew = async () =>
+      (await prisma.businessRecord.findUnique({ where: { id: recNew!.id } }))!.status;
+
+    // 2) 退单后重新提交(同号同额、状态回到在途)→ 补全更新:回写为财务系统审批。
+    const resubmit = await parseOne({
+      docNo: 'RT-NEW',
+      docStatus: '完成审核',
+      applyDate: '2026-06-11',
+      amount: '11',
+      handler: '新',
+      remark: '重新提交',
+    });
+    expect(resubmit.row.duplicateLevel).toBe('refresh');
+    const res2 = await confirmSettlementImport(resubmit.batchId, [resubmit.row.rowId], adminUser());
+    expect(res2).toMatchObject({ created: 0, updated: 1 });
+    expect(await statusOfNew()).toBe(BusinessStatus.FINANCE_APPROVAL);
+
+    // 3) 在途单被退回(同号同额、状态业务退单)→ 补全更新:回写为业务退单。
+    const back = await parseOne({
+      docNo: 'RT-NEW',
+      docStatus: '业务退单',
+      applyDate: '2026-06-11',
+      amount: '11',
+      handler: '新',
+      remark: '被退回',
+    });
+    expect(back.row.duplicateLevel).toBe('refresh');
+    await confirmSettlementImport(back.batchId, [back.row.rowId], adminUser());
+    expect(await statusOfNew()).toBe(BusinessStatus.RETURNED);
+    // 回写留业务记录历史(记录页「历史」可追溯)。
+    const hist = await prisma.businessRecordHistory.findFirst({
+      where: { businessRecordId: recNew!.id, action: 'import_refresh' },
+      orderBy: { operatedAt: 'desc' },
+    });
+    expect((hist!.afterData as Record<string, unknown>)['status']).toBe(BusinessStatus.RETURNED);
+
+    // 4) 已支出是终态:同号同额的业务退单行 → 硬重复,不回退。
+    const paidRow = await parseOne({
+      docNo: 'RT-PAID',
+      docStatus: '业务退单',
+      applyDate: '2026-06-12',
+      amount: '12',
+      handler: '新',
+      remark: '已支出源',
+    });
+    expect(paidRow.row.duplicateLevel).toBe('hard');
+    await expect(
+      confirmSettlementImport(paidRow.batchId, [paidRow.row.rowId], adminUser()),
+    ).rejects.toMatchObject({ status: 422, message: expect.stringContaining('硬重复') });
+    expect(
+      (await prisma.businessRecord.findFirst({ where: { projectId, docNo: 'RT-PAID' } }))!.status,
+    ).toBe(BusinessStatus.PAID);
+
+    // 5) 两个在途态之间互改不算新信息:合同记录遇同号同额的 完成审核 行 → 仍硬重复。
+    await prisma.businessRecord.create({
+      data: {
+        id: uuidv7(),
+        projectId,
+        budgetYear: 2026,
+        subjectId: leafId,
+        amount: toStored(new Prisma.Decimal('13')),
+        businessDate: new Date('2026-06-13T00:00:00Z'),
+        handler: '旧',
+        summary: '合同在途',
+        status: BusinessStatus.CONTRACT,
+        docNo: 'RT-CON',
+        createdById: adminId,
+      },
+    });
+    const conRow = await parseOne({
+      docNo: 'RT-CON',
+      docStatus: '完成审核',
+      applyDate: '2026-06-13',
+      amount: '13',
+      handler: '新',
+      remark: '合同在途',
+    });
+    expect(conRow.row.duplicateLevel).toBe('hard');
   });
 
   it('批次列表带 文件行数/实际导入 计数;删除:pending 可删(级联行),confirmed 409', async () => {

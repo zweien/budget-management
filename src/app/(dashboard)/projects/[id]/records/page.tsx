@@ -101,22 +101,33 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 
-/** §8 业务记录四态(与 Prisma BusinessStatus 同步,不依赖运行时枚举以避免在 client bundle 里强引 @prisma/client)。 */
-const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] as const;
+/** §8 业务记录五态(与 Prisma BusinessStatus 同步,不依赖运行时枚举以避免在 client bundle 里强引 @prisma/client)。 */
+const BUSINESS_STATUSES = [
+  'PLACEHOLDER',
+  'CONTRACT',
+  'FINANCE_APPROVAL',
+  'RETURNED',
+  'PAID',
+] as const;
 type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
 const STATUS_LABEL: Record<BusinessStatus, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同',
   FINANCE_APPROVAL: '财务系统审批',
+  RETURNED: '业务退单',
   PAID: '已支出',
 };
 
 /** Badge 语义色遵循 DESIGN.md。 */
-const STATUS_BADGE: Record<BusinessStatus, 'secondary' | 'outline' | 'warning' | 'success'> = {
+const STATUS_BADGE: Record<
+  BusinessStatus,
+  'secondary' | 'outline' | 'warning' | 'success' | 'error'
+> = {
   PLACEHOLDER: 'secondary',
   CONTRACT: 'outline',
   FINANCE_APPROVAL: 'warning',
+  RETURNED: 'error',
   PAID: 'success',
 };
 
@@ -125,6 +136,7 @@ const STATUS_FILTER_LABELS: Record<string, string> = {
   PLACEHOLDER: STATUS_LABEL.PLACEHOLDER,
   CONTRACT: STATUS_LABEL.CONTRACT,
   FINANCE_APPROVAL: STATUS_LABEL.FINANCE_APPROVAL,
+  RETURNED: STATUS_LABEL.RETURNED,
   PAID: STATUS_LABEL.PAID,
   __void__: '已作废',
 };
@@ -289,7 +301,10 @@ function BusinessRecordsPageInner() {
   } = useUrlSyncedTableState({
     columnFilters: (() => {
       const init: ColumnFiltersState = [
-        { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
+        {
+          id: 'status',
+          value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'RETURNED', 'PAID'],
+        },
       ];
       const sid = search.get('subjectId');
       if (sid) init.push({ id: 'subjectId', value: [sid] });

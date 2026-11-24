@@ -18,7 +18,8 @@ import { computeOccupancy, executionRate } from '@/lib/budget';
  *
  * 占用口径与 ledger/businessRecord 一致:复用 computeOccupancy。
  * - paid = 状态为 PAID 的有效记录金额合计。
- * - payable = 状态为 PLACEHOLDER/CONTRACT/FINANCE_APPROVAL 的有效记录金额合计。
+ * - payable = 状态为 PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/RETURNED 的有效记录金额合计
+ *   (业务退单与在途态同口径,计入应付未付)。
  * - totalOccupied = paid + payable。
  * - 作废记录不计入。
  */
@@ -866,7 +867,7 @@ function matchSubjects(
  *
  * - 权限:所有登录用户(全局只读);指定 projectId 时校验 project:view。
  * - 行 = 项目 × 科目(命中科目;无匹配行时按"全部叶科目"列出)。
- * - 占用口径与台账一致:四态全占(paid + payable),作废不计。
+ * - 占用口径与台账一致:五态全占(paid + payable),作废不计。
  * - 无预算/未生效项目照常显示(预算 0、结余为负即风险信号)。
  * - 合计行基于去重叶集合,父子行同时命中不重复计数。
  */
@@ -1262,7 +1263,7 @@ export interface ManagementOverviewResult {
 /**
  * 管理决策总览(工作台「管理决策」区一次取回)。
  *
- * 口径:项目现行总预算 vs 全部有效记录总占用(computeOccupancy 四态,作废不计),
+ * 口径:项目现行总预算 vs 全部有效记录总占用(computeOccupancy 五态,作废不计),
  * 与跨项目统计/台账一致;不按年度过滤(决策信号看项目全生命周期)。
  * - 应结题:结束日期 ≤ 年末的未归档项目(逾期含在内,前端标红);
  * - 执行率不足:执行率 < 时间进度。边界:起止缺失不参与;未开始时间进度=0

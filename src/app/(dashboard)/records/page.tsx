@@ -140,20 +140,28 @@ interface RecordHistoryRow {
   reason: string | null;
 }
 
-const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] as const;
+const BUSINESS_STATUSES = [
+  'PLACEHOLDER',
+  'CONTRACT',
+  'FINANCE_APPROVAL',
+  'RETURNED',
+  'PAID',
+] as const;
 type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
 const STATUS_LABEL: Record<string, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同签订',
   FINANCE_APPROVAL: '财务系统审批',
+  RETURNED: '业务退单',
   PAID: '已支出',
 };
 
-const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'outline'> = {
+const STATUS_BADGE: Record<string, 'secondary' | 'warning' | 'success' | 'outline' | 'error'> = {
   PLACEHOLDER: 'secondary',
   CONTRACT: 'warning',
   FINANCE_APPROVAL: 'outline',
+  RETURNED: 'error',
   PAID: 'success',
 };
 
@@ -162,6 +170,7 @@ const STATUS_FILTER_LABELS: Record<string, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同签订',
   FINANCE_APPROVAL: '财务系统审批',
+  RETURNED: '业务退单',
   PAID: '已支出',
   __void__: '已作废',
 };
@@ -309,7 +318,10 @@ function UnifiedRecordsPageInner() {
   // 初始值:URL `f` 优先;否则状态默认排除已作废(与项目页口径一致)+ 申请日期降序。
   const { columnFilters, sorting, setColumnFilters, setSorting } = useUrlSyncedTableState({
     columnFilters: [
-      { id: 'status', value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] },
+      {
+        id: 'status',
+        value: ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'RETURNED', 'PAID'],
+      },
     ],
     sorting: [{ id: 'businessDate', desc: true }],
   });

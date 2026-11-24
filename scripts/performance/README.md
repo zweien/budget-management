@@ -4,7 +4,7 @@
 
 1. 创建空的 `budget_perf_<本次运行标识>` 数据库，并用当前 Prisma migrations 执行 `migrate deploy`。测试另用独立空库，不与性能数据混跑。
 2. 设置 `PERF_DATABASE_URL` 为上述专用库、`PERF_AUTH_SECRET` 为本次独立服务的随机签名密钥（至少32字符）。这些值保留在本机环境，不提交版本库。
-3. 运行 `npm run perf:seed`，默认 10 项目 × 每项目 1 万记录、10 用户、一般/包干两种预算、三年度、四种状态和作废记录；3 个不可压缩的 8 MiB 附件用于区分元数据与二进制读取。可设置 `PERF_PROJECTS` / `PERF_ROWS`；ID 清单默认写 `.scratch/performance/fixture.json`。
+3. 运行 `npm run perf:seed`，默认 10 项目 × 每项目 1 万记录、10 用户、一般/包干两种预算、三年度、五种状态和作废记录；3 个不可压缩的 8 MiB 附件用于区分元数据与二进制读取。可设置 `PERF_PROJECTS` / `PERF_ROWS`；ID 清单默认写 `.scratch/performance/fixture.json`。
 4. 在需要测量的代码版本建立独立工作区，执行 `npm ci`、`prisma generate` 与文件预览资产复制脚本。使用 `node scripts/performance/app.mjs build <独立工作区>` 构建，再用同一命令的 `start` 模式启动。默认端口 3110，可设 `PERF_PORT`。
 5. 从当前工作区运行 `npm run perf:measure`。`PERF_BASE_URL` 默认 `http://127.0.0.1:3110`，只允许本机 3100 以上专用端口。预检会确认服务项目集合与夹具一致。使用正常签名会话读取合成用户，服务仍实时查库授权；不依赖真实 OIDC 登录，也不禁用启动守卫。
 

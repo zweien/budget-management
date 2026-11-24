@@ -61,6 +61,7 @@ export const FUNDING_REPORT_STATUS_TEXT: Record<string, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同',
   FINANCE_APPROVAL: '财务系统审批',
+  RETURNED: '业务退单',
   PAID: '已支出',
 };
 

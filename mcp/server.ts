@@ -147,7 +147,7 @@ server.tool(
     projectId: z.string().uuid().describe(projectIdDesc),
     year: z.number().int().optional(),
     subjectId: z.string().uuid().optional(),
-    status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID']).optional(),
+    status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'RETURNED', 'PAID']).optional(),
     includeVoid: z.boolean().optional(),
     handler: z.string().optional().describe('经办人包含匹配'),
     summary: z.string().optional().describe('摘要关键词包含匹配'),
@@ -344,7 +344,7 @@ server.tool(
 
 server.tool(
   'budget_create_record',
-  `新增业务记录。${POLICY_CONFIRM}status 取值:PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/PAID。填了 docNo 且与项目内未作废记录同号 → 409 硬重复,禁止创建(先作废旧记录才能重导);未填 docNo 时若与既有记录构成指纹相似(年度+金额+日期+摘要),响应带 duplicateHints 警示、仍会保存。`,
+  `新增业务记录。${POLICY_CONFIRM}status 取值:PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/RETURNED/PAID(业务退单 RETURNED 与在途态同口径,计入应付未付)。填了 docNo 且与项目内未作废记录同号 → 409 硬重复,禁止创建(先作废旧记录才能重导);未填 docNo 时若与既有记录构成指纹相似(年度+金额+日期+摘要),响应带 duplicateHints 警示、仍会保存。`,
   {
     projectId: z.string().uuid().describe(projectIdDesc),
     budgetYear: z.number().int(),
@@ -353,7 +353,7 @@ server.tool(
     businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     handler: z.string(),
     summary: z.string(),
-    status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID']),
+    status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'RETURNED', 'PAID']),
     docNo: z.string().nullable().optional().describe('财务系统单据编号,可空'),
     voucherNo: z
       .string()
@@ -386,7 +386,7 @@ server.tool(
       .optional(),
     handler: z.string().optional(),
     summary: z.string().optional(),
-    status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID']).optional(),
+    status: z.enum(['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'RETURNED', 'PAID']).optional(),
     docNo: z.string().nullable().optional(),
     voucherNo: z.string().nullable().optional().describe('记账凭证号,可空、不查重'),
     remark: z.string().nullable().optional(),

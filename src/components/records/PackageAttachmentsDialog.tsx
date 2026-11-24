@@ -32,7 +32,10 @@ const TOKENS: Array<{ token: string; desc: string }> = [
   { token: '{handler}', desc: '经办人姓名' },
   { token: '{subject}', desc: '叶科目名称' },
   { token: '{summary}', desc: '摘要(超 40 字截断)' },
-  { token: '{status}', desc: '状态码(PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/PAID)' },
+  {
+    token: '{status}',
+    desc: '状态码(PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/RETURNED/PAID)',
+  },
   { token: '{year}', desc: '预算年度(如 2026)' },
   { token: '{original}', desc: '原文件名(含扩展名)' },
 ];

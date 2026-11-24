@@ -40,6 +40,7 @@ export const STATUS_CN_TO_ENUM: Record<string, string> = {
   登记占位: 'PLACEHOLDER',
   合同: 'CONTRACT',
   财务系统审批: 'FINANCE_APPROVAL',
+  业务退单: 'RETURNED',
   已支出: 'PAID',
 };
 
@@ -48,6 +49,7 @@ export const STATUS_ENUM_TO_CN: Record<string, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同',
   FINANCE_APPROVAL: '财务系统审批',
+  RETURNED: '业务退单',
   PAID: '已支出',
 };
 
@@ -65,7 +67,7 @@ export const TEMPLATE_SHEET_NAME = '业务记录导入';
  *
  * 包含:
  * - 首行表头(加粗 + 背景色 + 冻结)。
- * - 「业务状态」列数据校验(list 下拉:四态中文)。
+ * - 「业务状态」列数据校验(list 下拉:五态中文)。
  * - 「金额」列数据校验(>0 的十进制)。
  * - 第二行填写说明(灰字注释行)。
  * - 列宽自适应。
@@ -109,7 +111,7 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
   // 第二行:填写说明(灰字,不参与解析——解析从第 2 行开始,说明行会被视为数据行并报错,
   // 因此改为只在表头加批注 + 文件末尾的"说明"工作表,避免污染数据区)。
 
-  // 「业务状态」列(第 8 列)数据校验:四态下拉。
+  // 「业务状态」列(第 8 列)数据校验:五态下拉。
   const statusColIdx = EXCEL_COLUMNS.findIndex((c) => c.key === 'businessStatus') + 1;
   sheet.getCell(1, statusColIdx).note = {
     texts: [{ text: `可选值:${STATUS_CN_VALUES.join(' / ')}` }],
@@ -172,7 +174,7 @@ export async function generateTemplateBuffer(): Promise<Buffer> {
     ['申请日期', 'YYYY-MM-DD 文本日期。'],
     ['经办人', '非空。'],
     ['摘要', '非空。'],
-    ['业务状态', `四选一:${STATUS_CN_VALUES.join(' / ')}。`],
+    ['业务状态', `五选一:${STATUS_CN_VALUES.join(' / ')}。`],
     ['备注', '可选。'],
     [
       '单据编号',

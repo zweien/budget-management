@@ -244,8 +244,17 @@ describe('settlementImport v4 (单据台账,单据粒度净额)', () => {
         project: '科研试制费/台账驱动测试专属项目甲',
         controlPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
       },
-      // 业务退单 → skipped。
-      { docNo: 'TZ-V4-4', docStatus: '业务退单', project: '科研试制费/台账驱动测试专属项目甲' },
+      // 业务退单 → 不再跳过:照常走校验/科目预选,入账为 RETURNED。
+      {
+        docNo: 'TZ-V4-4',
+        year: 2025,
+        docStatus: '业务退单',
+        claim: 40,
+        offset: 0,
+        fillDate: '2025-11-20',
+        project: '科研试制费/台账驱动测试专属项目甲',
+        controlPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+      },
       // 项目未命中 → error 未映射项目。
       {
         docNo: 'TZ-V4-5',
@@ -269,10 +278,10 @@ describe('settlementImport v4 (单据台账,单据粒度净额)', () => {
 
     const preview = await getSettlementBatch(batchId, adminUser());
     expect(preview.templateVersion).toBe(SETTLEMENT_V4_TEMPLATE_VERSION);
-    // 待导入:TZ-V4-1/2/6(负数冲正);错误(未映射):TZ-V4-5;跳过:全额冲销 + 业务退单。
-    expect(preview.pending).toHaveLength(3);
+    // 待导入:TZ-V4-1/2/4(业务退单)/6(负数冲正);错误(未映射):TZ-V4-5;跳过:全额冲销。
+    expect(preview.pending).toHaveLength(4);
     expect(preview.errors).toHaveLength(1);
-    expect(preview.skippedCount).toBe(2);
+    expect(preview.skippedCount).toBe(1);
 
     const byDoc = (doc: string) =>
       [...preview.pending, ...preview.duplicates, ...preview.errors].find(
@@ -298,17 +307,24 @@ describe('settlementImport v4 (单据台账,单据粒度净额)', () => {
     const r5 = byDoc('TZ-V4-5')!;
     expect(r5.errors.some((e) => e.message.includes('未映射项目'))).toBe(true);
 
+    // 业务退单:映射 RETURNED,金额取净额,控制项末段照常预选科目。
+    const r4 = byDoc('TZ-V4-4')!;
+    expect(r4.parsedData.status).toBe('RETURNED');
+    expect(r4.parsedData.statusLabel).toBe('业务退单');
+    expect(r4.parsedData.amount).toBe('40.00');
+    expect(r4.parsedData.subjectId).toBe(leafTravelId);
+
     // 冲正单据:净额 50 − 200 = -150,照常待导入(负数入账冲减科目)。
     const r6 = byDoc('TZ-V4-6')!;
     expect(r6.parsedData.amount).toBe('-150.00');
 
-    // 确认入账:预选科目的三行 → 写业务记录(净额 + 科目 + 完成日期,含负数冲正)。
+    // 确认入账:预选科目的四行 → 写业务记录(净额 + 科目 + 完成日期,含负数冲正与业务退单)。
     const res = await confirmSettlementImport(
       batchId,
       preview.pending.map((r) => r.rowId),
       adminUser(),
     );
-    expect(res.created).toBe(3);
+    expect(res.created).toBe(4);
     const rec1 = await prisma.businessRecord.findFirst({
       where: { projectId, docNo: 'TZ-V4-1' },
     });
@@ -319,6 +335,11 @@ describe('settlementImport v4 (单据台账,单据粒度净额)', () => {
       where: { projectId, docNo: 'TZ-V4-6' },
     });
     expect(rec6?.amount.toFixed(2)).toBe('-150.00');
+    const rec4 = await prisma.businessRecord.findFirst({
+      where: { projectId, docNo: 'TZ-V4-4' },
+    });
+    expect(rec4?.status).toBe('RETURNED');
+    expect(rec4?.amount.toFixed(2)).toBe('40.00');
   });
 
   it('v4:统一入口自动预映射承载项目;已入库同号同额再传 → 硬重复', async () => {

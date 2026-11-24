@@ -16,7 +16,7 @@
  * 与系统标准模板(src/lib/excel/template.ts)并存:
  * - 表头不在首行(位于前 N 行内,按「单据编号」+「单据状态」定位)。
  * - 无科目列,科目在预览页由用户逐条指定。
- * - 单据状态为财务系统枚举,需映射到 BusinessStatus。
+ * - 单据状态为财务系统枚举,需映射到 BusinessStatus;业务退单 → RETURNED(照常入账)。
  *
  * 仅在服务端使用(exceljs 在 Node 运行);常量可被客户端安全导入(纯数据)。
  */
@@ -63,8 +63,8 @@ export const SETTLEMENT_HEADERS = {
  */
 export const SETTLEMENT_V2_APPLY_DATE = '申请日期';
 
-/** 单据状态 → BusinessStatus 映射(三种版式同表)。 */
-export const SETTLEMENT_STATUS_TO_ENUM: Record<string, 'PAID' | 'FINANCE_APPROVAL'> = {
+/** 单据状态 → BusinessStatus 映射(各版式同表)。 */
+export const SETTLEMENT_STATUS_TO_ENUM: Record<string, 'PAID' | 'FINANCE_APPROVAL' | 'RETURNED'> = {
   完成记账: 'PAID',
   // 以下均为「尚未记账」的在途单据 → 财务系统审批(payable):
   // 制单保存(v1)、打印审签/完成审核(v2 实际出现)、
@@ -76,10 +76,13 @@ export const SETTLEMENT_STATUS_TO_ENUM: Record<string, 'PAID' | 'FINANCE_APPROVA
   完成复核: 'FINANCE_APPROVAL',
   提交审核: 'FINANCE_APPROVAL',
   完成收单: 'FINANCE_APPROVAL',
+  // 业务退单:被业务环节退回的单据,照常入账为「业务退单」状态(计入应付未付);
+  // 重新提交或完成记账后,再次导入同号同额行即回写状态(补全更新)。
+  业务退单: 'RETURNED',
 };
 
-/** 业务退单:不导入(解析时跳过,仅保留行供预览页提示条数)。 */
-export const SETTLEMENT_SKIPPED_STATUS = '业务退单';
+/** 结算单支持的单据状态原文(错误提示用,与上映射表同步)。 */
+export const SETTLEMENT_SUPPORTED_STATUS = Object.keys(SETTLEMENT_STATUS_TO_ENUM).join('/');
 
 /** v3 新增列(按名匹配;摘要列当前导出常为空,摘要兜底取备注)。 */
 export const SETTLEMENT_HEADERS_V3 = {

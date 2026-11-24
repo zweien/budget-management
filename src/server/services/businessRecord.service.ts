@@ -13,11 +13,12 @@ import {
   withoutCarryoverExcluded,
 } from '@/server/services/carryoverNormalization.service';
 
-/** §8 四态枚举(便于上层校验集合)。 */
+/** §8 五态枚举(便于上层校验集合;业务退单计入应付未付,与在途态同口径)。 */
 const BUSINESS_STATUSES: readonly BusinessStatus[] = [
   BusinessStatus.PLACEHOLDER,
   BusinessStatus.CONTRACT,
   BusinessStatus.FINANCE_APPROVAL,
+  BusinessStatus.RETURNED,
   BusinessStatus.PAID,
 ] as const;
 
@@ -214,7 +215,7 @@ function parseCompletedDate(s: string | null | undefined, businessDate: Date): D
 /**
  * §8.4 计算某年度某叶科目:在追加 `extraAmount` 的情况下是否超预算。
  * - currentBudget 来自 subject_budgets.currentAmount(审批生效后置位)。
- * - 现有占用直接聚合非作废记录金额，与四态占用口径一致。
+ * - 现有占用直接聚合非作废记录金额，与五态占用口径一致。
  * - 超预算仍允许保存(§8.4),仅返回预警标志。
  *
  * 返回 { overBudget, currentBudget, projectedOccupied }。
@@ -307,7 +308,7 @@ async function requireLeafSubject(
 /**
  * §8.1/8.4 新增业务记录。
  * - 权限:record:create + 项目范围。
- * - 校验:subjectId 为该项目叶节点;budgetYear 正整数;amount ≠ 0(负数=冲正);status 合法四态之一;
+ * - 校验:subjectId 为该项目叶节点;budgetYear 正整数;amount ≠ 0(负数=冲正);status 合法五态之一;
  *   businessDate 选填(缺省默认当天);handler/summary 非空。
  * - §8.4 超预算仍保存,仅返回 overBudget 标志。
  * - 事务内:写 business_record(id=uuidv7,createdById) + 审计 create。
@@ -806,7 +807,7 @@ export async function voidRecordsBatch(
 }
 
 /**
- * §8.3 四态自由切换。
+ * §8.3 五态自由切换。
  * - 权限:record:edit + 项目范围。
  * - history 行(action:'status_switch');审计 status_switch。
  */

@@ -14,7 +14,8 @@ export interface OccupancyResult {
 /**
  * §4.5 预算占用计算
  * 已支出金额 = 状态为 PAID 的有效记录金额合计
- * 应付未付 = 状态为 PLACEHOLDER/CONTRACT/FINANCE_APPROVAL 的有效记录金额合计
+ * 应付未付 = 状态为 PLACEHOLDER/CONTRACT/FINANCE_APPROVAL/RETURNED 的有效记录金额合计
+ * (业务退单与在途态同口径)
  * 总占用 = 已支出 + 应付未付
  * 作废记录不计入。
  *

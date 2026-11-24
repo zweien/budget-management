@@ -14,17 +14,32 @@ describe('computeOccupancy', () => {
     expect(r.totalOccupied.toFixed(2)).toBe('100.00');
   });
 
-  it('非已支出三类计入 payable 与 totalOccupied,不计入 paid', () => {
+  it('非已支出四类计入 payable 与 totalOccupied,不计入 paid', () => {
     const r = computeOccupancy({
       records: [
         { amount: amt('50'), status: 'PLACEHOLDER', isVoid: false },
         { amount: amt('30'), status: 'CONTRACT', isVoid: false },
         { amount: amt('20'), status: 'FINANCE_APPROVAL', isVoid: false },
+        { amount: amt('10'), status: 'RETURNED', isVoid: false },
       ],
     });
     expect(r.paid.toFixed(2)).toBe('0.00');
-    expect(r.payable.toFixed(2)).toBe('100.00');
-    expect(r.totalOccupied.toFixed(2)).toBe('100.00');
+    expect(r.payable.toFixed(2)).toBe('110.00');
+    expect(r.totalOccupied.toFixed(2)).toBe('110.00');
+  });
+
+  it('业务退单(RETURNED)与在途态同口径:计入应付未付,作废后不计入', () => {
+    const r = computeOccupancy({
+      records: [{ amount: amt('2738.31'), status: 'RETURNED', isVoid: false }],
+    });
+    expect(r.paid.toFixed(2)).toBe('0.00');
+    expect(r.payable.toFixed(2)).toBe('2738.31');
+    expect(r.totalOccupied.toFixed(2)).toBe('2738.31');
+
+    const voided = computeOccupancy({
+      records: [{ amount: amt('2738.31'), status: 'RETURNED', isVoid: true }],
+    });
+    expect(voided.totalOccupied.toFixed(2)).toBe('0.00');
   });
 
   it('作废记录不计入任何占用(§8.6)', () => {

@@ -344,6 +344,24 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
         remark: '差旅报销',
         projectName: '其他专项科学技术费/图谱驱动测试专属项目甲',
       },
+      // 业务退单:不再整行跳过——同号明细照常按单据合并(净额 250),入账为 RETURNED。
+      {
+        docNo: 'TYBX-RETURNED-1',
+        docStatus: '业务退单',
+        applyDate: '2025-06-10',
+        amount: -100,
+        handler: '赵六',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+        remark: '退单单据',
+      },
+      {
+        docNo: 'TYBX-RETURNED-1',
+        docStatus: '业务退单',
+        applyDate: '2025-06-10',
+        amount: 350,
+        handler: '赵六',
+        detailPath: '直接费用/会议、差旅、国际合作与交流/差旅费',
+      },
     ]);
     const wb = await loadSettlementWorkbookIfMatch(buf);
     const batchId = await parseSettlement(wb!, projectId, adminUser(), 'mix.xlsx');
@@ -354,15 +372,21 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     expect(mixed!.errors.some((e) => e.message.includes('经办人不一致'))).toBe(true);
     expect(mixed!.parsedData.amount).toBe('300.00'); // 100+200 净额(尽管标错)
 
-    // 确认:仅选可导入行(预选科目差旅费)。
+    // 确认:选可导入行(预选科目差旅费)与业务退单行。
     const okRow = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-OK-1')!;
     expect(okRow.parsedData.subjectId).toBe(leafTravelId);
     expect(okRow.parsedData.targetProjectId).toBe(projectId); // 自动预映射命中本项目
-    const result = await confirmSettlementImport(batchId, [okRow.rowId], {
+    const returned = preview.pending.find((r) => r.parsedData.docNo === 'TYBX-RETURNED-1')!;
+    expect(returned.parsedData.status).toBe('RETURNED');
+    expect(returned.parsedData.statusLabel).toBe('业务退单');
+    expect(returned.parsedData.amount).toBe('250.00'); // -100 + 350,按单据合并后的净额
+    expect(returned.parsedData.sourceRows).toHaveLength(2);
+    expect(returned.parsedData.subjectId).toBe(leafTravelId);
+    const result = await confirmSettlementImport(batchId, [okRow.rowId, returned.rowId], {
       id: adminId,
       role: UserRole.ADMIN,
     });
-    expect(result.created).toBe(1);
+    expect(result.created).toBe(2);
 
     const rec = await prisma.businessRecord.findFirst({
       where: { projectId, docNo: 'TYBX-OK-1' },
@@ -371,6 +395,11 @@ describe('settlementImport v3 (2025 财务导出,明细分组合并)', () => {
     expect(rec!.amount.toFixed(2)).toBe('300.00');
     expect(rec!.status).toBe('PAID');
     expect(rec!.subjectId).toBe(leafTravelId);
+    const recReturned = await prisma.businessRecord.findFirst({
+      where: { projectId, docNo: 'TYBX-RETURNED-1' },
+    });
+    expect(recReturned!.status).toBe('RETURNED');
+    expect(recReturned!.amount.toFixed(2)).toBe('250.00');
   });
 
   it('v3 多项目:自动预映射双项目;未命中留人工;确认分别入账到各自项目', async () => {

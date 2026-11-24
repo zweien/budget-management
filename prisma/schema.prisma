@@ -37,6 +37,7 @@ enum BusinessStatus {
   PLACEHOLDER // 登记占位
   CONTRACT    // 合同
   FINANCE_APPROVAL // 财务系统审批
+  RETURNED    // 业务退单(财务系统退回;计入应付未付)
   PAID        // 已支出
 }
 

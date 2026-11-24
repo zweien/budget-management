@@ -13,11 +13,22 @@ import { STATUS_ENUM_TO_CN } from '@/lib/excel/template';
  * - **疑似重复**:无编号行按指纹(年度+金额+业务日期+摘要归一化)命中既有记录或本批内重复
  *   ——仅提示,由人工判断,可强制导入。
  * - **补全更新(refresh,仅结算单导入开启)**:同单据编号命中已有记录,且新行带来新信息
- *   (新行有完成日期而已有记录缺,或状态推进到已支出)且金额一致 → 不判硬重复,
- *   确认后只更新既有记录的 完成日期/状态(状态只前进不回退);金额不一致或无新信息仍硬重复。
+ *   (新行有完成日期而已有记录缺,或状态可回写——见 statusRewriteAllowed)且金额一致
+ *   → 不判硬重复,确认后只更新既有记录的 完成日期/状态;金额不一致或无新信息仍硬重复。
  *
  * 作废记录不参与判定(不占编号、不算指纹);跨项目不查(唯一性以项目为界)。
  */
+
+/**
+ * 补全更新的状态回写判定:同号同额时,新行状态(next)可否回写到既有记录(existing)。
+ * 已支出是终态、不回退;其余随财务系统回写——推进到已支出,或在途 ↔ 业务退单
+ * (退单后重新提交 / 在途单被退回)。两个在途态之间互改不算新信息(仍按硬重复)。
+ * 解析期判定与确认期复核共用本函数,保证预览与入库口径一致。
+ */
+export function statusRewriteAllowed(existing: string, next: string): boolean {
+  if (existing === next || existing === 'PAID') return false;
+  return next === 'PAID' || next === 'RETURNED' || existing === 'RETURNED';
+}
 
 export interface DuplicateCheckRow {
   /** 调用方行引用(Excel 行号 / ImportRow id 等),原样回传。 */
@@ -30,7 +41,7 @@ export interface DuplicateCheckRow {
   /** yyyy-mm-dd;null 则跳过指纹。 */
   businessDate: string | null;
   summary: string | null;
-  /** 映射后的业务状态(结算单导入传入;用于补全更新的状态推进判定)。 */
+  /** 映射后的业务状态(结算单导入传入;用于补全更新的状态回写判定)。 */
   status?: string | null;
   /** 完成日期 yyyy-mm-dd(新格式结算单;可空)。 */
   completedDate?: string | null;
@@ -169,11 +180,11 @@ export async function checkDuplicates(
       const hit = byDocNo.get(docNo);
       if (hit) {
         const v = verdicts.get(r.rowKey)!;
-        // §补全更新:金额一致 + 带来新信息(补完成日期缺口 / 状态推进到已支出)。
+        // §补全更新:金额一致 + 带来新信息(补完成日期缺口 / 状态可回写)。
         const amountEqual = r.amount !== null && r.amount === hit.amount.toFixed(2);
-        const statusAdvances = r.status === 'PAID' && hit.status !== 'PAID';
+        const rewritesStatus = statusRewriteAllowed(hit.status, r.status ?? '');
         const fillsCompletion = !!r.completedDate && hit.completedDate === null;
-        if (opts.allowRefresh === true && amountEqual && (statusAdvances || fillsCompletion)) {
+        if (opts.allowRefresh === true && amountEqual && (rewritesStatus || fillsCompletion)) {
           v.refresh = true;
           if (!v.conflicts.some((c) => c.recordId === hit.id)) {
             v.conflicts.push({

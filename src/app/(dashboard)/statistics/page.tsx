@@ -45,23 +45,34 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-// ---- §8 业务记录四态(与 Prisma BusinessStatus 同步,不依赖运行时枚举,
+// ---- §8 业务记录五态(与 Prisma BusinessStatus 同步,不依赖运行时枚举,
 //      避免 client bundle 强引 @prisma/client)。 ----
-const BUSINESS_STATUSES = ['PLACEHOLDER', 'CONTRACT', 'FINANCE_APPROVAL', 'PAID'] as const;
+const BUSINESS_STATUSES = [
+  'PLACEHOLDER',
+  'CONTRACT',
+  'FINANCE_APPROVAL',
+  'RETURNED',
+  'PAID',
+] as const;
 type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
 const STATUS_LABEL: Record<BusinessStatus, string> = {
   PLACEHOLDER: '登记占位',
   CONTRACT: '合同',
   FINANCE_APPROVAL: '财务系统审批',
+  RETURNED: '业务退单',
   PAID: '已支出',
 };
 
 /** Badge 语义色遵循 DESIGN.md。 */
-const STATUS_BADGE: Record<BusinessStatus, 'secondary' | 'outline' | 'warning' | 'success'> = {
+const STATUS_BADGE: Record<
+  BusinessStatus,
+  'secondary' | 'outline' | 'warning' | 'success' | 'error'
+> = {
   PLACEHOLDER: 'secondary',
   CONTRACT: 'outline',
   FINANCE_APPROVAL: 'warning',
+  RETURNED: 'error',
   PAID: 'success',
 };
 
@@ -95,7 +106,7 @@ function renderRate(rate: number | null | undefined): string {
 /** Select 的"全部/清除"哨兵值(radix SelectItem 不允许空串)。 */
 const ALL = '__all__';
 
-/** 「应付未付」快捷口径哨兵:未支出三态(占位/合同/财务审批)组合,经 statuses 多值参数下发。 */
+/** 「应付未付」快捷口径哨兵:未支出四态(占位/合同/财务审批/业务退单)组合,经 statuses 多值参数下发。 */
 const PAYABLE = '__payable__';
 type StatusFilter = BusinessStatus | typeof PAYABLE;
 
@@ -246,7 +257,7 @@ interface CustomFilters {
   budgetYear?: number;
   /** 科目模糊(名称/编号 contains,跨项目;服务端含非叶展开)。 */
   subject?: string;
-  /** 状态单选,或 PAYABLE 哨兵(未支出三态组合,见摘要卡快捷筛选)。 */
+  /** 状态单选,或 PAYABLE 哨兵(未支出四态组合,见摘要卡快捷筛选)。 */
   status?: StatusFilter;
   dateRange?: DateRange;
   handler?: string;
@@ -259,7 +270,7 @@ function buildCustomQuery(f: CustomFilters): string {
   if (f.budgetYear !== undefined) qs.set('budgetYear', String(f.budgetYear));
   if (f.subject?.trim()) qs.set('subject', f.subject.trim());
   if (f.status === PAYABLE) {
-    // 应付未付 = 未支出三态组合;服务端支持 statuses 多值参数(record-filters)。
+    // 应付未付 = 未支出四态组合;服务端支持 statuses 多值参数(record-filters)。
     for (const s of BUSINESS_STATUSES) {
       if (s !== 'PAID') qs.append('statuses', s);
     }

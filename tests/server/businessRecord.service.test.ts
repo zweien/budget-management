@@ -828,7 +828,7 @@ describe('businessRecord.service (integration, real PG)', () => {
     expect(still!.amount.toFixed(2)).toBe('500.00');
   });
 
-  it('switchStatus: 四态切换,写 history(action=status_switch)', async () => {
+  it('switchStatus: 五态切换(含业务退单),写 history(action=status_switch)', async () => {
     const { project, leafA } = await seedApprovedProject('SWITCH');
 
     const { record } = await createRecord(
@@ -845,21 +845,29 @@ describe('businessRecord.service (integration, real PG)', () => {
       adminUser(),
     );
 
+    // 业务退单是合法状态:可手动切换,且与在途态同口径计入应付未付。
+    const returned = await switchStatus(record.id, BusinessStatus.RETURNED, adminUser());
+    expect(returned.status).toBe(BusinessStatus.RETURNED);
+    const ledgerReturned = await getProjectLedger(project.id, 2026, adminUser());
+    const nodeReturned = ledgerReturned.nodes.find((n) => n.subjectId === leafA.id)!;
+    expect(nodeReturned.paid).toBe('0.00');
+    expect(nodeReturned.payable).toBe('100.00');
+
     const switched = await switchStatus(record.id, BusinessStatus.PAID, adminUser());
     expect(switched.status).toBe(BusinessStatus.PAID);
 
-    // ledger:PLACEHOLDER→PAID,totalOccupied 不变(都是占用),但 paid=100,payable=0。
+    // ledger:PLACEHOLDER→RETURNED→PAID,totalOccupied 不变(都是占用),但 paid=100,payable=0。
     const ledger = await getProjectLedger(project.id, 2026, adminUser());
     const nodeA = ledger.nodes.find((n) => n.subjectId === leafA.id)!;
     expect(nodeA.paid).toBe('100.00');
     expect(nodeA.payable).toBe('0.00');
     expect(nodeA.totalOccupied).toBe('100.00');
 
-    // history。
-    const hist = await prisma.businessRecordHistory.findFirst({
+    // history:两次切换各留一行。
+    const hist = await prisma.businessRecordHistory.count({
       where: { businessRecordId: record.id, action: 'status_switch' },
     });
-    expect(hist).not.toBeNull();
+    expect(hist).toBe(2);
   });
 
   it('listRecords: 组合筛选 + 默认排除作废', async () => {

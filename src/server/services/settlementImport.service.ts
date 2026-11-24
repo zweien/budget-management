@@ -25,8 +25,8 @@ import {
   SETTLEMENT_HEADERS,
   SETTLEMENT_HEADER_SCAN_ROWS,
   SETTLEMENT_HEADERS_V3,
-  SETTLEMENT_SKIPPED_STATUS,
   SETTLEMENT_STATUS_TO_ENUM,
+  SETTLEMENT_SUPPORTED_STATUS,
   SETTLEMENT_TEMPLATE_VERSION,
   SETTLEMENT_V2_APPLY_DATE,
   SETTLEMENT_V3_MARKERS,
@@ -45,6 +45,7 @@ import {
 import {
   checkDuplicates,
   hardDupReason,
+  statusRewriteAllowed,
   type DuplicateRowVerdict,
 } from '@/server/services/duplicateCheck.service';
 
@@ -72,11 +73,12 @@ const BATCH_META_SELECT = {
  *   单据编号为明细行粒度,冲账重报产生同号多行 → 按单据编号分组、金额取组内代数和
  *   (净额)成一条记录;开支细项末段与本地叶科目名精确相等时自动预选科目)。
  * - 无科目列:科目在预览页由用户逐条指定(updateSettlementRows 暂存),确认时写入。
- * - 单据状态映射:完成记账→PAID;在途态(制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单)→FINANCE_APPROVAL;业务退单→跳过。
+ * - 单据状态映射:完成记账→PAID;在途态(制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单)→FINANCE_APPROVAL;业务退单→RETURNED(照常入账,计入应付未付)。
  * - 预算年度按日期(填制/申请)年份推导,预览页可改。
  * - **补全更新(refresh)**:docNo 命中项目内既有未作废记录且金额一致且带来新信息
- *   (新行有完成日期而已有记录缺 / 状态推进到已支出)→ 不判硬重复,确认后更新既有记录
- *   的 完成日期/状态(状态只前进);金额不一致或无新信息仍为硬重复(ADR 0002)。
+ *   (新行有完成日期而已有记录缺 / 状态可回写:推进到已支出,或在途↔业务退单)→
+ *   不判硬重复,确认后更新既有记录的 完成日期/状态(已支出是终态、不回退);
+ *   金额不一致或无新信息仍为硬重复(ADR 0002)。
  *
  * 复用 ImportBatch / ImportRow 两阶段流程:parse(status='pending') → 预览/暂存 → confirm。
  */
@@ -152,9 +154,9 @@ export interface SettlementBatchPreview {
   pending: SettlementPreviewRow[];
   duplicates: SettlementPreviewRow[];
   errors: SettlementPreviewRow[];
-  /** 业务退单等被跳过的行数(仅提示条数)。 */
+  /** 被跳过的行数(仅提示条数;即净额为 0 的纯冲销)。 */
   skippedCount: number;
-  /** 行被跳过的原因 → 条数(业务退单/净额为 0 的纯冲销等)。 */
+  /** 行被跳过的原因 → 条数(净额为 0 的纯冲销等)。 */
   skippedReasons: Record<string, number>;
   /** 项目名称。 */
   projectName: string | null;
@@ -248,7 +250,6 @@ export async function loadSettlementWorkbookIfMatch(
  * 阶段一:解析 + 校验 + 疑似重复检测(个人结算单格式)。
  * - 权限:record:import + 项目范围。
  * - workbook 由调用方 loadSettlementWorkbookIfMatch 预载传入(避免重复解析)。
- * - 业务退单行以 validationStatus='skipped' 留痕(预览页仅提示条数)。
  * - 疑似重复:docNo 命中项目内既有未作废记录,或文件内重复出现同一 docNo;
  *   无 docNo 的行退回指纹(年度+金额+日期+摘要)比对既有记录。
  * - 不写业务记录;返回 batchId 供预览。
@@ -403,32 +404,6 @@ export async function parseSettlement(
       throw new HTTPError(422, `数据行数超过上限 ${env.MAX_IMPORT_ROWS},请拆分文件后导入`);
     }
 
-    // 业务退单:不导入,留痕跳过。
-    if (statusLabel === SETTLEMENT_SKIPPED_STATUS) {
-      parsedRows.push({
-        rowNo: rowNumber,
-        data: {
-          kind: 'settlement',
-          docNo,
-          statusLabel,
-          status: 'PAID',
-          businessDate: dateRaw ?? '',
-          completedDate: null,
-          budgetYear: 0,
-          summary: summary ?? '',
-          amount: amountRaw ?? '',
-          handler: handler ?? '',
-          subjectId: null,
-          subjectName: null,
-        },
-        errors: [{ field: 'docStatus', message: '业务退单,不导入' }],
-        validationStatus: 'skipped',
-        duplicate: false,
-        duplicateLevel: 'none',
-      });
-      return;
-    }
-
     const errors: SettlementRowError[] = [];
 
     const mapped = statusLabel ? SETTLEMENT_STATUS_TO_ENUM[statusLabel] : undefined;
@@ -436,7 +411,7 @@ export async function parseSettlement(
       errors.push({
         field: 'docStatus',
         message: statusLabel
-          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单,业务退单不导入)`
+          ? `单据状态无法识别:${statusLabel}(支持 ${SETTLEMENT_SUPPORTED_STATUS})`
           : '单据状态不能为空',
       });
     }
@@ -783,37 +758,11 @@ async function parseSettlementV3(opts: {
     duplicateLevel: DuplicateLevel;
   }> = [];
 
-  // 业务退单:整行跳过留痕,不参与分组。
-  for (const r of rawRows) {
-    if (r.statusLabel !== SETTLEMENT_SKIPPED_STATUS) continue;
-    parsedRows.push({
-      rowNo: r.rowNo,
-      data: {
-        kind: 'settlement',
-        docNo: r.docNo || null,
-        statusLabel: r.statusLabel,
-        status: 'PAID',
-        businessDate: r.applyDate,
-        completedDate: null,
-        budgetYear: 0,
-        summary: r.summary || r.remark,
-        amount: r.amountRaw,
-        handler: r.handler,
-        subjectId: null,
-        subjectName: null,
-      },
-      errors: [{ field: 'docStatus', message: '业务退单,不导入' }],
-      validationStatus: 'skipped',
-      duplicate: false,
-      duplicateLevel: 'none',
-    });
-  }
-
   // 按单据编号+科研项目名称分组(codex P1:同一单据可能拆到不同项目,
   // 跨项目的同号行不得合并,金额须按各自项目分别结算);空编号行各自成组。
+  // 业务退单行同样参与分组与入账(状态取组内首行,金额取净额)。
   const groups = new Map<string, V3RawRow[]>();
   for (const r of rawRows) {
-    if (r.statusLabel === SETTLEMENT_SKIPPED_STATUS) continue;
     const key = `${r.docNo || `__row_${r.rowNo}`}__${r.projectFileName}`;
     const g = groups.get(key);
     if (g) g.push(r);
@@ -832,7 +781,7 @@ async function parseSettlementV3(opts: {
       errors.push({
         field: 'docStatus',
         message: statusLabel
-          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单,业务退单不导入)`
+          ? `单据状态无法识别:${statusLabel}(支持 ${SETTLEMENT_SUPPORTED_STATUS})`
           : '单据状态不能为空',
       });
     }
@@ -1232,34 +1181,6 @@ async function parseSettlementV4(opts: {
   for (const r of rawRows) {
     const errors: SettlementRowError[] = [];
 
-    // 业务退单:整行跳过留痕。
-    if (r.statusLabel === SETTLEMENT_SKIPPED_STATUS) {
-      parsedRows.push({
-        rowNo: r.rowNo,
-        data: {
-          kind: 'settlement',
-          docNo: r.docNo || null,
-          statusLabel: r.statusLabel,
-          status: 'PAID',
-          businessDate: r.fillDate,
-          completedDate: null,
-          budgetYear: 0,
-          summary: r.summary || r.explain,
-          amount: r.claimRaw,
-          handler: r.handler,
-          subjectId: null,
-          subjectName: null,
-          fileProjectName: r.projectFileName || null,
-          detailPath: r.controlPath || null,
-        },
-        errors: [{ field: 'docStatus', message: '业务退单,不导入' }],
-        validationStatus: 'skipped',
-        duplicate: false,
-        duplicateLevel: 'none',
-      });
-      continue;
-    }
-
     // 状态:无法映射 → error。
     const statusLabel = r.statusLabel;
     const mapped = statusLabel ? SETTLEMENT_STATUS_TO_ENUM[statusLabel] : undefined;
@@ -1267,7 +1188,7 @@ async function parseSettlementV4(opts: {
       errors.push({
         field: 'docStatus',
         message: statusLabel
-          ? `单据状态无法识别:${statusLabel}(支持 完成记账/制单保存/打印审签/完成审核/待记账/完成复核/提交审核/完成收单,业务退单不导入)`
+          ? `单据状态无法识别:${statusLabel}(支持 ${SETTLEMENT_SUPPORTED_STATUS})`
           : '单据状态不能为空',
       });
     }
@@ -2204,7 +2125,7 @@ export async function updateSettlementRows(
  * - 事务内复查:新增行的 docNo 冲突(解析后到确认前,他人可能已导入同单号)→ 422;
  *   refresh 行复核既有记录仍在且仍满足「金额一致 + 带来新信息」,否则 422。
  * - 新增行逐行写 business_record(含 docNo),审计 action='import';
- *   refresh 行更新既有记录的 完成日期/状态(状态只前进),审计 action='import_refresh'。
+ *   refresh 行更新既有记录的 完成日期/状态(已支出不回退),审计 action='import_refresh'。
  *   batch → confirmed。
  */
 export async function confirmSettlementImport(
@@ -2367,7 +2288,7 @@ export async function confirmSettlementImport(
         }
       }
 
-      // §补全更新:复核 + 更新既有记录(状态只前进不回退;完成日期以新行为准补缺)。
+      // §补全更新:复核 + 更新既有记录(已支出是终态不回退;完成日期以新行为准补缺)。
       for (const row of refreshRows) {
         const data = row.parsedData as unknown as SettlementParsedRow;
         const docNo = data.docNo!;
@@ -2382,12 +2303,13 @@ export async function confirmSettlementImport(
             `第 ${row.rowNo} 行的单据编号 ${docNo} 已不再满足补全更新条件(记录不存在、金额不一致或已作废),请刷新预览后重试`,
           );
         }
-        const statusAdvances = data.status === 'PAID' && existing.status !== 'PAID';
+        // 状态回写与解析期判定同一规则(statusRewriteAllowed),预览与入库口径一致。
+        const rewritesStatus = statusRewriteAllowed(existing.status, data.status);
         const fillsCompletion = !!data.completedDate && existing.completedDate === null;
-        if (!statusAdvances && !fillsCompletion) {
+        if (!rewritesStatus && !fillsCompletion) {
           throw new HTTPError(
             422,
-            `第 ${row.rowNo} 行的单据编号 ${docNo} 无可更新内容(完成日期已填或状态无需推进),该行已是硬重复;请刷新预览后重试`,
+            `第 ${row.rowNo} 行的单据编号 ${docNo} 无可更新内容(完成日期已填或状态无需变更),该行已是硬重复;请刷新预览后重试`,
           );
         }
         // §codex P1:回填基准是**既有记录的申请日期**(行上的申请日期不回写)——
@@ -2415,7 +2337,7 @@ export async function confirmSettlementImport(
         const updatedRecord = await tx.businessRecord.update({
           where: { id: existing.id },
           data: {
-            ...(statusAdvances ? { status: 'PAID' as const } : {}),
+            ...(rewritesStatus ? { status: data.status } : {}),
             ...(data.completedDate
               ? { completedDate: new Date(`${data.completedDate}T00:00:00Z`) }
               : {}),

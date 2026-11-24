@@ -8,7 +8,7 @@ import { switchStatus } from '@/server/services/businessRecord.service';
 const STATUS_SET = new Set<string>(Object.values(BusinessStatus));
 
 /**
- * POST /api/projects/:id/records/:recordId/status — 切换业务记录状态(§8.3 四态自由切换)。
+ * POST /api/projects/:id/records/:recordId/status — 切换业务记录状态(§8.3 五态自由切换)。
  * body = { status: BusinessStatus }。返回 { record }。
  */
 export const POST = withRoute(
