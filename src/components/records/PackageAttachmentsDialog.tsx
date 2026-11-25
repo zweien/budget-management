@@ -23,7 +23,7 @@ import {
 import { packageAttachmentsBySubject } from '@/lib/api/attachments';
 import { renderFilename, type TokenContext } from '@/lib/attachments/packagePath';
 
-const DEFAULT_TEMPLATE = '{date}_{amount}_{summary}_{original}';
+const DEFAULT_TEMPLATE = '{docNo}_{subject}_{amount}_{completed}_{handler}';
 const ALL_YEAR = '__ALL__';
 /** 占位符清单:token 点击插入模板;desc 供「各占位符含义」说明区与按钮悬停提示。 */
 const TOKENS: Array<{ token: string; desc: string }> = [

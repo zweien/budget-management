@@ -157,9 +157,9 @@ describe('buildFolderPaths(全树批量 + 兄弟同名消歧)', () => {
 });
 
 describe('renderFilename', () => {
-  it('默认模板渲染各占位符', () => {
-    expect(renderFilename('{date}_{amount}_{summary}_{original}', ctx)).toBe(
-      '2026-08-05_1200.00_差旅费_发票.pdf',
+  it('默认模板渲染各占位符(无 {original} 时自动补原扩展名)', () => {
+    expect(renderFilename('{docNo}_{subject}_{amount}_{completed}_{handler}', ctx)).toBe(
+      'BX-2026-0311_设备购置费_1200.00_2026-08-20_张三.pdf',
     );
   });
   it('未知占位符原样保留(字面量)', () => {
