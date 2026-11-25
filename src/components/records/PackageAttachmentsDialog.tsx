@@ -117,7 +117,8 @@ export function PackageAttachmentsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        {/* 高度兜底:说明区默认展开时内容较高,超窗时在内容区内部滚动,弹窗本身不超出视口。 */}
+        <div className="max-h-[calc(100dvh-16rem)] space-y-4 overflow-y-auto py-2">
           <div className="space-y-1.5">
             <label className="text-sm font-medium">年度</label>
             <Select value={year} onValueChange={setYear}>
@@ -161,11 +162,12 @@ export function PackageAttachmentsDialog({
               <summary className="w-fit cursor-pointer select-none text-mute hover:text-foreground">
                 各占位符含义
               </summary>
-              <ul className="mt-1.5 space-y-1 rounded-md border border-hairline bg-card px-3 py-2">
+              {/* max-h + 内滚:占位符多,默认展开也不撑爆弹窗;anywhere 允许超长状态码串折行,防窄窗横向撑破。 */}
+              <ul className="mt-1.5 max-h-60 space-y-1 overflow-y-auto rounded-md border border-hairline bg-card px-3 py-2">
                 {TOKENS.map((t) => (
                   <li key={t.token} className="flex gap-2">
                     <span className="w-20 shrink-0 font-mono text-mute">{t.token}</span>
-                    <span>{t.desc}</span>
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{t.desc}</span>
                   </li>
                 ))}
               </ul>
