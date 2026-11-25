@@ -220,6 +220,8 @@ export async function listProjects(
       members: {
         where: { memberRole: 'OWNER' },
         select: { user: { select: { id: true, name: true } } },
+        // 负责人按成员顺序展示(第一负责人在前;authorizedAt 兜底)。
+        orderBy: [{ sortOrder: 'asc' }, { authorizedAt: 'desc' }],
       },
       // 项目管理列表展示总经费(当前口径);未编制初始预算的项目该行为 null。
       projectBudget: true,
@@ -312,6 +314,8 @@ export async function getProject(
       members: {
         where: { memberRole: 'OWNER' },
         select: { user: { select: { id: true, name: true } } },
+        // 负责人按成员顺序展示(第一负责人在前;authorizedAt 兜底)。
+        orderBy: [{ sortOrder: 'asc' }, { authorizedAt: 'desc' }],
       },
     },
   });

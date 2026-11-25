@@ -977,8 +977,19 @@ export async function importPackage(
     }
 
     if (acting.mode === 'claimed') {
+      // 认领人加为 OWNER:顺序追加到末尾(与其他加成员入口同款,不打乱既有排序)。
+      const last = await tx.projectMember.aggregate({
+        where: { projectId: pid },
+        _max: { sortOrder: true },
+      });
       await tx.projectMember.create({
-        data: { id: uuidv7(), projectId: pid, userId: acting.user.id, memberRole: 'OWNER' },
+        data: {
+          id: uuidv7(),
+          projectId: pid,
+          userId: acting.user.id,
+          memberRole: 'OWNER',
+          sortOrder: (last._max.sortOrder ?? 0) + 1,
+        },
       });
     }
 

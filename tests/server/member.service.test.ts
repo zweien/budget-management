@@ -8,6 +8,7 @@ import {
   addMember,
   listMembers,
   removeMember,
+  reorderMembers,
   updateMemberRole,
 } from '@/server/services/member.service';
 import { canEditProject } from '@/lib/auth/permissions';
@@ -119,8 +120,8 @@ describe('member.service(集成,真实 PG)', () => {
     });
     expect(same.authorizedAt.getTime()).toBe(before.authorizedAt.getTime());
 
-    // 晋升 OWNER:授权时间刷新为最近一次授权——预算调整文书据此识别
-    // 「最新授权的第一负责人」(从成员晋升的新负责人不应被旧时间戳埋没)。
+    // 晋升 OWNER:授权时间刷新为最近一次授权(重新授权的记录语义;
+    // 成员排序已由 sortOrder 驱动,授权时间不再影响第一负责人的取值)。
     await new Promise((r) => setTimeout(r, 5));
     await updateMemberRole(project.id, userA, MemberRole.OWNER, admin());
     const after = await prisma.projectMember.findUniqueOrThrow({
@@ -137,5 +138,56 @@ describe('member.service(集成,真实 PG)', () => {
       false,
     );
     await expect(removeMember(project.id, userA, admin())).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('addMember:新成员追加到顺序末尾', async () => {
+    const project = await seedProject('ORDER-ADD');
+    await addMember(project.id, { userId: userA, memberRole: MemberRole.OWNER }, admin());
+    await addMember(project.id, { userId: userB, memberRole: MemberRole.HANDLER }, admin());
+    const members = await listMembers(project.id, admin());
+    expect(members.map((m) => m.userId)).toEqual([adminId, userA, userB]);
+  });
+
+  it('reorderMembers:顺序持久,listMembers 跟随;审计留痕', async () => {
+    const project = await seedProject('REORDER');
+    await addMember(project.id, { userId: userA, memberRole: MemberRole.OWNER }, admin());
+    await addMember(project.id, { userId: userB, memberRole: MemberRole.HANDLER }, admin());
+
+    // 打乱为 userB / admin / userA:第一负责人变为 userB。
+    const members = await reorderMembers(project.id, [userB, adminId, userA], admin());
+    expect(members.map((m) => m.userId)).toEqual([userB, adminId, userA]);
+    await expect(listMembers(project.id, admin())).resolves.toEqual(members);
+
+    const first = await prisma.projectMember.findUniqueOrThrow({
+      where: { projectId_userId: { projectId: project.id, userId: userB } },
+    });
+    const last = await prisma.projectMember.findUniqueOrThrow({
+      where: { projectId_userId: { projectId: project.id, userId: userA } },
+    });
+    expect(first.sortOrder).toBe(1);
+    expect(last.sortOrder).toBe(3);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { projectId: project.id, objectType: 'project_members', action: 'reorder' },
+    });
+    expect(audit).not.toBeNull();
+  });
+
+  it('reorderMembers:order 不重不漏校验(缺/多/重复 422);非 ADMIN 403', async () => {
+    const project = await seedProject('REORDER-V');
+    await addMember(project.id, { userId: userA, memberRole: MemberRole.HANDLER }, admin());
+
+    await expect(reorderMembers(project.id, [adminId], admin())).rejects.toMatchObject({
+      status: 422,
+    }); // 缺 userA
+    await expect(
+      reorderMembers(project.id, [adminId, userA, userB], admin()),
+    ).rejects.toMatchObject({ status: 422 }); // 多 userB(非成员)
+    await expect(reorderMembers(project.id, [adminId, adminId], admin())).rejects.toMatchObject({
+      status: 422,
+    }); // 重复
+    await expect(
+      reorderMembers(project.id, [userA, adminId], { id: userA, role: UserRole.USER }),
+    ).rejects.toMatchObject({ status: 403 }); // 非 ADMIN
   });
 });

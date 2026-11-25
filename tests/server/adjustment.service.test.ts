@@ -778,13 +778,18 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     expect(buf3.length).toBeGreaterThan(0);
   });
 
-  it('导出项目负责人:取最新授权的当前 OWNER 成员,而非建档 ownerId 快照', async () => {
+  it('导出项目负责人:取成员顺序最前的 OWNER(第一负责人),授权时间不参与', async () => {
     const { project, leafA } = await seedApprovedProject('OWNR');
-    // 模拟换负责人:建档 owner(admin-adj)仍留成员表,新负责人以更晚授权时间成为 OWNER。
+    // 模拟换负责人:建档 owner(admin-adj)排到第二位,新负责人排第一
+    // (授权时间保持更早,证明 sortOrder 优先于 authorizedAt)。
     const newLeaderId = uuidv7();
     createdUserIds.push(newLeaderId);
     await prisma.user.create({
       data: { id: newLeaderId, name: '新第一负责人-OWNR', role: UserRole.USER },
+    });
+    await prisma.projectMember.update({
+      where: { projectId_userId: { projectId: project.id, userId: adminUser().id } },
+      data: { sortOrder: 2 },
     });
     await prisma.projectMember.create({
       data: {
@@ -792,7 +797,8 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
         projectId: project.id,
         userId: newLeaderId,
         memberRole: MemberRole.OWNER,
-        authorizedAt: new Date(Date.now() + 60_000), // 晚于建档授权,成为「最新」
+        sortOrder: 1,
+        authorizedAt: new Date(Date.now() - 60_000), // 授权更早,不参与第一负责人判定
       },
     });
 
@@ -806,10 +812,44 @@ describe('adjustment.service (integration, real PG) — 双维度调整', () => 
     );
     const buf = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
 
-    // 解包 docx:项目负责人格应填新负责人,不再打印 ownerId 快照里的旧负责人。
+    // 解包 docx:项目负责人格应填成员顺序第一的新负责人,而非旧负责人。
     const zip = await JSZip.loadAsync(buf);
     const xml = await zip.file('word/document.xml')!.async('string');
     expect(xml).toContain('新第一负责人-OWNR');
+    expect(xml).not.toContain('admin-adj');
+  });
+
+  it('导出项目负责人:成员 sortOrder 相同(迁移前旧数据)时按授权时间兜底', async () => {
+    const { project, leafA } = await seedApprovedProject('OWNL');
+    // 迁移回填前的历史形态:所有成员 sortOrder 同值,此时按授权时间倒序兜底。
+    const newLeaderId = uuidv7();
+    createdUserIds.push(newLeaderId);
+    await prisma.user.create({
+      data: { id: newLeaderId, name: '新第一负责人-OWNL', role: UserRole.USER },
+    });
+    await prisma.projectMember.create({
+      data: {
+        id: uuidv7(),
+        projectId: project.id,
+        userId: newLeaderId,
+        memberRole: MemberRole.OWNER,
+        authorizedAt: new Date(Date.now() + 60_000), // 晚于建档授权,兜底时成为第一
+      },
+    });
+
+    const adj = await createAdjustment(
+      project.id,
+      {
+        year: 2026,
+        lines: [{ subjectId: leafA.id, totalAdjustment: '0.00', annualAdjustment: '0.00' }],
+      },
+      adminUser(),
+    );
+    const buf = await exportAdjustmentDocx(adj.id, 'annual', adminUser());
+
+    const zip = await JSZip.loadAsync(buf);
+    const xml = await zip.file('word/document.xml')!.async('string');
+    expect(xml).toContain('新第一负责人-OWNL');
     expect(xml).not.toContain('admin-adj');
   });
 

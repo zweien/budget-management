@@ -151,6 +151,8 @@ model ProjectMember {
   userId       String    @map("user_id") @db.Uuid
   memberRole   MemberRole @map("member_role")
   authorizedAt DateTime  @default(now()) @map("authorized_at")
+  // 成员展示顺序(成员管理可调;第一负责人 = 顺序最前的 OWNER)。旧数据默认 0。
+  sortOrder    Int       @default(0) @map("sort_order")
 
   project Project @relation(fields: [projectId], references: [id])
   user    User    @relation(fields: [userId], references: [id])

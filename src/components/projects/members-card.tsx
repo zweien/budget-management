@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Trash2, UserPlus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { apiFetch } from '@/lib/api/client';
@@ -86,6 +86,21 @@ export function MembersCard({
     }
   };
 
+  /** 上移/下移成员:PUT 全量顺序(服务端按下标写 sortOrder;第一负责人 = 顺序最前的 OWNER)。 */
+  const move = (index: number, dir: -1 | 1) => {
+    if (!members) return;
+    const next = [...members];
+    [next[index], next[index + dir]] = [next[index + dir], next[index]];
+    void run(
+      () =>
+        apiFetch(`/api/projects/${projectId}/members/order`, {
+          method: 'PUT',
+          body: JSON.stringify({ order: next.map((m) => m.userId) }),
+        }),
+      '已调整成员顺序',
+    );
+  };
+
   const candidates = allUsers.filter((u) => !members?.some((m) => m.userId === u.id));
 
   return (
@@ -94,6 +109,7 @@ export function MembersCard({
         <CardTitle className="text-base">成员管理</CardTitle>
         <p className="text-xs text-muted-foreground">
           负责人(OWNER)拥有该项目全部编辑权限;成员(HANDLER)可录入/维护业务记录。
+          顺序最前的负责人即「第一负责人」,经费调整表按它填「项目负责人」。
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -104,8 +120,30 @@ export function MembersCard({
             {members.length === 0 ? (
               <li className="px-3 py-4 text-center text-sm text-muted-foreground">暂无成员</li>
             ) : (
-              members.map((m) => (
+              members.map((m, index) => (
                 <li key={m.userId} className="flex items-center gap-2 px-3 py-2">
+                  <div className="flex flex-col">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-5"
+                      aria-label={`上移 ${m.name}`}
+                      disabled={busy || index === 0}
+                      onClick={() => move(index, -1)}
+                    >
+                      <ChevronUp className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-5"
+                      aria-label={`下移 ${m.name}`}
+                      disabled={busy || index === members.length - 1}
+                      onClick={() => move(index, 1)}
+                    >
+                      <ChevronDown className="size-3.5" />
+                    </Button>
+                  </div>
                   <span className="text-sm">{m.name}</span>
                   <Badge variant={m.memberRole === 'OWNER' ? 'success' : 'secondary'}>
                     {MEMBER_ROLE_LABEL[m.memberRole]}

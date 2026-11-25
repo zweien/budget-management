@@ -75,12 +75,13 @@ export async function exportAdjustmentDocx(
     }),
     prisma.annualBudget.findUnique({ where: { projectId_year: { projectId, year } } }),
     prisma.projectBudget.findUnique({ where: { projectId } }),
-    // 项目负责人实时取当前 OWNER 成员(§codex P2 与列表/详情页同口径):成员管理
-    // 换负责人后 Project.ownerId 不回写,按静态快照打印会打出已卸任负责人。
+    // 项目负责人实时取 OWNER 成员(§codex P2):成员管理换负责人后 Project.ownerId
+    // 不回写,按静态快照打印会打出已卸任负责人。口径 v0.53.0 起为「第一负责人」
+    // = 成员顺序最前的 OWNER(成员管理可调,authorizedAt 仅作排序兜底)。
     prisma.projectMember.findMany({
       where: { projectId, memberRole: 'OWNER' },
       include: { user: { select: { name: true } } },
-      orderBy: { authorizedAt: 'desc' },
+      orderBy: [{ sortOrder: 'asc' }, { authorizedAt: 'desc' }],
     }),
   ]);
 

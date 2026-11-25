@@ -19,7 +19,7 @@ export interface MemberView {
   authorizedAt: Date;
 }
 
-/** 列出项目成员(查看权限即可;成员管理卡片的数据源)。 */
+/** 列出项目成员(查看权限即可;成员管理卡片的数据源)。按成员顺序返回(第一负责人在前)。 */
 export async function listMembers(
   projectId: string,
   user: Pick<User, 'id' | 'role'>,
@@ -28,7 +28,7 @@ export async function listMembers(
   const rows = await prisma.projectMember.findMany({
     where: { projectId },
     include: { user: { select: { id: true, name: true } } },
-    orderBy: [{ memberRole: 'asc' }, { authorizedAt: 'asc' }],
+    orderBy: [{ sortOrder: 'asc' }, { authorizedAt: 'asc' }],
   });
   return rows.map((r) => ({
     userId: r.userId,
@@ -64,12 +64,18 @@ export async function addMember(
   }
 
   return prisma.$transaction(async (tx) => {
+    // 新成员追加到顺序末尾(不打乱既有第一负责人口径)。
+    const last = await tx.projectMember.aggregate({
+      where: { projectId },
+      _max: { sortOrder: true },
+    });
     const created = await tx.projectMember.create({
       data: {
         id: uuidv7(),
         projectId,
         userId: input.userId,
         memberRole: input.memberRole,
+        sortOrder: (last._max.sortOrder ?? 0) + 1,
       },
     });
     await recordAudit(tx, {
@@ -109,9 +115,8 @@ export async function updateMemberRole(
   return prisma.$transaction(async (tx) => {
     const updated = await tx.projectMember.update({
       where: { projectId_userId: { projectId, userId: targetUserId } },
-      // 角色变更 = 重新授权,刷新授权时间:预算调整文书等项目负责人取
-      // 「最新授权的 OWNER」,从成员晋升的新负责人需以此被识别为最新
-      // (authorizedAt 不在 UI 展示,仅影响成员列表排序与取数口径)。
+      // 角色变更 = 重新授权,刷新授权时间(重新授权的记录语义;排序已由
+      // sortOrder 驱动,authorizedAt 不再影响第一负责人的取值)。
       data: {
         memberRole,
         ...(existing.memberRole !== memberRole ? { authorizedAt: new Date() } : {}),
@@ -161,4 +166,77 @@ export async function removeMember(
       before: { userId: targetUserId, name: existing.user.name, memberRole: existing.memberRole },
     });
   });
+}
+
+/**
+ * 调整成员顺序(仅 ADMIN):body 传全量 userId 顺序,按数组下标写 sortOrder。
+ * 第一负责人 = 顺序最前的 OWNER——调整表「项目负责人」与概览/列表负责人显示
+ * 均按此口径;order 必须与现有成员不重不漏,否则 422。
+ */
+export async function reorderMembers(
+  projectId: string,
+  orderedUserIds: string[],
+  user: Pick<User, 'id' | 'role'>,
+): Promise<MemberView[]> {
+  await requirePermission(user, 'member:manage', projectId);
+  if (!Array.isArray(orderedUserIds)) {
+    throw new HTTPError(422, 'order 须为 userId 数组');
+  }
+  const rows = await prisma.projectMember.findMany({
+    where: { projectId },
+    include: { user: { select: { id: true, name: true } } },
+    orderBy: [{ sortOrder: 'asc' }, { authorizedAt: 'asc' }],
+  });
+  if (new Set(orderedUserIds).size !== orderedUserIds.length) {
+    throw new HTTPError(422, 'order 不得包含重复成员');
+  }
+  if (orderedUserIds.length !== rows.length) {
+    throw new HTTPError(422, 'order 必须包含全部项目成员,不重不漏');
+  }
+  const known = new Set(rows.map((r) => r.userId));
+  for (const uid of orderedUserIds) {
+    if (!known.has(uid)) throw new HTTPError(422, 'order 包含非项目成员的用户');
+  }
+  if (rows.length === 0) return [];
+
+  const beforeOrder = rows.map((r) => ({
+    userId: r.userId,
+    name: r.user.name,
+    memberRole: r.memberRole,
+  }));
+  const updated = await prisma.$transaction(async (tx) => {
+    for (const [index, uid] of orderedUserIds.entries()) {
+      await tx.projectMember.update({
+        where: { projectId_userId: { projectId, userId: uid } },
+        data: { sortOrder: index + 1 },
+      });
+    }
+    const after = await tx.projectMember.findMany({
+      where: { projectId },
+      include: { user: { select: { id: true, name: true } } },
+      orderBy: [{ sortOrder: 'asc' }, { authorizedAt: 'asc' }],
+    });
+    await recordAudit(tx, {
+      projectId,
+      objectType: 'project_members',
+      objectId: projectId,
+      action: 'reorder',
+      operatorId: user.id,
+      before: { order: beforeOrder },
+      after: {
+        order: after.map((r) => ({
+          userId: r.userId,
+          name: r.user.name,
+          memberRole: r.memberRole,
+        })),
+      },
+    });
+    return after;
+  });
+  return updated.map((r) => ({
+    userId: r.userId,
+    name: r.user.name,
+    memberRole: r.memberRole,
+    authorizedAt: r.authorizedAt,
+  }));
 }
