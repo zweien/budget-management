@@ -192,6 +192,7 @@ export async function createProject(
  * v0.3.0 起普通用户全局只读 → 所有登录用户看到全部(未归档)项目;
  * 指定项目范围的凭证仅看到 allowlist 内项目(codex P1,列表语义=过滤而非拒绝);
  * 编辑权不在此处区分(由 canEditProject / requirePermission 在编辑动作上拦截)。
+ * isMyProject 只是「只看我的项目」开关的筛选标记(CONTEXT.md「我的项目」),不是查看权限。
  */
 export async function listProjects(
   user: {
@@ -202,7 +203,7 @@ export async function listProjects(
     keyProjectIds?: string[];
   },
   opts: { includeArchived?: boolean } = {},
-): Promise<(Project & { canEdit: boolean; totalSpent: string })[]> {
+): Promise<(Project & { canEdit: boolean; isMyProject: boolean; totalSpent: string })[]> {
   const scoped =
     user.viaApiKey && user.keyProjectScope === 'selected'
       ? { id: { in: user.keyProjectIds ?? [] } }
@@ -240,16 +241,23 @@ export async function listProjects(
     totalSpent: (spentByProject.get(p.id) ?? ZERO).toFixed(2),
   }));
 
-  // canEdit 随行下发(项目管理页编辑/归档按钮的行级门控):ADMIN 恒可,否则需 OWNER。
+  // canEdit / isMyProject 随行下发(项目管理页的行级门控与「只看我的项目」筛选):
+  // ADMIN 恒可编辑、恒为「我的项目」(管理员恒为全部项目);否则按当前成员关系判定——
+  // OWNER 可编辑,OWNER/HANDLER 均算「我的项目」。同负责人展示,不看建档时的
+  // Project.ownerId(成员管理换人后它不会回写)。
   if (user.role === 'ADMIN') {
-    return withSpent.map((p) => ({ ...p, canEdit: true }));
+    return withSpent.map((p) => ({ ...p, canEdit: true, isMyProject: true }));
   }
-  const owned = await prisma.projectMember.findMany({
-    where: { userId: user.id, memberRole: 'OWNER' },
-    select: { projectId: true },
+  const memberships = await prisma.projectMember.findMany({
+    where: { userId: user.id },
+    select: { projectId: true, memberRole: true },
   });
-  const ownedIds = new Set(owned.map((m) => m.projectId));
-  return withSpent.map((p) => ({ ...p, canEdit: ownedIds.has(p.id) }));
+  const roleByProject = new Map(memberships.map((m) => [m.projectId, m.memberRole]));
+  return withSpent.map((p) => ({
+    ...p,
+    canEdit: roleByProject.get(p.id) === 'OWNER',
+    isMyProject: roleByProject.has(p.id),
+  }));
 }
 
 /** 项目 + 当前用户权限标记(统一录入页的数据源)。 */

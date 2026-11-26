@@ -137,6 +137,81 @@ describe('project.service (integration, real PG)', () => {
     expect(list.map((p) => p.id)).toContain(project.id);
   });
 
+  it('§我的项目:isMyProject 按当前成员关系下发(OWNER/HANDLER 为真、非成员为假),管理员恒真', async () => {
+    const suffix = uuidv7().slice(0, 8);
+    // 负责人:ownerId 指向 outsider(即 OWNER 成员),创建者 admin 不是该项目成员。
+    const owned = await createProject(
+      { code: `MINE-OWN-${suffix}`, name: 'mine owner', ownerId: outsiderId },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    // 录入人员:admin 建档,outsider 仅为 HANDLER。
+    const handled = await createProject(
+      { code: `MINE-HDL-${suffix}`, name: 'mine handler' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    // 非成员。
+    const untouched = await createProject(
+      { code: `MINE-OUT-${suffix}`, name: 'mine outsider' },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(owned.id, handled.id, untouched.id);
+    await prisma.projectMember.create({
+      data: { id: uuidv7(), projectId: handled.id, userId: outsiderId, memberRole: 'HANDLER' },
+    });
+
+    const mine = await listProjects({ id: outsiderId, role: UserRole.USER });
+    // 查看范围不变:三行都可见,只是成员标记不同。
+    expect(mine.map((p) => p.id)).toEqual(
+      expect.arrayContaining([owned.id, handled.id, untouched.id]),
+    );
+    const rowOf = (id: string) => mine.find((p) => p.id === id);
+    expect(rowOf(owned.id)).toMatchObject({ isMyProject: true, canEdit: true });
+    // 录入人员算「我的项目」,但不可编辑。
+    expect(rowOf(handled.id)).toMatchObject({ isMyProject: true, canEdit: false });
+    expect(rowOf(untouched.id)).toMatchObject({ isMyProject: false, canEdit: false });
+
+    // 管理员恒为「我的项目」、恒可编辑——哪怕不是该项目成员(owned 的成员只有 outsider)。
+    const adminList = await listProjects({ id: adminId, role: UserRole.ADMIN });
+    expect(adminList.find((p) => p.id === owned.id)).toMatchObject({
+      isMyProject: true,
+      canEdit: true,
+    });
+  });
+
+  it('§我的项目:被移出成员后不再是「我的项目」(以当前成员关系为准,不看 ownerId 快照)', async () => {
+    const project = await createProject(
+      { code: `MINE-RM-${uuidv7().slice(0, 8)}`, name: 'mine removed', ownerId: outsiderId },
+      { id: adminId, role: UserRole.ADMIN },
+    );
+    createdProjectIds.push(project.id);
+    const mineRow = async (opts?: { includeArchived?: boolean }) => {
+      const list = await listProjects({ id: outsiderId, role: UserRole.USER }, opts);
+      return list.find((p) => p.id === project.id);
+    };
+
+    // 建档时是负责人。
+    expect(project.ownerId).toBe(outsiderId);
+    expect(await mineRow()).toMatchObject({ isMyProject: true, canEdit: true });
+
+    // 成员管理移出后:ownerId 仍是 outsider,但已不算「我的项目」。
+    await prisma.projectMember.deleteMany({
+      where: { projectId: project.id, userId: outsiderId },
+    });
+    expect(await mineRow()).toMatchObject({ isMyProject: false, canEdit: false });
+
+    // 重新加入为录入人员 → 又是「我的项目」;归档后默认列表隐藏,
+    // includeArchived 仍带成员标记(项目列表空状态据此区分「不是成员」与「都已归档」)。
+    await prisma.projectMember.create({
+      data: { id: uuidv7(), projectId: project.id, userId: outsiderId, memberRole: 'HANDLER' },
+    });
+    await archiveProject(project.id, { id: adminId, role: UserRole.ADMIN });
+    expect(await mineRow()).toBeUndefined();
+    expect(await mineRow({ includeArchived: true })).toMatchObject({
+      isMyProject: true,
+      canEdit: false,
+    });
+  });
+
   it('getProject: 普通用户可查看任意项目详情(只读)', async () => {
     const code = `VIP-${uuidv7().slice(0, 8)}`;
     const project = await createProject(

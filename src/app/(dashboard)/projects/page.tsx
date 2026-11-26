@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import {
   Archive,
   FolderKanban,
+  FolderSearch,
   Package,
   Pencil,
   Plus,
@@ -30,6 +31,7 @@ import {
 } from '@tanstack/react-table';
 
 import { apiFetch } from '@/lib/api/client';
+import { EmptyState } from '@/components/layout/empty-state';
 import { ExportMigrationPackagesDialog } from '@/components/projects/export-migration-packages-dialog';
 import { ImportMigrationPackageDialog } from '@/components/projects/import-migration-package-dialog';
 import {
@@ -66,6 +68,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { dateRange, multiSelectStrict, numberRange, textContains } from '@/lib/table/filter-fns';
+import { readProjectsOnlyMine, writeProjectsOnlyMine } from '@/lib/ui-prefs';
 
 interface ProjectRow {
   id: string;
@@ -89,6 +92,8 @@ interface ProjectRow {
   createdAt: string;
   /** 行级编辑权(ADMIN 或该项目 OWNER):编辑/归档/恢复按钮的门控。 */
   canEdit: boolean;
+  /** 是否「我的项目」(当前用户为该项目成员;ADMIN 恒 true):「只看我的项目」的筛选依据。 */
+  isMyProject: boolean;
 }
 
 const formatDate = (d: string | null) => (d ? format(new Date(d), 'yyyy-MM-dd') : '—');
@@ -153,6 +158,13 @@ export default function ProjectsPage() {
   const [keyword, setKeyword] = useState('');
   /** 是否包含已归档项目(项目管理:归档可恢复,开关切换查看)。 */
   const [showArchived, setShowArchived] = useState(false);
+  /**
+   * 「只看我的项目」:只显示自己是成员的项目(CONTEXT.md「我的项目」)。
+   * 个人筛选视图,不改查看范围;默认关,个人偏好 cookie 记忆。
+   * 惰性初始值直读 cookie:开关在 /api/me 返回角色后才渲染、首屏 loading 不渲染行,
+   * 偏好不影响服务端 HTML 与水合输出,故无需走服务端注入。
+   */
+  const [onlyMine, setOnlyMine] = useState(readProjectsOnlyMine);
   // 列显隐偏好(cookie 持久化,与录入页同款交互);TanStack 受控 state 驱动。
   const [columnVisibility, toggleColumnVisibility] = useStoredColumnVisibility(
     'ui.projects.columns',
@@ -223,25 +235,34 @@ export default function ProjectsPage() {
     };
   }, [showArchived, listVersion]);
 
+  // 「只看我的项目」:基础过滤,先于关键词与表头筛选;值清单候选同样取自过滤后的行。
+  const baseRows = useMemo(
+    () => (onlyMine ? rows.filter((r) => r.isMyProject) : rows),
+    [rows, onlyMine],
+  );
+
   // 顶部关键词:编号/名称包含(与列头筛选叠加,先过关键词再进 TanStack)。
   const keywordFiltered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
-    if (!kw) return rows;
-    return rows.filter(
+    if (!kw) return baseRows;
+    return baseRows.filter(
       (r) => r.code.toLowerCase().includes(kw) || r.name.toLowerCase().includes(kw),
     );
-  }, [rows, keyword]);
+  }, [baseRows, keyword]);
 
   // 值清单候选:从当前列表数据动态去重(Excel 行为,零后端改动)。
   const memberOptions = useMemo(
-    () => distinctSorted(rows.flatMap((r) => r.members.map((m) => m.user.name))),
-    [rows],
+    () => distinctSorted(baseRows.flatMap((r) => r.members.map((m) => m.user.name))),
+    [baseRows],
   );
-  const levelOptions = useMemo(() => distinctSorted(rows.map((r) => r.level)), [rows]);
-  const projectTypeOptions = useMemo(() => distinctSorted(rows.map((r) => r.projectType)), [rows]);
+  const levelOptions = useMemo(() => distinctSorted(baseRows.map((r) => r.level)), [baseRows]);
+  const projectTypeOptions = useMemo(
+    () => distinctSorted(baseRows.map((r) => r.projectType)),
+    [baseRows],
+  );
   const undertakingUnitOptions = useMemo(
-    () => distinctSorted(rows.map((r) => r.undertakingUnit)),
-    [rows],
+    () => distinctSorted(baseRows.map((r) => r.undertakingUnit)),
+    [baseRows],
   );
 
   const openCreateDialog = () => {
@@ -317,6 +338,12 @@ export default function ProjectsPage() {
     } catch (e) {
       toast.error((e as Error).message);
     }
+  };
+
+  /** 切换「只看我的项目」:状态与偏好 cookie 同步(关 = 清除 cookie,回到默认)。 */
+  const toggleOnlyMine = (next: boolean) => {
+    setOnlyMine(next);
+    writeProjectsOnlyMine(next);
   };
 
   // useReactTable 与 React Compiler 记忆化假设不兼容(官方已知,功能正常)。
@@ -579,7 +606,7 @@ export default function ProjectsPage() {
         ) : null}
       </div>
 
-      {/* 工具行:搜索 + 显示已归档开关 + 列设置 */}
+      {/* 工具行:搜索 + 显示已归档 / 只看我的项目开关 + 列设置 + 导出迁移包 */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="relative w-full max-w-72">
           <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-mute" />
@@ -605,6 +632,20 @@ export default function ProjectsPage() {
           <Label htmlFor="show-archived" className="text-sm text-muted-foreground">
             显示已归档
           </Label>
+          {/* 只看我的项目:仅普通用户可见(管理员恒为全部项目);个人偏好,cookie 记忆。 */}
+          {me?.role === 'USER' ? (
+            <>
+              <Switch
+                id="only-mine"
+                className="ml-2"
+                checked={onlyMine}
+                onCheckedChange={toggleOnlyMine}
+              />
+              <Label htmlFor="only-mine" className="text-sm text-muted-foreground">
+                只看我的项目
+              </Label>
+            </>
+          ) : null}
           <ColumnSettingsPopover
             items={[
               { id: 'code', label: '项目编号' },
@@ -657,6 +698,24 @@ export default function ProjectsPage() {
             </Button>
           ) : null}
         </div>
+      ) : onlyMine && baseRows.length === 0 ? (
+        /* 只看我的项目而无一命中。开了「显示已归档」时空 = 确实不是任何项目成员;
+         * 没开时还可能是参与的项目都已归档(归档项目不在列表数据里,无法区分)。 */
+        <EmptyState
+          icon={<FolderSearch />}
+          title={showArchived ? '你还不是任何项目的成员' : '没有你参与的项目'}
+          description={showArchived ? undefined : '你尚未被分配到任何项目,或你参与的项目都已归档'}
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              {showArchived ? null : (
+                <Button variant="outline" onClick={() => setShowArchived(true)}>
+                  显示已归档
+                </Button>
+              )}
+              <Button onClick={() => toggleOnlyMine(false)}>查看全部项目</Button>
+            </div>
+          }
+        />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-l2">
           {/* 滚动区限高 + 表头冻结(与业务录入页同款):长列表下表头常驻。 */}
@@ -701,6 +760,7 @@ export default function ProjectsPage() {
           </Table>
           <div className="border-t border-border px-4 py-2 text-xs text-mute tabular-nums">
             共 {visibleRows.length} 个项目
+            {onlyMine ? '(只看我的项目)' : ''}
             {showArchived ? '(含已归档)' : ''}
             {hasHeaderFilter ? '(已应用表头筛选)' : ''}
           </div>
@@ -742,7 +802,7 @@ export default function ProjectsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 批量导出迁移包:条件渲染,projects 为当前筛选结果(含归档开关语境)。 */}
+      {/* 批量导出迁移包:条件渲染,projects 为当前筛选结果(含归档开关与「只看我的项目」语境)。 */}
       {exportOpen ? (
         <ExportMigrationPackagesDialog
           projects={keywordFiltered.map((p) => ({

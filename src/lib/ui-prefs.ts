@@ -117,3 +117,25 @@ export function clearDashThresholds(): void {
   if (typeof document === 'undefined') return;
   document.cookie = `${DASH_THRESHOLDS_COOKIE}=; path=/; max-age=0; samesite=lax`;
 }
+
+// ------------------------------------------------------------
+// 项目列表「只看我的项目」偏好(cookie 持久化,客户端读写;项目管理页用)。
+// 默认关(显示全部);打开才落 cookie,关闭即清除——「未作出」与「关」同义。
+// ------------------------------------------------------------
+
+/** 「只看我的项目」偏好 cookie:值为 '1' = 只显示自己是成员的项目;不存在 = 关(默认)。 */
+export const PROJECTS_ONLY_MINE_COOKIE = 'bm-projects-only-mine';
+
+/** 读「只看我的项目」偏好(仅客户端;无文档对象或 cookie 不存在/值不为 '1' = false)。 */
+export function readProjectsOnlyMine(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.cookie.split('; ').includes(`${PROJECTS_ONLY_MINE_COOKIE}=1`);
+}
+
+/** 写「只看我的项目」偏好(仅客户端,max-age 一年);关闭时清除 cookie,回到默认。 */
+export function writeProjectsOnlyMine(onlyMine: boolean): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = onlyMine
+    ? `${PROJECTS_ONLY_MINE_COOKIE}=1; path=/; max-age=31536000; samesite=lax`
+    : `${PROJECTS_ONLY_MINE_COOKIE}=; path=/; max-age=0; samesite=lax`;
+}
