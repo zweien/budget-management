@@ -178,8 +178,10 @@ describe('attachments package route (按科目层级打包)', () => {
     const buf = Buffer.from(await res.arrayBuffer());
     const zip = await JSZip.loadAsync(buf);
     const names = Object.keys(zip.files);
-    // 路径: 根科目/叶科目/2026-08-05_1200.00_差旅费_发票.pdf(目录只取科目名,不带编码)
-    expect(names).toContain('根科目/叶科目/2026-08-05_1200.00_差旅费_发票.pdf');
+    // 路径: 根科目/叶科目/叶科目_1200.00_张三.pdf(目录只取科目名,不带编码)。
+    // 默认模板 {docNo}_{subject}_{amount}_{completed}_{handler}:单据编号与完成日期为空,
+    // 占位符连同紧邻的分隔符一起折叠;模板不含 {original},末尾自动补原文件扩展名。
+    expect(names).toContain('根科目/叶科目/叶科目_1200.00_张三.pdf');
   });
 
   it('自定义模板渲染各占位符', async () => {
