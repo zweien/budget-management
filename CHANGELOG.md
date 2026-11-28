@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [0.55.1] - 2026-11-28
+
+### 变更
+
+- **登录会话与登录流程 cookie 在 https 部署下改用 `__Host-` 前缀**（`__Host-bm_session` / `__Host-bm_dingtalk_flow` / `__Host-bm_oidc_flow`）：浏览器只接受本站下发的此类 cookie，同一主域下的其他子域名无法再写入同名 cookie 冒充登录流程（防「被登录成他人账号」）；http 部署保持无前缀。**升级后所有用户需重新登录一次**，退出登录会一并清掉旧的无前缀 cookie
+- **写接口拦截跨源请求**：浏览器发起的 POST / PUT / PATCH / DELETE 若来源不是系统对外地址（`APP_BASE_URL`），一律 403「跨站请求被拒绝」。此前仅依赖会话 cookie 的 `SameSite=Lax`，而同一主域下的兄弟站点对本系统而言是「同站」、请求照常携带 cookie，可以带着用户身份调用任意写接口。服务端脚本、MCP、API 凭证调用不带 Origin，不受影响；mock 模式（本地开发）不做此判定
+- 依赖安全升级：Next.js 16.2.12 → 16.4.6、`@modelcontextprotocol/sdk` 1.30.0 → 1.32.2 及其传递依赖（修复 Next 图片优化端点的未授权远程代码执行 GHSA-2464-fhr4-w9xw / GHSA-2xp9-vwfh-vxw4、图片优化 SSRF GHSA-cjq9-62q9-8jv4 等）
+- **测试套件拒绝在生产运行目录里对着生产库启动**：检出目录里存在 `.env.production`（即真实部署主机）时，`npm test` 必须显式把 `DATABASE_URL` 指向别的库，否则直接报错退出。集成测试会建用户、项目、凭证与审计日志，此前只靠口头约定；CI 与开发检出不受影响
+
+### 修复
+
+- **迁移包导入未校验 API 凭证档位**：`POST /api/import/migration-package`（含 `preview`）此前只判断角色与「指定项目范围」，管理员名下的只读 / 读写档凭证也能导入建项目。现与建项目同一动作受档位与项目范围约束，被拒照常写审计
+- 附件按科目打包的一条测试断言过期：0.54.0 把默认模板改为 `{docNo}_{subject}_{amount}_{completed}_{handler}` 后未同步更新，该用例一直失败
+
 ## [0.55.0] - 2026-11-26
 
 ### 新增
