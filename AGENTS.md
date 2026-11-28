@@ -14,7 +14,8 @@
 - **`MOCK_AUTH=false`(SSO)**:登录页按已配置提供方渲染入口,两组提供方可并存、**至少配一组**(env 启动校验,半配置报错):
   - **Authentik OIDC**:`/api/auth/login|callback|logout`,授权码 + PKCE;登出走 Authentik end-session(id_token_hint)。
   - **钉钉扫码**(v0.35.0 起,`src/lib/auth/dingtalk.ts`):`/api/auth/dingtalk/login|callback`,OAuth2 授权码换 `userAccessToken` 取 `unionId`;无 id_token,登出仅清本地会话。身份键 `dingtalk:<unionId>` 与 Authentik sub 共用 `users.auth_subject` 唯一列——**同一人经两提供方登录为两个独立账号,不做自动关联**。
-  - 会话均为 HttpOnly JWT cookie(`bm_session`,8h,jose HS256);`getCurrentUser()` 验签后**实时查库**(改角色/停用即时生效)。
+  - 会话均为 HttpOnly JWT cookie(`bm_session`;https 部署下带 `__Host-` 前缀,登录流程 cookie 同理,只有本站能下发),8h,jose HS256);`getCurrentUser()` 验签后**实时查库**(改角色/停用即时生效)。
+  - SSO 模式下,浏览器发起的写请求(POST/PUT/PATCH/DELETE)来源必须是 `APP_BASE_URL`,否则 403(同一主域的兄弟站点对浏览器是「同站」,会携带 cookie);HTTP API 客户端(Bearer 凭证)不带 Origin,不受影响。
 
 ### 角色模型
 

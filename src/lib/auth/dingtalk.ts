@@ -1,11 +1,14 @@
 import { randomBytes } from 'node:crypto';
 
 import { env } from '@/lib/env';
+import { secureCookies } from '@/lib/auth/oidc';
 
-// 钉钉流程复用与 OIDC 相同的会话约定(Secure 推导 / returnTo 白名单 / cookie 常量)。
+// 钉钉流程复用与 OIDC 相同的会话约定(Secure 推导 / returnTo 白名单 / cookie 命名与清理)。
 export {
   secureCookies,
   sanitizeReturnTo,
+  clearAuthCookie,
+  sessionCookieName,
   AUTH_MODE_COOKIE,
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
@@ -20,6 +23,11 @@ export {
 
 /** 钉钉流程暂存 cookie(state/returnTo),短寿命。 */
 export const DINGTALK_FLOW_COOKIE = 'bm_dingtalk_flow';
+
+/** 钉钉流程 cookie 名(https 下带 `__Host-` 前缀,约定见 oidc.ts)。 */
+export function dingtalkFlowCookieName(): string {
+  return secureCookies() ? `__Host-${DINGTALK_FLOW_COOKIE}` : DINGTALK_FLOW_COOKIE;
+}
 
 /** 钉钉流程 cookie 时长:10 分钟(与 OIDC 流程一致)。 */
 export const DINGTALK_FLOW_TTL_SECONDS = 10 * 60;

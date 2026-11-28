@@ -32,6 +32,20 @@ describe('withRoute(HTTP 边缘)', () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
+  it('mock 模式(本地开发工具)不做跨源判定', async (ctx) => {
+    // 环境被注入 MOCK_AUTH=false 时该模式不存在,无从断言;SSO 模式的拦截见 withRoute.origin.test.ts。
+    if (!env.MOCK_AUTH) ctx.skip();
+    const handler = withRoute(async () => NextResponse.json({ ok: true }));
+    const res = await handler(
+      new NextRequest('http://localhost/api/test', {
+        method: 'POST',
+        headers: { origin: 'http://192.168.5.6:3000' },
+      }),
+      undefined as never,
+    );
+    expect(res.status).toBe(200);
+  });
+
   it('HTTPError → 状态码与消息透传', async () => {
     const handler = withRoute(async () => {
       throw new HTTPError(403, '无权操作');

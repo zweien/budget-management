@@ -4,7 +4,7 @@ import { jwtVerify, SignJWT } from 'jose';
 
 import { prisma } from '@/lib/prisma';
 import { env } from '@/lib/env';
-import { SESSION_COOKIE, SESSION_TTL_SECONDS } from '@/lib/auth/oidc';
+import { SESSION_TTL_SECONDS, sessionCookieName } from '@/lib/auth/oidc';
 import { verifyApiKey } from '@/lib/auth/api-key';
 import { measureAuthentication } from '@/server/observability/request-metrics';
 
@@ -77,7 +77,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   }
 
   const store = await cookies();
-  const token = store.get(SESSION_COOKIE)?.value;
+  const token = store.get(sessionCookieName())?.value;
   if (!token) return null;
   const session = await verifySession(token);
   if (!session) return null;

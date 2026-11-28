@@ -22,6 +22,8 @@ let mockUser: {
   id: string;
   role: UserRole;
   viaApiKey?: boolean;
+  unattended?: boolean;
+  keyTier?: string;
   keyProjectScope?: string;
   keyProjectIds?: string[];
 };
@@ -393,6 +395,24 @@ describe('权限矩阵', () => {
     };
     expect((await preview(pkgFile(cleanPkg))).status).toBe(403);
     expect((await execute(pkgFile(cleanPkg))).status).toBe(403);
+    mockUser = { id: adminId, role: 'ADMIN' };
+  });
+
+  it('管理员名下机器凭证受档位约束:只读/读写档 403 并落被拒审计,完整档放行', async () => {
+    const denied = () =>
+      prisma.auditLog.count({
+        where: { operatorId: adminId, objectType: 'permission', action: 'apikey.denied' },
+      });
+    for (const tier of ['read', 'write']) {
+      mockUser = { id: adminId, role: 'ADMIN', viaApiKey: true, keyTier: tier, unattended: true };
+      const before = await denied();
+      expect((await preview(pkgFile(cleanPkg))).status).toBe(403);
+      expect((await execute(pkgFile(cleanPkg))).status).toBe(403);
+      expect(await denied()).toBe(before + 2);
+    }
+    // 完整档与登录会话同权:预检照常只读执行(不触发执行端,避免真实导入)。
+    mockUser = { id: adminId, role: 'ADMIN', viaApiKey: true, keyTier: 'full', unattended: true };
+    expect((await preview(pkgFile(cleanPkg))).status).toBe(200);
     mockUser = { id: adminId, role: 'ADMIN' };
   });
 });

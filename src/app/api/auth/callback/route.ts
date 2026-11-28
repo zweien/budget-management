@@ -6,14 +6,15 @@ import { env } from '@/lib/env';
 import { prisma } from '@/lib/prisma';
 import { signSession } from '@/lib/auth/session';
 import {
+  clearAuthCookie,
   getOidcConfig,
+  oidcFlowCookieName,
   oidcRedirectUri,
   rebuildCallbackUrl,
   sanitizeReturnTo,
-  OIDC_FLOW_COOKIE,
-  AUTH_MODE_COOKIE,
-  SESSION_COOKIE,
   secureCookies,
+  sessionCookieName,
+  AUTH_MODE_COOKIE,
   SESSION_TTL_SECONDS,
   type OidcFlowState,
 } from '@/lib/auth/oidc';
@@ -22,7 +23,7 @@ function loginErrorRedirect(reason: string): NextResponse {
   const url = new URL('/login', env.APP_BASE_URL);
   url.searchParams.set('error', reason);
   const res = NextResponse.redirect(url);
-  res.cookies.delete(OIDC_FLOW_COOKIE);
+  clearAuthCookie(res, oidcFlowCookieName());
   return res;
 }
 
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const rawFlow = req.cookies.get(OIDC_FLOW_COOKIE)?.value;
+    const rawFlow = req.cookies.get(oidcFlowCookieName())?.value;
     if (!rawFlow) {
       return loginErrorRedirect('登录流程已过期,请重试');
     }
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
 
     const sessionJwt = await signSession(user.id, tokens.id_token);
     const res = NextResponse.redirect(new URL(sanitizeReturnTo(flow.returnTo), env.APP_BASE_URL));
-    res.cookies.set(SESSION_COOKIE, sessionJwt, {
+    res.cookies.set(sessionCookieName(), sessionJwt, {
       httpOnly: true,
       sameSite: 'lax',
       secure: secureCookies(),
@@ -95,7 +96,7 @@ export async function GET(req: NextRequest) {
       maxAge: SESSION_TTL_SECONDS,
       path: '/',
     });
-    res.cookies.delete(OIDC_FLOW_COOKIE);
+    clearAuthCookie(res, oidcFlowCookieName());
     return res;
   } catch (e) {
     console.error('[auth] callback 处理失败:', e);

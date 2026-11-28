@@ -4,10 +4,10 @@ import { env } from '@/lib/env';
 import {
   buildDingtalkAuthorizeUrl,
   dingtalkEnabled,
+  dingtalkFlowCookieName,
   randomDingtalkState,
   secureCookies,
   sanitizeReturnTo,
-  DINGTALK_FLOW_COOKIE,
   DINGTALK_FLOW_TTL_SECONDS,
   type DingtalkFlowState,
 } from '@/lib/auth/dingtalk';
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   };
 
   const res = NextResponse.redirect(buildDingtalkAuthorizeUrl(flow.state));
-  res.cookies.set(DINGTALK_FLOW_COOKIE, JSON.stringify(flow), {
+  res.cookies.set(dingtalkFlowCookieName(), JSON.stringify(flow), {
     httpOnly: true,
     sameSite: 'lax',
     secure: secureCookies(),

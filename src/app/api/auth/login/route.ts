@@ -5,10 +5,10 @@ import { env } from '@/lib/env';
 import { authentikEnabled } from '@/lib/auth/dingtalk';
 import {
   getOidcConfig,
+  oidcFlowCookieName,
   oidcRedirectUri,
   sanitizeReturnTo,
   secureCookies,
-  OIDC_FLOW_COOKIE,
   OIDC_FLOW_TTL_SECONDS,
   type OidcFlowState,
 } from '@/lib/auth/oidc';
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
   });
 
   const res = NextResponse.redirect(url);
-  res.cookies.set(OIDC_FLOW_COOKIE, JSON.stringify(flow), {
+  res.cookies.set(oidcFlowCookieName(), JSON.stringify(flow), {
     httpOnly: true,
     sameSite: 'lax',
     secure: secureCookies(),

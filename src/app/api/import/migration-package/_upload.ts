@@ -6,8 +6,8 @@ import JSZip from 'jszip';
 
 import { assertContentLengthBelow } from '@/lib/api/withRoute';
 import { env } from '@/lib/env';
-import { can, denyApiKeyCrossProject } from '@/lib/auth/permissions';
-import { HTTPError, requireUser } from '@/lib/auth/session';
+import { denyApiKeyCrossProject, requirePermission } from '@/lib/auth/permissions';
+import { requireUser, HTTPError } from '@/lib/auth/session';
 import {
   inspectPackage,
   validatePackage,
@@ -34,13 +34,16 @@ export interface ParsedUpload {
   form: FormData;
 }
 
-/** 导入门卫:仅 ADMIN(对齐 project:create),指定项目范围凭证 403(跨项目接口惯例)。 */
+/**
+ * 导入门卫:与建项目同一动作 project:create(仅 ADMIN),走 requirePermission——
+ * 机器凭证由此同时受档位与项目范围约束(此前只查角色与「指定项目范围」,
+ * 管理员名下的只读/读写档凭证也能导入建项目)。
+ */
 export async function requireImportAdmin() {
   const user = await requireUser();
+  // 指定项目范围的凭证:跨项目/无项目上下文接口一律 403(审计后拒绝,口径同统计/审计)。
   await denyApiKeyCrossProject(user, 'project:create');
-  if (!can(user, 'project:create')) {
-    throw new HTTPError(403, '仅管理员可导入迁移包');
-  }
+  await requirePermission(user, 'project:create');
   return user;
 }
 

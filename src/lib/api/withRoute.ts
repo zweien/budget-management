@@ -155,6 +155,35 @@ export function assertContentLengthBelow(req: Request, cap: number): void {
   }
 }
 
+/** 安全方法(不改变服务端状态);其余方法做跨源判定。 */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * 跨源写请求判定:返回拒绝原因,null = 放行。
+ * 会话 cookie 是 SameSite=Lax——跨站 POST 不带 cookie,但「同站不同源」(同一可注册域下的
+ * 兄弟子域)的请求照常携带,而 JSON 接口不校验 Content-Type,兄弟站点上的脚本用
+ * no-cors fetch + text/plain 即可以受害者身份调任意写接口。浏览器对跨源的
+ * POST/PUT/PATCH/DELETE 必带 Origin,故以对外源(APP_BASE_URL)做同源判定;
+ * 非浏览器客户端(服务端脚本、MCP、curl)不带 Origin 与 Sec-Fetch-Site,不受影响。
+ */
+export function crossOriginWriteReason(req: Request, trustedOrigin: string): string | null {
+  if (SAFE_METHODS.has(req.method.toUpperCase())) return null;
+  const fetchSite = req.headers.get('sec-fetch-site');
+  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+    return '跨站请求被拒绝';
+  }
+  const origin = req.headers.get('origin');
+  if (!origin) return null;
+  // 非法值与 "null"(沙箱 iframe / 隐私跳转的来源)同样视为不可信:解析失败即拒绝。
+  let sameOrigin = false;
+  try {
+    sameOrigin = new URL(origin).origin === trustedOrigin;
+  } catch {
+    sameOrigin = false;
+  }
+  return sameOrigin ? null : '跨站请求被拒绝';
+}
+
 export function withRoute<Ctx>(
   handler: (req: NextRequest, ctx: Ctx) => Promise<Response>,
 ): (req: NextRequest, ctx: Ctx) => Promise<Response> {
@@ -169,6 +198,12 @@ export function withRoute<Ctx>(
       let res: Response;
       let failure: Pick<RequestLogInfo, 'error' | 'stack'> = {};
       try {
+        // 跨源写请求在进入 handler(含请求体缓冲)之前拦截。仅 SSO 模式生效:对外源以
+        // APP_BASE_URL 为准,mock 模式是本地开发工具,访问地址不受其约束。
+        if (!env.MOCK_AUTH) {
+          const reason = crossOriginWriteReason(req, new URL(env.APP_BASE_URL).origin);
+          if (reason) throw new HTTPError(403, reason);
+        }
         res = await handler(req, ctx);
       } catch (e) {
         const { status, message, stack } = classify(e);

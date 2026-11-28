@@ -1,3 +1,5 @@
+import type { NextResponse } from 'next/server';
+
 import * as client from 'openid-client';
 
 import { env } from '@/lib/env';
@@ -76,6 +78,32 @@ export const OIDC_FLOW_TTL_SECONDS = 10 * 60;
  */
 export function secureCookies(): boolean {
   return env.APP_BASE_URL.startsWith('https://');
+}
+
+/**
+ * `__Host-` 前缀:浏览器只接受带 Secure、Path=/ 且不带 Domain 的此类 cookie,并拒绝
+ * 其他来源写入的同名 cookie——会话与登录流程 cookie 只能由本站下发。否则同一可注册域下的
+ * 兄弟子域(对浏览器而言是「同站」)若被攻破,可覆盖流程 cookie,把受害者登录成攻击者的账号。
+ * http 部署(内网/本地开发)用不了该前缀,保留无前缀名。
+ */
+const HOST_PREFIX = '__Host-';
+
+/** 会话 cookie 名(https 下为 `__Host-bm_session`)。 */
+export function sessionCookieName(): string {
+  return secureCookies() ? `${HOST_PREFIX}${SESSION_COOKIE}` : SESSION_COOKIE;
+}
+
+/** OIDC 流程 cookie 名(https 下带 `__Host-` 前缀)。 */
+export function oidcFlowCookieName(): string {
+  return secureCookies() ? `${HOST_PREFIX}${OIDC_FLOW_COOKIE}` : OIDC_FLOW_COOKIE;
+}
+
+/**
+ * 清除认证类 cookie。不用 `res.cookies.delete()`:它下发的过期头不带 Secure,
+ * 浏览器会拒绝删除 `__Host-` 前缀的 cookie(登出后旧会话仍然有效)。
+ */
+export function clearAuthCookie(res: NextResponse, name: string): void {
+  res.cookies.set(name, '', { path: '/', secure: secureCookies(), expires: new Date(0) });
 }
 
 export interface OidcFlowState {

@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as client from 'openid-client';
 
 import { env } from '@/lib/env';
-import { getOidcConfig, OIDC_FLOW_COOKIE, SESSION_COOKIE, AUTH_MODE_COOKIE } from '@/lib/auth/oidc';
-import { DINGTALK_FLOW_COOKIE } from '@/lib/auth/dingtalk';
+import {
+  OIDC_FLOW_COOKIE,
+  SESSION_COOKIE,
+  AUTH_MODE_COOKIE,
+  clearAuthCookie,
+  getOidcConfig,
+  oidcFlowCookieName,
+  sessionCookieName,
+} from '@/lib/auth/oidc';
+import { DINGTALK_FLOW_COOKIE, dingtalkFlowCookieName } from '@/lib/auth/dingtalk';
 import { verifySession } from '@/lib/auth/session';
 
 /**
@@ -27,7 +35,7 @@ export async function GET(req: NextRequest) {
   }
 
   let target = loginUrl;
-  const token = req.cookies.get(SESSION_COOKIE)?.value;
+  const token = req.cookies.get(sessionCookieName())?.value;
   const session = token ? await verifySession(token) : null;
   if (session?.idToken) {
     try {
@@ -42,9 +50,17 @@ export async function GET(req: NextRequest) {
   }
 
   const res = NextResponse.redirect(target);
-  res.cookies.delete(SESSION_COOKIE);
+  // 清本代 cookie 名,并清 https 部署加上 `__Host-` 前缀之前下发的无前缀旧名(浏览器可能仍有残留)。
+  for (const name of new Set([
+    sessionCookieName(),
+    oidcFlowCookieName(),
+    dingtalkFlowCookieName(),
+    SESSION_COOKIE,
+    OIDC_FLOW_COOKIE,
+    DINGTALK_FLOW_COOKIE,
+  ])) {
+    clearAuthCookie(res, name);
+  }
   res.cookies.delete(AUTH_MODE_COOKIE);
-  res.cookies.delete(OIDC_FLOW_COOKIE);
-  res.cookies.delete(DINGTALK_FLOW_COOKIE);
   return res;
 }
